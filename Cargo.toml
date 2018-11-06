@@ -3,4 +3,8 @@ name = "janus-conference"
 version = "0.1.0"
 authors = ["Andrei Nesterov <ae.nesterov@gmail.com>"]
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
+janus-plugin = { version = "0.11.1", features = ["refcount"] }
