@@ -1,6 +1,6 @@
 #!/bin/bash
 
-PROJECT='janus-conference'
+PROJECT="janus-conference"
 PROJECT_DIR="/build"
 PLUGIN="libjanus_conference.so"
 DOCKER_CONTAINER_NAME="sandbox/${PROJECT}"
@@ -8,11 +8,11 @@ DOCKER_CONTAINER_COMMAND=${DOCKER_CONTAINER_COMMAND:-'/bin/bash'}
 DOCKER_RUN_OPTIONS=${DOCKER_RUN_OPTIONS:-'-ti --rm'}
 DOCKER_WSS_PORT=${DOCKER_WSS_PORT:-'8989'}
 DOCKER_WS_PORT=${DOCKER_WS_PORT:-'8188'}
+WS_CONFIG="/opt/janus/etc/janus/janus.transport.websockets.cfg"
 
 read -r DOCKER_RUN_COMMAND <<-EOF
-    WS_CONFIG='/opt/janus/etc/janus/janus.transport.websockets.cfg' \
-    && perl -pi -e 's/(wss = )no/\${1}yes/' "\${WS_CONFIG}" \
-    && perl -pi -e 's/;(wss_port = 8989)/\${1}/' "\${WS_CONFIG}" \
+    perl -pi -e 's/(wss = )no/\${1}yes/' "${WS_CONFIG}" \
+    && perl -pi -e 's/;(wss_port = 8989)/\${1}/' "${WS_CONFIG}" \
     && cargo build --release \
     && ln -s "${PROJECT_DIR}/target/release/${PLUGIN}" "/opt/janus/lib/janus/plugins/${PLUGIN}" \
     && /opt/janus/bin/janus --token-auth --token-auth-secret=xepohgue3Wa3yohg0aiP --event-handlers --debug-level=6
