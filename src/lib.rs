@@ -18,13 +18,40 @@ macro_rules! c_str {
     };
 }
 
+// TODO: move CALLBACKS definition, initialization and wrappers to separate mod
+static mut CALLBACKS: Option<&PluginCallbacks> = None;
+
+fn acquire_callbacks() -> &'static PluginCallbacks {
+    unsafe { CALLBACKS }.expect("Gateway is not set")
+}
+
+fn relay_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+    (acquire_callbacks().relay_rtp)(handle, video, buf, len);
+}
+
+fn relay_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+    (acquire_callbacks().relay_rtcp)(handle, video, buf, len);
+}
+
+fn relay_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
+    (acquire_callbacks().relay_data)(handle, buf, len);
+}
+
 #[derive(Debug)]
 struct State;
 
-pub type Session = SessionWrapper<State>;
+type Session = SessionWrapper<State>;
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
+    unsafe {
+        let callbacks = callbacks
+            .as_ref()
+            .expect("Invalid callbacks ptr from Janus Core");
+        CALLBACKS = Some(callbacks);
+    }
+
     janus_info!("Janus Conference plugin initialized!");
+
     0
 }
 
@@ -94,6 +121,7 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 }
 
 extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+    relay_rtp(handle, video, buf, len);
 }
 
 extern "C" fn incoming_rtcp(
@@ -102,9 +130,12 @@ extern "C" fn incoming_rtcp(
     buf: *mut c_char,
     len: c_int,
 ) {
+    relay_rtcp(handle, video, buf, len);
 }
 
-extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {}
+extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
+    relay_data(handle, buf, len);
+}
 
 extern "C" fn slow_link(handle: *mut PluginSession, _uplink: c_int, _video: c_int) {}
 
