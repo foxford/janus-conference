@@ -9,6 +9,9 @@
 *.un~
 Session.vim
 
+# VSCode
+.vscode/
+
 # Rust
 /target/
 
