@@ -1,8 +1,11 @@
 #[macro_use]
 extern crate janus_plugin as janus;
 
-use janus::{JanusError, JanusResult, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, Plugin, PluginCallbacks,
-            LibraryMetadata, PluginResult, PluginSession, RawPluginResult, RawJanssonValue, SessionWrapper};
+use janus::{
+    JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusError, JanusResult,
+    LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue,
+    RawPluginResult, SessionWrapper,
+};
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -11,10 +14,8 @@ use std::os::raw::{c_char, c_int};
 // taking in as a dependency here.
 macro_rules! c_str {
     ($lit:expr) => {
-        unsafe {
-            CStr::from_ptr(concat!($lit, "\0").as_ptr() as *const $crate::c_char)
-        }
-    }
+        unsafe { CStr::from_ptr(concat!($lit, "\0").as_ptr() as *const $crate::c_char) }
+    };
 }
 
 #[derive(Debug)]
@@ -32,7 +33,7 @@ extern "C" fn destroy() {
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
-    let state = State{};
+    let state = State {};
 
     match unsafe { Session::associate(handle, state) } {
         Ok(sess) => {
@@ -61,17 +62,23 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
     let val = "{}".to_owned();
-    JanssonValue::from_str(&val, JanssonDecodingFlags::empty()).unwrap().into_raw()
+    JanssonValue::from_str(&val, JanssonDecodingFlags::empty())
+        .unwrap()
+        .into_raw()
 }
 
-extern "C" fn handle_message(handle: *mut PluginSession, transaction: *mut c_char,
-                             message: *mut RawJanssonValue, jsep: *mut RawJanssonValue) -> *mut RawPluginResult {
+extern "C" fn handle_message(
+    handle: *mut PluginSession,
+    transaction: *mut c_char,
+    message: *mut RawJanssonValue,
+    jsep: *mut RawJanssonValue,
+) -> *mut RawPluginResult {
     let result = match unsafe { Session::from_ptr(handle) } {
         Ok(sess) => {
             janus_info!("Ignoring signalling message on {:p}.", sess.handle);
             PluginResult::ok_wait(Some(c_str!("Ignored")))
-        },
-        Err(_) => PluginResult::error(c_str!("No handle associated with message!"))
+        }
+        Err(_) => PluginResult::error(c_str!("No handle associated with message!")),
     };
     result.into_raw()
 }
@@ -89,14 +96,17 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
 }
 
-extern "C" fn incoming_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+extern "C" fn incoming_rtcp(
+    handle: *mut PluginSession,
+    video: c_int,
+    buf: *mut c_char,
+    len: c_int,
+) {
 }
 
-extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
-}
+extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {}
 
-extern "C" fn slow_link(handle: *mut PluginSession, _uplink: c_int, _video: c_int) {
-}
+extern "C" fn slow_link(handle: *mut PluginSession, _uplink: c_int, _video: c_int) {}
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
