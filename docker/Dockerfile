@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM rust:latest
 
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
@@ -22,7 +22,6 @@ RUN set -xe \
         automake \
         cmake \
         git \
-        curl \
     && USRSCTP_BUILD_DIR=$(mktemp -d) \
         && cd "${USRSCTP_BUILD_DIR}" \
         && git clone https://github.com/sctplab/usrsctp . \
@@ -46,11 +45,3 @@ RUN set -xe \
     && make -j $(nproc) \
     && make install \
     && make configs
-
-## -----------------------------------------------------------------------------
-## Installing Rust
-## -----------------------------------------------------------------------------
-RUN cd /tmp \
-    && curl https://sh.rustup.rs -o rustup.sh \
-    && chmod +x rustup.sh \
-    && ./rustup.sh -y

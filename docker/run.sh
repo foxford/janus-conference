@@ -29,9 +29,9 @@ docker build -t ${DOCKER_CONTAINER_NAME} -f docker/Dockerfile .
 # Setting up `DOCKER_RUN_COMMAND` to be able to run initial command again.
 docker run ${DOCKER_RUN_OPTIONS} \
     -v $(pwd):${PROJECT_DIR} \
-    -v ${BUILD_CACHE_VOLUME}:/root/.cargo \
+    -v ${BUILD_CACHE_VOLUME}:/usr/local/cargo \
     -p ${DOCKER_WSS_PORT}:8989 \
     -p ${DOCKER_WS_PORT}:8188 \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
     ${DOCKER_CONTAINER_NAME} \
-    /bin/bash -l -c "set -x && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"
+    /bin/bash -c "set -x && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"
