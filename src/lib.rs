@@ -50,13 +50,13 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
         CALLBACKS = Some(callbacks);
     }
 
-    janus_info!("Janus Conference plugin initialized!");
+    janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
     0
 }
 
 extern "C" fn destroy() {
-    janus_info!("Janus Conference plugin destroyed!");
+    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -64,24 +64,30 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 
     match unsafe { Session::associate(handle, state) } {
         Ok(sess) => {
-            janus_info!("Initializing SFU session {:p}...", sess.handle);
+            janus_info!(
+                "[CONFERENCE] Initializing Conference session {:p}...",
+                sess.handle
+            );
         }
         Err(e) => {
-            janus_err!("{}", e);
+            janus_err!("[CONFERENCE] {}", e);
             unsafe { *error = -1 };
         }
     }
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
-    janus_info!("Destroying Conference session...");
+    janus_info!("[CONFERENCE] Destroying Conference session...");
 
     match unsafe { Session::from_ptr(handle) } {
         Ok(sess) => {
-            janus_info!("Destroying SFU session {:p}...", sess.handle);
+            janus_info!(
+                "[CONFERENCE] Destroying Conference session {:p}...",
+                sess.handle
+            );
         }
         Err(e) => {
-            janus_err!("{}", e);
+            janus_err!("[CONFERENCE] {}", e);
             unsafe { *error = -1 };
         }
     }
@@ -102,7 +108,10 @@ extern "C" fn handle_message(
 ) -> *mut RawPluginResult {
     let result = match unsafe { Session::from_ptr(handle) } {
         Ok(sess) => {
-            janus_info!("Ignoring signalling message on {:p}.", sess.handle);
+            janus_info!(
+                "[CONFERENCE] Ignoring signalling message on {:p}.",
+                sess.handle
+            );
             PluginResult::ok_wait(Some(c_str!("Ignored")))
         }
         Err(_) => PluginResult::error(c_str!("No handle associated with message!")),
@@ -112,12 +121,15 @@ extern "C" fn handle_message(
 
 extern "C" fn setup_media(handle: *mut PluginSession) {
     let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null!") };
-    janus_info!("WebRTC media is now available on {:p}.", sess.handle);
+    janus_info!(
+        "[CONFERENCE] WebRTC media is now available on {:p}.",
+        sess.handle
+    );
 }
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
     let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null!") };
-    janus_info!("Hanging up WebRTC media on {:p}.", sess.handle);
+    janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", sess.handle);
 }
 
 extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
