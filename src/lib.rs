@@ -140,19 +140,6 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
     janus_info!("[CONFERENCE] Destroying Conference session...");
-
-    match unsafe { Session::from_ptr(handle) } {
-        Ok(sess) => {
-            janus_info!(
-                "[CONFERENCE] Destroying Conference session {:p}...",
-                sess.handle
-            );
-        }
-        Err(e) => {
-            janus_err!("[CONFERENCE] {}", e);
-            unsafe { *error = -1 };
-        }
-    }
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
@@ -166,32 +153,23 @@ extern "C" fn handle_message(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
-    let result = match unsafe { Session::from_ptr(handle) } {
-        Ok(sess) => {
-            janus_info!(
-                "[CONFERENCE] Queueing signalling message on {:p}.",
-                sess.handle
-            );
+    janus_info!("[CONFERENCE] Queueing signalling message on {:p}.", handle);
 
-            let msg = Message {
-                handle,
-                transaction,
-                message: unsafe { JanssonValue::from_raw(message) },
-                jsep: unsafe { JanssonValue::from_raw(jsep) },
-            };
-
-            unsafe {
-                STATE
-                    .message_channel
-                    .as_mut()
-                    .and_then(|ch| ch.send(msg).ok());
-            }
-
-            PluginResult::ok_wait(Some(c_str!("Processing...")))
-        }
-        Err(_) => PluginResult::error(c_str!("No handle associated with message!")),
+    let msg = Message {
+        handle,
+        transaction,
+        message: unsafe { JanssonValue::from_raw(message) },
+        jsep: unsafe { JanssonValue::from_raw(jsep) },
     };
-    result.into_raw()
+
+    unsafe {
+        STATE
+            .message_channel
+            .as_mut()
+            .and_then(|ch| ch.send(msg).ok());
+    }
+
+    PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
 }
 
 extern "C" fn setup_media(handle: *mut PluginSession) {
