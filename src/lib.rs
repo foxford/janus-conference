@@ -15,7 +15,7 @@ use std::thread;
 use janus::{
     sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusError, JanusResult,
     LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue,
-    RawPluginResult, SessionWrapper,
+    RawPluginResult,
 };
 
 // courtesy of c_string crate, which also has some other stuff we aren't interested in
@@ -84,11 +84,6 @@ static mut STATE: State = State {
     message_channel: None,
 };
 
-#[derive(Debug)]
-struct SessionState;
-
-type Session = SessionWrapper<SessionState>;
-
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
     unsafe {
         let callbacks = callbacks
@@ -121,24 +116,11 @@ extern "C" fn destroy() {
     janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
 }
 
-extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
-    let state = SessionState {};
-
-    match unsafe { Session::associate(handle, state) } {
-        Ok(sess) => {
-            janus_info!(
-                "[CONFERENCE] Initializing Conference session {:p}...",
-                sess.handle
-            );
-        }
-        Err(e) => {
-            janus_err!("[CONFERENCE] {}", e);
-            unsafe { *error = -1 };
-        }
-    }
+extern "C" fn create_session(handle: *mut PluginSession, _error: *mut c_int) {
+    janus_info!("[CONFERENCE] New session at {:p} without state", handle);
 }
 
-extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
+extern "C" fn destroy_session(_handle: *mut PluginSession, _error: *mut c_int) {
     janus_info!("[CONFERENCE] Destroying Conference session...");
 }
 
