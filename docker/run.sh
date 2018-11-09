@@ -13,7 +13,7 @@ read -r DOCKER_RUN_COMMAND <<-EOF
     cargo build --release \
     && (rm "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" || true) \
     && ln -s "${PROJECT_DIR}/target/release/${PLUGIN}" "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" \
-    && ${JANUS_DIR}/bin/janus --event-handlers --debug-level=6
+    && ${JANUS_DIR}/bin/janus --event-handlers --debug-level=5
 EOF
 
 set -ex
