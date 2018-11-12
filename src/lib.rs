@@ -220,7 +220,7 @@ fn handle_message_async(received: Message) -> JanusResult {
 
     let jsep = received
         .jsep
-        .unwrap()
+        .expect("JSEP is None")
         .to_libcstring(JanssonEncodingFlags::empty());
     let jsep_string = jsep.to_string_lossy();
     let jsep_json: JsepKind =
@@ -229,7 +229,9 @@ fn handle_message_async(received: Message) -> JanusResult {
 
     let answer: serde_json::Value = match jsep_json {
         JsepKind::Offer { sdp } => {
-            let offer = sdp::Sdp::parse(&CString::new(sdp).unwrap()).unwrap();
+            let offer = sdp::Sdp::parse(
+                &CString::new(sdp).expect("Failed to create string from SDP offer"),
+            ).expect("Failed to parse SDP offer");
             janus_verb!("[CONFERENCE] offer: {:?}", offer);
 
             let answer = answer_sdp!(offer);
@@ -237,18 +239,21 @@ fn handle_message_async(received: Message) -> JanusResult {
 
             let answer = answer.to_glibstring().to_string_lossy().to_string();
 
-            serde_json::to_value(JsepKind::Answer { sdp: answer }).unwrap()
+            serde_json::to_value(JsepKind::Answer { sdp: answer })
+                .expect("Failed to create JSON string from SDP answer")
         }
         JsepKind::Answer { .. } => unreachable!(),
     };
 
     let event_json = json!({ "result": "ok" });
     let mut event_serde: JanssonValue =
-        JanssonValue::from_str(&event_json.to_string(), JanssonDecodingFlags::empty()).unwrap();
+        JanssonValue::from_str(&event_json.to_string(), JanssonDecodingFlags::empty())
+            .expect("Failed to create Jansson value with event");
     let event = event_serde.as_mut_ref();
 
     let mut jsep_serde: JanssonValue =
-        JanssonValue::from_str(&answer.to_string(), JanssonDecodingFlags::empty()).unwrap();
+        JanssonValue::from_str(&answer.to_string(), JanssonDecodingFlags::empty())
+            .expect("Failed to create Jansson value with JSEP");
     let jsep = jsep_serde.as_mut_ref();
 
     push_event(received.handle, received.transaction, event, jsep)
