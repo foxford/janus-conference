@@ -7,15 +7,23 @@ A Janus Gateway plugin implementing Conference rooms.
 ### How To Use
 
 To build and start playing with the plugin,
-execute following shell commands within different terminal tabs:
+execute following shell commands:
 
 ```bash
-## Building the image locally
-docker build -t sandbox/janus-conference -f docker/Dockerfile .
-## Running a container with Janus Gateway and the plugin
-docker run -ti --rm sandbox/janus-conference
+# Build and run Janus instance with plugin
+bash docker/run.sh
 ```
 
+### How to run echo example
+
+```bash
+# Open example page in browser
+open examples/echo/index.html
+```
+
+Then click `Start` (page should ask for permission to use
+web camera and microphone) and `Call` after that. You should
+see both local and echoed video stream.
 
 
 ## License
