@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM rust:latest
 
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
@@ -45,3 +45,10 @@ RUN set -xe \
     && make -j $(nproc) \
     && make install \
     && make configs
+
+## -----------------------------------------------------------------------------
+## Installing development tools
+## -----------------------------------------------------------------------------
+RUN set -xe \
+    && apt-get install -y gdb \
+    && rustup component add clippy-preview

@@ -9,8 +9,14 @@
 *.un~
 Session.vim
 
+# VSCode
+.vscode/
+
 # Rust
 /target/
 
 # Project
 /docs/book/
+
+# Other
+core
