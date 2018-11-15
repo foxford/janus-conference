@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: janus-gateway
+  labels:
+    app: janus-gateway
+spec:
+  selector:
+    matchLabels:
+      app: janus-gateway
+  template:
+    metadata:
+      labels:
+        app: janus-gateway
+    spec:
+      # Schedule Janus Gateways on specific nodes with this label only.
+      nodeSelector:
+        purpose: janus-node
+      containers:
+        - name: janus-gateway
+          image: netologygroup/janus-gateway
+          # TODO: we need a way to specify ~ 1000-2000 ports somehow.
+          ports:
+            - containerPort: 30000
+              protocol: UDP
+            - containerPort: 30001
+              protocol: UDP
+            - containerPort: 30002
+              protocol: UDP
+            - containerPort: 30003
+              protocol: UDP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
