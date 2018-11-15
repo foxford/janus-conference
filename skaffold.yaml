@@ -1,0 +1,18 @@
+apiVersion: skaffold/v1alpha3
+kind: Config
+build:
+  artifacts:
+    - imageName: netologygroup/janus-gateway
+      docker:
+        dockerfilePath: docker/Dockerfile
+  tagPolicy:
+    envTemplate:
+      template: "{{ .IMAGE_NAME }}:{{ .IMAGE_TAG }}"
+  local:
+    skipPush: true
+    useDockerCLI: true
+deploy:
+  kubectl:
+    manifests:
+      - k8s/janus-gateway.yaml
+      - k8s/janus-gateway-service.yaml
