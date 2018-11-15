@@ -19,6 +19,21 @@ spec:
       containers:
         - name: janus-gateway
           image: netologygroup/janus-gateway
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: RTP_PORT_RANGE_MIN
+              value: "30000"
+            - name: RTP_PORT_RANGE_MAX
+              value: "30003"
+          command:
+            - /opt/janus/bin/janus
+          args:
+            - --event-handlers
+            - --nat-1-1=${NODE_IP}
+            - --rtp-port-range=${RTP_PORT_RANGE_MIN}-${RTP_PORT_RANGE_MAX}
           # TODO: we need a way to specify ~ 1000-2000 ports somehow.
           ports:
             - containerPort: 30000
