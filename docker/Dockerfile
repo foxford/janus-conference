@@ -58,7 +58,6 @@ COPY . .
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
-        ca-certificates \
         libjansson-dev \
     && cargo build --release
 
