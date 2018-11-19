@@ -56,6 +56,6 @@ function KUBECTL_APPLY() {
         | kubectl apply -f -
 }
 
-# TODO: add smth sensitive
+KUBECTL_APPLY "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-service.yaml"
 
 IMAGE_TAG="${DOCKER_IMAGE_TAG}" skaffold run -n "${NAMESPACE}"
