@@ -19,12 +19,16 @@ spec:
     - port: 30000
       targetPort: 30000
       protocol: UDP
+      name: rtp0000
     - port: 30001
       targetPort: 30001
       protocol: UDP
+      name: rtp0001
     - port: 30002
       targetPort: 30002
       protocol: UDP
+      name: rtp0002
     - port: 30003
       targetPort: 30003
       protocol: UDP
+      name: rtp0003
