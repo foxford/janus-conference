@@ -17,7 +17,6 @@ else
     if [[ ! ${DOCKER_USERNAME} ]]; then echo "DOCKER_USERNAME isn't specified" 1>&2; exit 1; fi
     if [[ ! ${KUBE_SERVER} ]]; then echo "KUBE_SERVER isn't specified" 1>&2; exit 1; fi
     if [[ ! ${KUBE_TOKEN} ]]; then echo "KUBE_TOKEN isn't specified" 1>&2; exit 1; fi
-    if [[ ! ${KUBE_CLUSTER_CA} ]]; then echo "KUBE_CLUSTER_CA isn't specified" 1>&2; exit 1; fi
 
     ## Initializing deploy for Travis CI
 
@@ -41,11 +40,7 @@ else
     echo ${DOCKER_PASSWORD} \
         | docker login -u ${DOCKER_USERNAME} --password-stdin
 
-    set +x
-    echo $KUBE_CLUSTER_CA > ca.crt
-    set -x
-
-    kubectl config set-cluster media --embed-certs --server ${KUBE_SERVER} --certificate-authority ca.crt
+    kubectl config set-cluster media --embed-certs --server ${KUBE_SERVER} --certificate-authority deploy/ca.crt
     kubectl config set-credentials travis --token ${KUBE_TOKEN}
     kubectl config set-context media --cluster media --user travis --namespace=${NAMESPACE}
     kubectl config use-context media
