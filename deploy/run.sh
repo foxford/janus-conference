@@ -57,5 +57,6 @@ function KUBECTL_APPLY() {
 }
 
 KUBECTL_APPLY "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-service.yaml"
+KUBECTL_APPLY "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-config.yaml"
 
 IMAGE_TAG="${DOCKER_IMAGE_TAG}" skaffold run -n "${NAMESPACE}"

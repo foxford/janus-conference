@@ -31,7 +31,6 @@ spec:
           command:
             - /opt/janus/bin/janus
           args:
-            - --event-handlers
             - --nat-1-1=${NODE_IP}
             - --rtp-port-range=${RTP_PORT_RANGE_MIN}-${RTP_PORT_RANGE_MAX}
           # TODO: we need a way to specify ~ 1000-2000 ports somehow.
@@ -44,6 +43,10 @@ spec:
               protocol: UDP
             - containerPort: 30003
               protocol: UDP
+          volumeMounts:
+          - name: config
+            mountPath: /opt/janus/etc/janus/janus.cfg
+            readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -51,3 +54,7 @@ spec:
             limits:
               cpu: 1000m
               memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: janus-gateway-config
