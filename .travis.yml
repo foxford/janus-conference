@@ -34,6 +34,6 @@ stages:
   - name: compile
   - name: test
   - name: deploy
-    if: (branch = feature/MEDIA-1830 AND type = push) OR tag IS present
+    if: (branch = master AND type = push) OR tag IS present
 notifications:
   email: false
