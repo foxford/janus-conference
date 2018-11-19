@@ -28,10 +28,12 @@ jobs:
       name: "Clippy"
       before_script: rustup component add clippy-preview
       script: cargo clippy
+    - stage: deploy
+      script: ./deploy/run.sh
 stages:
   - name: compile
   - name: test
   - name: deploy
-    if: (branch = master AND type = push) OR tag IS present
+    if: (branch = feature/MEDIA-1830 AND type = push) OR tag IS present
 notifications:
   email: false

@@ -2,12 +2,13 @@ apiVersion: skaffold/v1alpha5
 kind: Config
 build:
   tagPolicy:
-    gitCommit: {}
+    envTemplate:
+      template: "{{ .IMAGE_NAME }}:{{ .IMAGE_TAG }}"
   artifacts:
   - image: netologygroup/janus-gateway
     docker:
       dockerfile: docker/Dockerfile
-      target: dev
+      target: deploy
   local:
     push: false
     useDockerCLI: true
@@ -17,11 +18,3 @@ deploy:
     manifests:
     - k8s/janus-gateway.yaml
     - k8s/janus-gateway-service.yaml
-profiles:
-  - name: deploy
-    build:
-      artifacts:
-      - image: netologygroup/janus-gateway
-        docker:
-          dockerfile: docker/Dockerfile
-          target: deploy
