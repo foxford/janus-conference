@@ -5,15 +5,15 @@ build:
     envTemplate:
       template: "{{ .IMAGE_NAME }}:{{ .IMAGE_TAG }}"
   artifacts:
-  - image: netologygroup/janus-gateway
-    docker:
-      dockerfile: docker/Dockerfile
-      target: deploy
+    - image: netologygroup/janus-gateway
+      docker:
+        dockerfile: docker/Dockerfile
+        target: deploy
   local:
-    push: false
+    push: true
     useDockerCLI: true
     useBuildkit: true
 deploy:
   kubectl:
     manifests:
-    - k8s/janus-gateway.yaml
+      - k8s/janus-gateway.yaml
