@@ -22,9 +22,9 @@ spec:
           imagePullPolicy: Always
           env:
             - name: NODE_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
+              configMapKeyRef:
+                name: janus-gateway-config
+                key: publicIP
             - name: RTP_PORT_RANGE_MIN
               value: "30000"
             - name: RTP_PORT_RANGE_MAX
@@ -32,8 +32,8 @@ spec:
           command:
             - /opt/janus/bin/janus
           args:
-            - --nat-1-1=${NODE_IP}
-            - --rtp-port-range=${RTP_PORT_RANGE_MIN}-${RTP_PORT_RANGE_MAX}
+            - --nat-1-1=$(NODE_IP)
+            - --rtp-port-range=$(RTP_PORT_RANGE_MIN)-$(RTP_PORT_RANGE_MAX)
           # TODO: we need a way to specify ~ 1000-2000 ports somehow.
           ports:
             - containerPort: 30000
