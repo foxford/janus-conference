@@ -7,8 +7,7 @@ build:
   artifacts:
     - image: netologygroup/janus-gateway
       docker:
-        dockerfile: docker/Dockerfile
-        target: deploy
+        dockerfile: docker/Dockerfile.deploy
   local:
     push: true
     useDockerCLI: true

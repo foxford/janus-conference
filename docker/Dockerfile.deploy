@@ -1,4 +1,4 @@
-FROM rust:latest as build-janus
+FROM debian:latest as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
@@ -16,6 +16,12 @@ RUN set -xe \
         libwebsockets-dev \
         libsrtp2-dev \
         gengetopt \
+        ca-certificates \
+        git \
+        libtool \
+        m4 \
+        automake \
+        make \
     && USRSCTP_BUILD_DIR=$(mktemp -d) \
         && cd "${USRSCTP_BUILD_DIR}" \
         && git clone https://github.com/sctplab/usrsctp . \
@@ -39,15 +45,17 @@ RUN set -xe \
     && ./configure --prefix=/opt/janus \
     && make -j $(nproc) \
     && make install \
-    && make configs
+    && make configs \
+    && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
 
-## -----------------------------------------------------------------------------
-## Development image
-## -----------------------------------------------------------------------------
-FROM build-janus as dev
 RUN set -xe \
-    && apt-get install -y gdb \
-    && rustup component add clippy-preview
+    && apt-get remove -y \
+        ca-certificates \
+        git \
+        libtool \
+        m4 \
+        automake \
+        make
 
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
@@ -64,8 +72,7 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Build image ready to deploy
 ## -----------------------------------------------------------------------------
-FROM debian:latest as deploy
+FROM build-janus
 ARG PLUGIN=libjanus_conference.so
 WORKDIR /opt/janus
-COPY --from=build-janus /opt/janus .
 COPY --from=build-plugin-deploy /build/target/release/${PLUGIN} ./lib/janus/plugins/${PLUGIN}
