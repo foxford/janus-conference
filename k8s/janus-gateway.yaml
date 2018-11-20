@@ -19,6 +19,7 @@ spec:
       containers:
         - name: janus-gateway
           image: netologygroup/janus-gateway
+          imagePullPolicy: Always
           env:
             - name: NODE_IP
               valueFrom:
