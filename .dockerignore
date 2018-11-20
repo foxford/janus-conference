@@ -1,2 +1,5 @@
-target/
-core
+**/*
+!src/
+!Cargo.lock
+!Cargo.toml
+!README.md
