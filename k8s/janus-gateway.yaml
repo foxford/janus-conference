@@ -44,9 +44,10 @@ spec:
             - containerPort: 30003
               protocol: UDP
           volumeMounts:
-          - name: config
-            mountPath: /opt/janus/etc/janus/janus.cfg
-            readOnly: true
+            - name: config
+              mountPath: /opt/janus/etc/janus/janus.cfg
+              subPath: janus.cfg
+              readOnly: true
           resources:
             requests:
               cpu: 100m
