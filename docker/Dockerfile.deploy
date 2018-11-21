@@ -21,15 +21,7 @@ RUN set -xe \
         libtool \
         m4 \
         automake \
-        make \
-    && USRSCTP_BUILD_DIR=$(mktemp -d) \
-        && cd "${USRSCTP_BUILD_DIR}" \
-        && git clone https://github.com/sctplab/usrsctp . \
-        && ./bootstrap \
-        && ./configure --prefix=/usr \
-        && make -j $(nproc) \
-        && make install \
-        && rm -fr "${USRSCTP_BUILD_DIR}"
+        make
 
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway

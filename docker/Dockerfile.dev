@@ -15,15 +15,7 @@ RUN set -xe \
         libogg-dev \
         libwebsockets-dev \
         libsrtp2-dev \
-        gengetopt \
-    && USRSCTP_BUILD_DIR=$(mktemp -d) \
-        && cd "${USRSCTP_BUILD_DIR}" \
-        && git clone https://github.com/sctplab/usrsctp . \
-        && ./bootstrap \
-        && ./configure --prefix=/usr \
-        && make -j $(nproc) \
-        && make install \
-        && rm -fr "${USRSCTP_BUILD_DIR}"
+        gengetopt
 
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
