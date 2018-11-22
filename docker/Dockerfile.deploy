@@ -1,3 +1,4 @@
+# Using Debian here because official Rust image is based on Debian too.
 FROM debian:latest as build-janus
 
 ## -----------------------------------------------------------------------------
