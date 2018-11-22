@@ -29,7 +29,7 @@ RUN set -xe \
         && cd "${PAHO_MQTT_BUILD_DIR}" \
         && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
         && git checkout "v${PAHO_MQTT_VERSION}" \
-        && make -j $(nproc) \
+        && make \
         && make install
 
 ## -----------------------------------------------------------------------------
