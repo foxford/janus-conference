@@ -47,16 +47,19 @@ else
 
 fi
 
-function KUBECTL_APPLY() {
+function K8S_FROM_GITHUB() {
     local URI="${1}"; if [[ ! "${URI}" ]]; then echo "${FUNCNAME[0]}:URI isn't specified" 1>&2; exit 1; fi
+    mkdir k8s || true
+    local FILEPATH="k8s/$(basename $URI)"
     curl -fsSL \
         -H "authorization: token ${GITHUB_TOKEN}" \
         -H 'accept: application/vnd.github.v3.raw' \
-        "${URI}" \
-        | kubectl apply -f -
+        -o $FILEPATH \
+        "${URI}"
 }
 
-KUBECTL_APPLY "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-service.yaml"
-KUBECTL_APPLY "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-config.yaml"
+K8S_FROM_GITHUB "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-service.yaml"
+K8S_FROM_GITHUB "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway-config.yaml"
+K8S_FROM_GITHUB "https://api.github.com/repos/netology-group/environment/contents/cluster/k8s/apps/janus-gateway/ns/${NAMESPACE}/janus-gateway.yaml"
 
 IMAGE_TAG="${DOCKER_IMAGE_TAG}" skaffold run -n "${NAMESPACE}"

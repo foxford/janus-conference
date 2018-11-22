@@ -11,3 +11,9 @@ build:
   local:
     push: true
     useDockerCLI: true
+deploy:
+  kubectl:
+    manifests:
+      - k8s/janus-gateway.yaml
+      - k8s/janus-gateway-service.yaml
+      - k8s/janus-gateway-config.yaml
