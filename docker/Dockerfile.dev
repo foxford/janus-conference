@@ -1,41 +1,36 @@
-FROM rust:latest
+FROM rust:latest as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
 ## -----------------------------------------------------------------------------
+ARG PAHO_MQTT_VERSION=1.3.0
+
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
-        ca-certificates \
         libmicrohttpd-dev \
         libjansson-dev \
         libnice-dev \
         libcurl4-openssl-dev \
         libsofia-sip-ua-dev \
-        libglib2.0-dev \
         libopus-dev \
         libogg-dev \
         libwebsockets-dev \
         libsrtp2-dev \
         gengetopt \
-        libtool \
-        automake \
-        cmake \
-        git \
-    && USRSCTP_BUILD_DIR=$(mktemp -d) \
-        && cd "${USRSCTP_BUILD_DIR}" \
-        && git clone https://github.com/sctplab/usrsctp . \
-        && ./bootstrap \
-        && ./configure --prefix=/usr \
-        && make -j $(nproc) \
-        && make install \
-        && rm -fr "${USRSCTP_BUILD_DIR}"
+    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+        && cd "${PAHO_MQTT_BUILD_DIR}" \
+        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+        && git checkout "v${PAHO_MQTT_VERSION}" \
+        && make \
+        && make install
 
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
+ARG JANUS_GATEWAY_VERSION=0.4.5
+
 RUN set -xe \
-    && JANUS_GATEWAY_VERSION='0.4.5' \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
     && git clone 'https://github.com/meetecho/janus-gateway' . \
@@ -44,10 +39,11 @@ RUN set -xe \
     && ./configure --prefix=/opt/janus \
     && make -j $(nproc) \
     && make install \
-    && make configs
+    && make configs \
+    && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
 
 ## -----------------------------------------------------------------------------
-## Installing development tools
+## Install development tools
 ## -----------------------------------------------------------------------------
 RUN set -xe \
     && apt-get install -y gdb \

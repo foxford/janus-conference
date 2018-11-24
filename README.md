@@ -25,6 +25,12 @@ Then click `Start` (page should ask for permission to use
 web camera and microphone) and `Call` after that. You should
 see both local and echoed video stream.
 
+### How to build an image for deploy
+
+```bash
+docker build -t netologygroup/janus-gateway --target deploy -f docker/Dockerfile .
+```
+
 
 ## License
 

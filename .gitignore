@@ -20,3 +20,5 @@ Session.vim
 
 # Other
 core
+# Folder created during local deployment
+k8s/

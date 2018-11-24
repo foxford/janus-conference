@@ -1,0 +1,39 @@
+language: rust
+rust:
+  - stable
+addons:
+  apt:
+    packages:
+      - libjansson-dev
+cache:
+  directories:
+    - /home/travis/.cargo
+before_cache:
+  - rm -rf /home/travis/.cargo/registry
+services: docker
+git:
+  depth: 1
+script:
+  - cargo test
+jobs:
+  fast_finish: true
+  include:
+    - stage: compile
+      script: cargo check
+    - stage: test
+      name: "Rustfmt"
+      before_script: rustup component add rustfmt-preview
+      script: cargo fmt -- --check
+    - stage: test
+      name: "Clippy"
+      before_script: rustup component add clippy-preview
+      script: cargo clippy
+    - stage: deploy
+      script: bash ./deploy/run.sh
+stages:
+  - name: compile
+  - name: test
+  - name: deploy
+    if: (branch = master AND type = push) OR tag IS present
+notifications:
+  email: false
