@@ -7,32 +7,30 @@ addons:
       - libjansson-dev
 cache:
   directories:
-    - /home/travis/.cargo
+    - ${TRAVIS_HOME}/.cargo
 before_cache:
-  - rm -rf /home/travis/.cargo/registry
+  - rm -rf ${TRAVIS_HOME}/.cargo/registry
 services: docker
 git:
   depth: 1
-script:
-  - cargo test
 jobs:
-  fast_finish: true
   include:
-    - stage: compile
-      script: cargo check
-    - stage: test
-      name: "Rustfmt"
-      before_script: rustup component add rustfmt-preview
+    - stage: check
+      name: Tests
+      script: cargo test
+    - stage: check
+      name : Rustfmt
+      install: rustup component add rustfmt-preview
       script: cargo fmt -- --check
-    - stage: test
-      name: "Clippy"
-      before_script: rustup component add clippy-preview
+    - stage: check
+      name: Clippy
+      install: rustup component add clippy-preview
       script: cargo clippy
     - stage: deploy
-      script: bash ./deploy/run.sh
+      name: Kubernetes
+      script: deploy/run.sh
 stages:
-  - name: compile
-  - name: test
+  - name: check
   - name: deploy
     if: (branch = master AND type = push) OR tag IS present
 notifications:
