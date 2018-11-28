@@ -19,7 +19,7 @@ jobs:
       name: Tests
       script: cargo test
     - stage: check
-      name : Rustfmt
+      name: Rustfmt
       install: rustup component add rustfmt-preview
       script: cargo fmt -- --check
     - stage: check
@@ -28,7 +28,7 @@ jobs:
       script: cargo clippy
     - stage: deploy
       name: Kubernetes
-      script: deploy/run.sh
+      script: bash deploy/run.sh
 stages:
   - name: check
   - name: deploy
