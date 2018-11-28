@@ -179,7 +179,7 @@ extern "C" fn incoming_rtcp(
 }
 
 extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
-    relay_data(handle, buf, len);
+    // Dropping incoming data.
 }
 
 extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_int) {
