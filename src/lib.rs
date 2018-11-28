@@ -7,16 +7,26 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
+#[macro_use]
+extern crate lazy_static;
+extern crate atom;
+
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::sync::mpsc;
+use std::sync::{mpsc, RwLock};
 use std::thread;
 
+use atom::AtomSetOnce;
 use janus::{
     sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusError, JanusResult,
     LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue,
     RawPluginResult,
 };
+
+mod session;
+mod switchboard;
+
+use switchboard::Switchboard;
 
 // courtesy of c_string crate, which also has some other stuff we aren't interested in
 // taking in as a dependency here.
@@ -77,12 +87,16 @@ pub enum JsepKind {
 
 #[derive(Debug)]
 struct State {
-    pub message_channel: Option<mpsc::SyncSender<Message>>,
+    pub message_channel: AtomSetOnce<Box<mpsc::SyncSender<Message>>>,
+    pub switchboard: RwLock<Switchboard>,
 }
 
-static mut STATE: State = State {
-    message_channel: None,
-};
+lazy_static! {
+    static ref STATE: State = State {
+        message_channel: AtomSetOnce::empty(),
+        switchboard: RwLock::new(Switchboard::new()),
+    };
+}
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
     unsafe {
@@ -94,9 +108,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
 
     let (messages_tx, messages_rx) = mpsc::sync_channel(0);
 
-    unsafe {
-        STATE.message_channel = Some(messages_tx);
-    }
+    STATE.message_channel.set_if_none(Box::new(messages_tx));
 
     thread::spawn(move || {
         janus_info!("[CONFERENCE] Message processing thread is alive.");
@@ -144,12 +156,7 @@ extern "C" fn handle_message(
         jsep: unsafe { JanssonValue::from_raw(jsep) },
     };
 
-    unsafe {
-        STATE
-            .message_channel
-            .as_mut()
-            .and_then(|ch| ch.send(msg).ok());
-    }
+    STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
 
     PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
 }
@@ -178,7 +185,7 @@ extern "C" fn incoming_rtcp(
     relay_rtcp(handle, video, buf, len);
 }
 
-extern "C" fn incoming_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
+extern "C" fn incoming_data(_handle: *mut PluginSession, _buf: *mut c_char, _len: c_int) {
     // Dropping incoming data.
 }
 
