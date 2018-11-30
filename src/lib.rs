@@ -233,7 +233,14 @@ extern "C" fn incoming_rtcp(
     buf: *mut c_char,
     len: c_int,
 ) {
-    // Dropping incoming rtcp.
+    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null") };
+    let switchboard = STATE
+        .switchboard
+        .read()
+        .expect("Switchboard lock poisoned; can't continue");
+    for other in switchboard.subscribers_for(&sess) {
+        relay_rtcp(other.as_ptr(), video, buf, len);
+    }
 }
 
 extern "C" fn incoming_data(_handle: *mut PluginSession, _buf: *mut c_char, _len: c_int) {
