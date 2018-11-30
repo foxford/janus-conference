@@ -27,6 +27,7 @@ mod messages;
 mod session;
 mod switchboard;
 
+use messages::JsepKind;
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -79,13 +80,6 @@ struct Message {
 }
 
 unsafe impl Send for Message {}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase", tag = "type")]
-pub enum JsepKind {
-    Offer { sdp: String },
-    Answer { sdp: String },
-}
 
 #[derive(Debug)]
 struct State {
