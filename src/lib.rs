@@ -26,6 +26,7 @@ use janus::{
 mod session;
 mod switchboard;
 
+use session::{Session, SessionState};
 use switchboard::Switchboard;
 
 // courtesy of c_string crate, which also has some other stuff we aren't interested in
@@ -128,12 +129,51 @@ extern "C" fn destroy() {
     janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
 }
 
-extern "C" fn create_session(handle: *mut PluginSession, _error: *mut c_int) {
-    janus_info!("[CONFERENCE] New session at {:p} without state", handle);
+extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
+    let initial_state = SessionState::new();
+
+    match unsafe { Session::associate(handle, initial_state) } {
+        Ok(sess) => {
+            janus_info!("[CONFERENCE] Initializing session {:p}...", sess.handle);
+            STATE
+                .switchboard
+                .write()
+                .expect("Switchboard is poisoned")
+                .connect(sess)
+        }
+        Err(e) => {
+            janus_err!("{}", e);
+            unsafe {
+                *error = -1;
+            }
+        }
+    }
 }
 
-extern "C" fn destroy_session(_handle: *mut PluginSession, _error: *mut c_int) {
-    janus_info!("[CONFERENCE] Destroying Conference session...");
+extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
+    match unsafe { Session::from_ptr(handle) } {
+        Ok(sess) => {
+            janus_info!(
+                "[CONFERENCE] Destroying Conference session {:p}...",
+                sess.handle
+            );
+
+            let mut destroyed = sess
+                .destroyed
+                .lock()
+                .expect("Session destruction mutex is poisoned");
+            let mut switchboard = STATE.switchboard.write().expect("Switchboard is poisoned");
+            switchboard.disconnect(&sess);
+
+            *destroyed = true;
+        }
+        Err(e) => {
+            janus_err!("{}", e);
+            unsafe {
+                *error = -1;
+            }
+        }
+    }
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
