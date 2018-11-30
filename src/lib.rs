@@ -23,6 +23,7 @@ use janus::{
     RawPluginResult,
 };
 
+mod messages;
 mod session;
 mod switchboard;
 
@@ -213,7 +214,14 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 }
 
 extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    relay_rtp(handle, video, buf, len);
+    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null") };
+    let switchboard = STATE
+        .switchboard
+        .read()
+        .expect("Switchboard lock poisoned; can't continue");
+    for other in switchboard.subscribers_for(&sess) {
+        relay_rtp(other.as_ptr(), video, buf, len);
+    }
 }
 
 extern "C" fn incoming_rtcp(
