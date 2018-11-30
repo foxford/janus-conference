@@ -271,6 +271,8 @@ fn handle_message_async(received: Message) -> JanusResult {
         }
     };
 
+    // TODO: handle room create & join messages
+
     Ok(())
 }
 
