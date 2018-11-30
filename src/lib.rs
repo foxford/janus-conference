@@ -230,7 +230,7 @@ extern "C" fn incoming_rtcp(
     buf: *mut c_char,
     len: c_int,
 ) {
-    relay_rtcp(handle, video, buf, len);
+    // Dropping incoming rtcp.
 }
 
 extern "C" fn incoming_data(_handle: *mut PluginSession, _buf: *mut c_char, _len: c_int) {
