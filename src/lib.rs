@@ -262,18 +262,26 @@ const PLUGIN: Plugin = build_plugin!(
 export_plugin!(&PLUGIN);
 
 fn handle_message_async(received: Message) -> JanusResult {
-    if received.jsep.is_none() {
-        janus_info!("[CONFERENCE] JSEP is empty, skipping");
-        return Ok(());
-    }
+    match received.jsep {
+        Some(jsep) => {
+            handle_jsep(received.handle, received.transaction, jsep)?;
+        }
+        None => {
+            janus_info!("[CONFERENCE] JSEP is empty, skipping");
+        }
+    };
 
-    let jsep = received
-        .jsep
-        .expect("JSEP is None")
-        .to_libcstring(JanssonEncodingFlags::empty());
-    let jsep_string = jsep.to_string_lossy();
-    let jsep_json: JsepKind =
-        serde_json::from_str(&jsep_string).expect("Failed to parse JSEP kind");
+    Ok(())
+}
+
+fn handle_jsep(
+    handle: *mut PluginSession,
+    transaction: *mut c_char,
+    jsep: JanssonValue,
+) -> JanusResult {
+    let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
+    let jsep = jsep.to_string_lossy();
+    let jsep_json: JsepKind = serde_json::from_str(&jsep).expect("Failed to parse JSEP kind");
     janus_verb!("[CONFERENCE] jsep: {:?}", jsep_json);
 
     let answer: serde_json::Value = match jsep_json {
@@ -305,8 +313,7 @@ fn handle_message_async(received: Message) -> JanusResult {
             .expect("Failed to create Jansson value with JSEP");
     let jsep = jsep_serde.as_mut_ref();
 
-    push_event(received.handle, received.transaction, event, jsep)
-        .expect("Pushing event has failed");
+    push_event(handle, transaction, event, jsep).expect("Pushing event has failed");
 
     Ok(())
 }
