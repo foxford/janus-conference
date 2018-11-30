@@ -13,7 +13,7 @@ extern crate atom;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::sync::{mpsc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 
 use atom::AtomSetOnce;
@@ -27,7 +27,7 @@ mod messages;
 mod session;
 mod switchboard;
 
-use messages::JsepKind;
+use messages::{JsepKind, RTCOperation};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -73,7 +73,7 @@ fn push_event(
 
 #[derive(Debug)]
 struct Message {
-    handle: *mut PluginSession,
+    session: Arc<Session>,
     transaction: *mut c_char,
     message: Option<JanssonValue>,
     jsep: Option<JanssonValue>,
@@ -182,18 +182,27 @@ extern "C" fn handle_message(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
-    janus_info!("[CONFERENCE] Queueing signalling message on {:p}.", handle);
+    janus_info!("[CONFERENCE] Queueing message on {:p}.", handle);
 
-    let msg = Message {
-        handle,
-        transaction,
-        message: unsafe { JanssonValue::from_raw(message) },
-        jsep: unsafe { JanssonValue::from_raw(jsep) },
-    };
+    match unsafe { Session::from_ptr(handle) } {
+        Ok(sess) => {
+            let msg = Message {
+                session: sess,
+                transaction,
+                message: unsafe { JanssonValue::from_raw(message) },
+                jsep: unsafe { JanssonValue::from_raw(jsep) },
+            };
 
-    STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
+            STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
 
-    PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
+            PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
+        }
+        Err(e) => {
+            janus_err!("[CONFERENCE] Failed to restore session state: {}", e);
+
+            PluginResult::error(c_str!("Failed to restore session state")).into_raw()
+        }
+    }
 }
 
 extern "C" fn setup_media(handle: *mut PluginSession) {
@@ -264,23 +273,38 @@ export_plugin!(&PLUGIN);
 fn handle_message_async(received: Message) -> JanusResult {
     match received.jsep {
         Some(jsep) => {
-            handle_jsep(received.handle, received.transaction, jsep)?;
+            handle_jsep(received.session.clone(), received.transaction, jsep)?;
         }
         None => {
             janus_info!("[CONFERENCE] JSEP is empty, skipping");
         }
     };
 
-    // TODO: handle room create & join messages
+    if let Some(message) = received.message {
+        let message = message.to_libcstring(JanssonEncodingFlags::empty());
+        let message = message.to_string_lossy();
+        let message: RTCOperation =
+            serde_json::from_str(&message).expect("Failed to parse message");
+
+        let mut switchboard = STATE
+            .switchboard
+            .write()
+            .expect("Switchboard lock poisoned; can't continue");
+
+        match message {
+            RTCOperation::Create { room_id } => {
+                switchboard.create_room(room_id, received.session.clone())
+            }
+            RTCOperation::Read { room_id } => {
+                switchboard.join_room(room_id, received.session.clone())
+            }
+        }
+    }
 
     Ok(())
 }
 
-fn handle_jsep(
-    handle: *mut PluginSession,
-    transaction: *mut c_char,
-    jsep: JanssonValue,
-) -> JanusResult {
+fn handle_jsep(session: Arc<Session>, transaction: *mut c_char, jsep: JanssonValue) -> JanusResult {
     let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
     let jsep = jsep.to_string_lossy();
     let jsep_json: JsepKind = serde_json::from_str(&jsep).expect("Failed to parse JSEP kind");
@@ -315,7 +339,7 @@ fn handle_jsep(
             .expect("Failed to create Jansson value with JSEP");
     let jsep = jsep_serde.as_mut_ref();
 
-    push_event(handle, transaction, event, jsep).expect("Pushing event has failed");
+    push_event(session.handle, transaction, event, jsep).expect("Pushing event has failed");
 
     Ok(())
 }
