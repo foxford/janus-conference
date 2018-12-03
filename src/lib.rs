@@ -13,7 +13,8 @@ extern crate atom;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::sync::{mpsc, Arc, RwLock};
+use std::slice;
+use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
 
 use atom::AtomSetOnce;
@@ -54,10 +55,6 @@ fn relay_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c
     (acquire_callbacks().relay_rtcp)(handle, video, buf, len);
 }
 
-fn relay_data(handle: *mut PluginSession, buf: *mut c_char, len: c_int) {
-    (acquire_callbacks().relay_data)(handle, buf, len);
-}
-
 fn push_event(
     handle: *mut PluginSession,
     transaction: *mut c_char,
@@ -92,6 +89,31 @@ lazy_static! {
         message_channel: AtomSetOnce::empty(),
         switchboard: RwLock::new(Switchboard::new()),
     };
+}
+
+fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
+    for publisher in publishers {
+        let mut pli = janus_plugin::rtcp::gen_pli();
+        relay_rtcp(
+            publisher.as_ref().as_ptr(),
+            1,
+            pli.as_mut_ptr(),
+            pli.len() as i32,
+        );
+    }
+}
+
+fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
+    for publisher in publishers {
+        let mut seq = publisher.as_ref().fir_seq.fetch_add(1, Ordering::Relaxed) as i32;
+        let mut fir = janus::rtcp::gen_fir(&mut seq);
+        relay_rtcp(
+            publisher.as_ref().as_ptr(),
+            1,
+            fir.as_mut_ptr(),
+            fir.len() as i32,
+        );
+    }
 }
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
@@ -206,6 +228,10 @@ extern "C" fn handle_message(
 }
 
 extern "C" fn setup_media(handle: *mut PluginSession) {
+    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null!") };
+    let switchboard = STATE.switchboard.read().expect("Switchboard is poisoned");
+    send_fir(switchboard.senders_to(&sess));
+
     janus_info!(
         "[CONFERENCE] WebRTC media is now available on {:p}.",
         handle
@@ -222,8 +248,8 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c
         .switchboard
         .read()
         .expect("Switchboard lock poisoned; can't continue");
-    for other in switchboard.subscribers_for(&sess) {
-        relay_rtp(other.as_ptr(), video, buf, len);
+    for subscriber in switchboard.subscribers_for(&sess) {
+        relay_rtp(subscriber.as_ptr(), video, buf, len);
     }
 }
 
@@ -234,12 +260,26 @@ extern "C" fn incoming_rtcp(
     len: c_int,
 ) {
     let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null") };
+
     let switchboard = STATE
         .switchboard
         .read()
         .expect("Switchboard lock poisoned; can't continue");
-    for other in switchboard.subscribers_for(&sess) {
-        relay_rtcp(other.as_ptr(), video, buf, len);
+
+    let packet = unsafe { slice::from_raw_parts(buf, len as usize) };
+
+    match video {
+        1 if janus_plugin::rtcp::has_pli(packet) => {
+            send_pli(switchboard.senders_to(&sess));
+        }
+        1 if janus_plugin::rtcp::has_fir(packet) => {
+            send_fir(switchboard.senders_to(&sess));
+        }
+        _ => {
+            for subscriber in switchboard.subscribers_for(&sess) {
+                relay_rtcp(subscriber.as_ptr(), video, buf, len);
+            }
+        }
     }
 }
 
@@ -315,7 +355,6 @@ fn handle_jsep(session: Arc<Session>, transaction: *mut c_char, jsep: JanssonVal
     let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
     let jsep = jsep.to_string_lossy();
     let jsep_json: JsepKind = serde_json::from_str(&jsep).expect("Failed to parse JSEP kind");
-    janus_verb!("[CONFERENCE] jsep: {:?}", jsep_json);
 
     let answer: serde_json::Value = match jsep_json {
         JsepKind::Offer { sdp } => {

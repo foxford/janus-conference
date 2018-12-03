@@ -9,6 +9,7 @@ pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<RoomId, Arc<Session>>,
     subscriptions: HashMap<Arc<Session>, Vec<Arc<Session>>>,
+    publishers_to: HashMap<Arc<Session>, Vec<Arc<Session>>>,
 }
 
 impl Switchboard {
@@ -17,6 +18,7 @@ impl Switchboard {
             sessions: Vec::new(),
             publishers: HashMap::new(),
             subscriptions: HashMap::new(),
+            publishers_to: HashMap::new(),
         }
     }
 
@@ -35,6 +37,13 @@ impl Switchboard {
         }
     }
 
+    pub fn senders_to(&self, subscriber: &Session) -> impl Iterator<Item = &Arc<Session>> {
+        match self.publishers_to.get(subscriber) {
+            Some(publishers) => publishers.iter(),
+            None => [].iter(),
+        }
+    }
+
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
         self.publishers.insert(room_id, publisher);
     }
@@ -43,10 +52,13 @@ impl Switchboard {
         match self.publishers.get(&room_id) {
             Some(publisher) => {
                 let room_subscribers = self.subscriptions.entry(publisher.clone()).or_default();
-                room_subscribers.push(subscriber);
+                room_subscribers.push(subscriber.clone());
+
+                let senders = self.publishers_to.entry(subscriber.clone()).or_default();
+                senders.push(publisher.clone());
             }
 
             None => {}
-        }
+        };
     }
 }
