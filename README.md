@@ -22,8 +22,20 @@ open examples/echo/index.html
 ```
 
 Then click `Start` (page should ask for permission to use
-web camera and microphone) and `Call` after that. You should
-see both local and echoed video stream.
+web camera) and `Call` after that. You should see both
+local and echoed video stream.
+
+### How to run conference example
+
+```bash
+open examples/conference/index.html
+```
+
+Click `Start translation` button (page should ask for permission
+to use web camera) then open page again in another tab and click
+`Join translation`. On publisher page you should see local stream
+on the left and on listener page you should see remote stream on
+the right.
 
 ### How to build an image for deploy
 
