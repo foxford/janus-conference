@@ -14,20 +14,10 @@ execute following shell commands:
 bash docker/run.sh
 ```
 
-### How to run echo example
-
-```bash
-# Open example page in browser
-open examples/echo/index.html
-```
-
-Then click `Start` (page should ask for permission to use
-web camera) and `Call` after that. You should see both
-local and echoed video stream.
-
 ### How to run conference example
 
 ```bash
+# Open example page in browser
 open examples/conference/index.html
 ```
 
