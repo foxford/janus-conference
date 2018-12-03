@@ -93,7 +93,7 @@ lazy_static! {
 
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
-        let mut pli = janus_plugin::rtcp::gen_pli();
+        let mut pli = janus::rtcp::gen_pli();
         relay_rtcp(
             publisher.as_ref().as_ptr(),
             1,
@@ -269,10 +269,10 @@ extern "C" fn incoming_rtcp(
     let packet = unsafe { slice::from_raw_parts(buf, len as usize) };
 
     match video {
-        1 if janus_plugin::rtcp::has_pli(packet) => {
+        1 if janus::rtcp::has_pli(packet) => {
             send_pli(switchboard.senders_to(&sess));
         }
-        1 if janus_plugin::rtcp::has_fir(packet) => {
+        1 if janus::rtcp::has_fir(packet) => {
             send_fir(switchboard.senders_to(&sess));
         }
         _ => {
