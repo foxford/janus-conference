@@ -94,9 +94,9 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
     thread::spawn(move || {
         janus_info!("[CONFERENCE] Message processing thread is alive.");
         for msg in messages_rx.iter() {
-            handle_message_async(msg).err().map(|e| {
-                janus_err!("Error processing message: {}", e);
-            });
+            if let Some(err) = handle_message_async(msg).err() {
+                janus_err!("Error processing message: {}", err);
+            }
         }
     });
 
@@ -138,14 +138,8 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
                 sess.handle
             );
 
-            let mut destroyed = sess
-                .destroyed
-                .lock()
-                .expect("Session destruction mutex is poisoned");
             let mut switchboard = STATE.switchboard.write().expect("Switchboard is poisoned");
             switchboard.disconnect(&sess);
-
-            *destroyed = true;
         }
         Err(e) => {
             janus_err!("{}", e);
@@ -283,7 +277,7 @@ export_plugin!(&PLUGIN);
 fn handle_message_async(received: Message) -> JanusResult {
     match received.jsep {
         Some(jsep) => {
-            handle_jsep(received.session.clone(), received.transaction, jsep)?;
+            handle_jsep(&received.session, received.transaction, &jsep)?;
         }
         None => {
             janus_info!("[CONFERENCE] JSEP is empty, skipping");
@@ -314,7 +308,7 @@ fn handle_message_async(received: Message) -> JanusResult {
     Ok(())
 }
 
-fn handle_jsep(session: Arc<Session>, transaction: *mut c_char, jsep: JanssonValue) -> JanusResult {
+fn handle_jsep(session: &Session, transaction: *mut c_char, jsep: &JanssonValue) -> JanusResult {
     let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
     let jsep = jsep.to_string_lossy();
     let jsep_json: JsepKind = serde_json::from_str(&jsep).expect("Failed to parse JSEP kind");
