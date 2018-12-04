@@ -7,7 +7,7 @@ use super::PLUGIN;
 static mut CALLBACKS: Option<&PluginCallbacks> = None;
 
 pub fn init(callbacks: *mut PluginCallbacks) {
-  unsafe {
+    unsafe {
         let callbacks = callbacks
             .as_ref()
             .expect("Invalid callbacks ptr from Janus Core");

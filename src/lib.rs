@@ -20,9 +20,8 @@ use std::thread;
 
 use atom::AtomSetOnce;
 use janus::{
-    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusResult,
-    LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue,
-    RawPluginResult,
+    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusResult, LibraryMetadata,
+    Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
@@ -349,7 +348,8 @@ fn handle_jsep(session: Arc<Session>, transaction: *mut c_char, jsep: JanssonVal
             .expect("Failed to create Jansson value with JSEP");
     let jsep = jsep_serde.as_mut_ref();
 
-    janus_callbacks::push_event(session.handle, transaction, event, jsep).expect("Pushing event has failed");
+    janus_callbacks::push_event(session.handle, transaction, event, jsep)
+        .expect("Pushing event has failed");
 
     Ok(())
 }

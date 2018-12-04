@@ -46,7 +46,8 @@ impl Switchboard {
     pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
         match self.publishers.get(&room_id) {
             Some(publisher) => {
-                self.publishers_subscribers.associate(publisher.clone(), subscriber);
+                self.publishers_subscribers
+                    .associate(publisher.clone(), subscriber);
             }
 
             None => {}
