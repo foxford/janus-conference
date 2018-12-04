@@ -20,55 +20,22 @@ use std::thread;
 
 use atom::AtomSetOnce;
 use janus::{
-    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusError, JanusResult,
+    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusResult,
     LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue,
     RawPluginResult,
 };
 
 mod bidirectional_multimap;
+mod janus_callbacks;
 mod messages;
 mod session;
 mod switchboard;
+#[macro_use]
+mod utils;
 
 use messages::{JsepKind, RTCOperation};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
-
-// courtesy of c_string crate, which also has some other stuff we aren't interested in
-// taking in as a dependency here.
-macro_rules! c_str {
-    ($lit:expr) => {
-        unsafe { CStr::from_ptr(concat!($lit, "\0").as_ptr() as *const $crate::c_char) }
-    };
-}
-
-// TODO: move CALLBACKS definition, initialization and wrappers to separate mod
-static mut CALLBACKS: Option<&PluginCallbacks> = None;
-
-fn acquire_callbacks() -> &'static PluginCallbacks {
-    unsafe { CALLBACKS }.expect("Gateway is not set")
-}
-
-fn relay_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    (acquire_callbacks().relay_rtp)(handle, video, buf, len);
-}
-
-fn relay_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    (acquire_callbacks().relay_rtcp)(handle, video, buf, len);
-}
-
-fn push_event(
-    handle: *mut PluginSession,
-    transaction: *mut c_char,
-    body: *mut RawJanssonValue,
-    jsep: *mut RawJanssonValue,
-) -> JanusResult {
-    let push_event_fn = acquire_callbacks().push_event;
-
-    let res = push_event_fn(handle, &mut PLUGIN, transaction, body, jsep);
-
-    JanusError::from(res)
-}
 
 #[derive(Debug)]
 struct Message {
@@ -96,7 +63,7 @@ lazy_static! {
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut pli = janus::rtcp::gen_pli();
-        relay_rtcp(
+        janus_callbacks::relay_rtcp(
             publisher.as_ref().as_ptr(),
             1,
             pli.as_mut_ptr(),
@@ -109,7 +76,7 @@ fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut seq = publisher.as_ref().fir_seq.fetch_add(1, Ordering::Relaxed) as i32;
         let mut fir = janus::rtcp::gen_fir(&mut seq);
-        relay_rtcp(
+        janus_callbacks::relay_rtcp(
             publisher.as_ref().as_ptr(),
             1,
             fir.as_mut_ptr(),
@@ -119,12 +86,7 @@ fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
 }
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
-    unsafe {
-        let callbacks = callbacks
-            .as_ref()
-            .expect("Invalid callbacks ptr from Janus Core");
-        CALLBACKS = Some(callbacks);
-    }
+    janus_callbacks::init(callbacks);
 
     let (messages_tx, messages_rx) = mpsc::sync_channel(0);
 
@@ -251,7 +213,7 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c
         .read()
         .expect("Switchboard lock poisoned; can't continue");
     for subscriber in switchboard.subscribers_to(&sess) {
-        relay_rtp(subscriber.as_ptr(), video, buf, len);
+        janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
     }
 }
 
@@ -279,7 +241,7 @@ extern "C" fn incoming_rtcp(
         }
         _ => {
             for subscriber in switchboard.subscribers_to(&sess) {
-                relay_rtcp(subscriber.as_ptr(), video, buf, len);
+                janus_callbacks::relay_rtcp(subscriber.as_ptr(), video, buf, len);
             }
         }
     }
@@ -387,7 +349,7 @@ fn handle_jsep(session: Arc<Session>, transaction: *mut c_char, jsep: JanssonVal
             .expect("Failed to create Jansson value with JSEP");
     let jsep = jsep_serde.as_mut_ref();
 
-    push_event(session.handle, transaction, event, jsep).expect("Pushing event has failed");
+    janus_callbacks::push_event(session.handle, transaction, event, jsep).expect("Pushing event has failed");
 
     Ok(())
 }
