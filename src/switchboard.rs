@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bidirectional_multimap::BidirectionalMultimap;
 use messages::RoomId;
 use session::Session;
 
@@ -8,8 +9,7 @@ use session::Session;
 pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<RoomId, Arc<Session>>,
-    subscriptions: HashMap<Arc<Session>, Vec<Arc<Session>>>,
-    publishers_to: HashMap<Arc<Session>, Vec<Arc<Session>>>,
+    publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
 }
 
 impl Switchboard {
@@ -17,8 +17,7 @@ impl Switchboard {
         Self {
             sessions: Vec::new(),
             publishers: HashMap::new(),
-            subscriptions: HashMap::new(),
-            publishers_to: HashMap::new(),
+            publishers_subscribers: BidirectionalMultimap::new(),
         }
     }
 
@@ -28,20 +27,16 @@ impl Switchboard {
 
     pub fn disconnect(&mut self, sess: &Session) {
         self.sessions.retain(|s| s.handle != sess.handle);
+        self.publishers_subscribers.remove_key(sess);
+        self.publishers_subscribers.remove_value(sess);
     }
 
-    pub fn subscribers_for(&self, publisher: &Session) -> impl Iterator<Item = &Arc<Session>> {
-        match self.subscriptions.get(publisher) {
-            Some(subscribers) => subscribers.iter(),
-            None => [].iter(),
-        }
+    pub fn subscribers_to(&self, publisher: &Session) -> &[Arc<Session>] {
+        self.publishers_subscribers.get_values(publisher)
     }
 
-    pub fn senders_to(&self, subscriber: &Session) -> impl Iterator<Item = &Arc<Session>> {
-        match self.publishers_to.get(subscriber) {
-            Some(publishers) => publishers.iter(),
-            None => [].iter(),
-        }
+    pub fn publisher_to(&self, subscriber: &Session) -> Option<&Arc<Session>> {
+        self.publishers_subscribers.get_key(subscriber)
     }
 
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
@@ -51,11 +46,7 @@ impl Switchboard {
     pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
         match self.publishers.get(&room_id) {
             Some(publisher) => {
-                let room_subscribers = self.subscriptions.entry(publisher.clone()).or_default();
-                room_subscribers.push(subscriber.clone());
-
-                let senders = self.publishers_to.entry(subscriber.clone()).or_default();
-                senders.push(publisher.clone());
+                self.publishers_subscribers.associate(publisher.clone(), subscriber);
             }
 
             None => {}

@@ -10,6 +10,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate lazy_static;
 extern crate atom;
+extern crate multimap;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -24,6 +25,7 @@ use janus::{
     RawPluginResult,
 };
 
+mod bidirectional_multimap;
 mod messages;
 mod session;
 mod switchboard;
@@ -230,7 +232,7 @@ extern "C" fn handle_message(
 extern "C" fn setup_media(handle: *mut PluginSession) {
     let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null!") };
     let switchboard = STATE.switchboard.read().expect("Switchboard is poisoned");
-    send_fir(switchboard.senders_to(&sess));
+    send_fir(switchboard.publisher_to(&sess));
 
     janus_info!(
         "[CONFERENCE] WebRTC media is now available on {:p}.",
@@ -248,7 +250,7 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c
         .switchboard
         .read()
         .expect("Switchboard lock poisoned; can't continue");
-    for subscriber in switchboard.subscribers_for(&sess) {
+    for subscriber in switchboard.subscribers_to(&sess) {
         relay_rtp(subscriber.as_ptr(), video, buf, len);
     }
 }
@@ -270,13 +272,13 @@ extern "C" fn incoming_rtcp(
 
     match video {
         1 if janus::rtcp::has_pli(packet) => {
-            send_pli(switchboard.senders_to(&sess));
+            send_pli(switchboard.publisher_to(&sess));
         }
         1 if janus::rtcp::has_fir(packet) => {
-            send_fir(switchboard.senders_to(&sess));
+            send_fir(switchboard.publisher_to(&sess));
         }
         _ => {
-            for subscriber in switchboard.subscribers_for(&sess) {
+            for subscriber in switchboard.subscribers_to(&sess) {
                 relay_rtcp(subscriber.as_ptr(), video, buf, len);
             }
         }
