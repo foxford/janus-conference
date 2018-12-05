@@ -20,7 +20,7 @@ set -ex
 
 BUILD_CACHE_VOLUME=janus-conference-cargo
 
-docker volume create $BUILD_CACHE_VOLUME
+docker volume create ${BUILD_CACHE_VOLUME}
 docker build -t ${DOCKER_CONTAINER_NAME} -f docker/Dockerfile.dev .
 # Setting up `DOCKER_RUN_COMMAND` to be able to run initial command again.
 docker run ${DOCKER_RUN_OPTIONS} \

@@ -6,38 +6,46 @@ var localVideo = document.getElementById("localVideo");
 var remoteVideo = document.getElementById("remoteVideo");
 
 // JavaScript variables assciated with call management buttons in the page
-var startButton = document.getElementById("startButton");
-var callButton = document.getElementById("callButton");
+var publisherStartButton = document.getElementById("publisherStartButton");
+var listenerStartButton = document.getElementById("listenerStartButton");
 var hangupButton = document.getElementById("hangupButton");
 
-// Just allow the user to click on the Call button at start-up
-startButton.disabled = false;
-callButton.disabled = true;
+// Just allow the user to click on the Start or Join button at start-up
+publisherStartButton.disabled = false;
+listenerStartButton.disabled = false;
 hangupButton.disabled = true;
 
 // Associate JavaScript handlers with click events on the buttons
-startButton.onclick = start;
-callButton.onclick = call;
+publisherStartButton.onclick = startTranslation;
+listenerStartButton.onclick = joinTranslation;
 hangupButton.onclick = hangup;
 
 var websocket, sessionId, pluginHandleId, sessionTransaction, handleTransaction;
 var janusHost = "ws://localhost:8188";
+var roomId = "demo-conference-room";
 
-function start() {
+function startTranslation() {
     navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
             localStream = stream;
             localVideo.srcObject = stream;
+
+            start(true);
         })
         .catch(error => console.error(error));
-
-    startButton.disabled = true;
-    callButton.disabled = false;
 }
 
-function call() {
-    callButton.disabled = true;
+function joinTranslation() {
+    start(false);
+}
+
+function start(isPublisher) {
+    publisherStartButton.disabled = true;
+    listenerStartButton.disabled = true;
     hangupButton.disabled = false;
+
+    var gotLocalDescription = isPublisher ? publisherGotLocalDescription : listenerGotLocalDescription;
+    var options = { offerToReceiveVideo: !isPublisher };
 
     websocket = new WebSocket(janusHost, 'janus-protocol');
     websocket.onopen = function (event) {
@@ -46,13 +54,17 @@ function call() {
         // Triggered whenever a new candidate is made available to the local peer by the ICE protocol machine
         peerConnection.onicecandidate = gotLocalIceCandidate;
 
-        // Triggered on setRemoteDescription() call
-        peerConnection.onaddstream = (event) => {
-            console.log('got remote stream');
-            remoteVideo.srcObject = event.stream;
-        };
+        if (isPublisher) {
+            peerConnection.addStream(localStream);
+        }
 
-        peerConnection.addStream(localStream);
+        if (!isPublisher) {
+            peerConnection.onaddstream = (event) => {
+                console.log(event);
+                console.log('got remote stream');
+                remoteVideo.srcObject = event.stream;
+            };
+        }
 
         sessionTransaction = getTransactionId();
         var payload = {
@@ -85,26 +97,23 @@ function call() {
                     pluginHandleId = data.data.id;
 
                     console.log('creating offer');
-                    peerConnection.createOffer(gotLocalDescription, onSignalingError);
+                    peerConnection.createOffer(gotLocalDescription, onSignalingError, options);
                 }
                 break;
 
             case 'event':
-                handleEvent(data);
+                var jsep = new RTCSessionDescription(data.jsep);
+                console.log(jsep);
+
+                if (jsep.type == 'answer') {
+                    console.info("Stream has been started!");
+                    peerConnection.setRemoteDescription(jsep);
+                }
                 break;
 
             default:
                 break;
         }
-    }
-}
-
-function handleEvent(data) {
-    var jsep = new RTCSessionDescription(data.jsep);
-    console.log(jsep);
-
-    if (jsep.type == 'answer') {
-        peerConnection.setRemoteDescription(jsep);
     }
 }
 
@@ -115,7 +124,8 @@ function hangup() {
     localStream = null;
     remoteStream = null;
 
-    startButton.disabled = false;
+    publisherStartButton.disabled = false;
+    listenerStartButton.disabled = false;
     hangupButton.disabled = true;
 }
 
@@ -139,7 +149,7 @@ function gotLocalIceCandidate(event) {
     }
 }
 
-function gotLocalDescription(desc) {
+function publisherGotLocalDescription(desc) {
     console.log('got local SDP');
     console.log(desc);
 
@@ -151,7 +161,34 @@ function gotLocalDescription(desc) {
         "handle_id": pluginHandleId,
         "transaction": getTransactionId(),
         "body": {
-            "video": true
+            "method": "rtc.create",
+            "room_id": roomId
+        },
+        "jsep": {
+            "type": "offer",
+            "sdp": desc.sdp
+        }
+    };
+
+    console.log('Uploading offer');
+    console.log(payload);
+    websocket.send(JSON.stringify(payload));
+}
+
+function listenerGotLocalDescription(desc) {
+    console.log("got local SDP");
+    console.log(desc);
+
+    peerConnection.setLocalDescription(desc);
+
+    var payload = {
+        "janus": "message",
+        "session_id": sessionId,
+        "handle_id": pluginHandleId,
+        "transaction": getTransactionId(),
+        "body": {
+            "method": "rtc.read",
+            "room_id": roomId
         },
         "jsep": {
             "type": "offer",

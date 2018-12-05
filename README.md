@@ -14,16 +14,18 @@ execute following shell commands:
 bash docker/run.sh
 ```
 
-### How to run echo example
+### How to run conference example
 
 ```bash
 # Open example page in browser
-open examples/echo/index.html
+open examples/conference/index.html
 ```
 
-Then click `Start` (page should ask for permission to use
-web camera and microphone) and `Call` after that. You should
-see both local and echoed video stream.
+Click `Start translation` button (page should ask for permission
+to use web camera) then open page again in another tab and click
+`Join translation`. On publisher page you should see local stream
+on the left and on listener page you should see remote stream on
+the right.
 
 ### How to build an image for deploy
 
