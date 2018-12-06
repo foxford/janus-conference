@@ -1,0 +1,4 @@
+[book]
+authors = ["Dmitry Shlagoff"]
+multilingual = false
+src = "src"
