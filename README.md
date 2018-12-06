@@ -11,7 +11,7 @@ execute following shell commands:
 
 ```bash
 # Build and run Janus instance with plugin
-bash docker/run.sh
+bash docker/dev.run.sh
 ```
 
 ### How to run conference example
@@ -26,12 +26,6 @@ to use web camera) then open page again in another tab and click
 `Join translation`. On publisher page you should see local stream
 on the left and on listener page you should see remote stream on
 the right.
-
-### How to build an image for deploy
-
-```bash
-docker build -t netologygroup/janus-gateway --target deploy -f docker/Dockerfile .
-```
 
 
 ## License
