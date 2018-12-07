@@ -19,3 +19,11 @@ Name | Type   | Default    | Description
 ---- | ------ | ---------- | -----------
 type | String | _required_ | Always `offer`
 sdp  | String | _required_ | An SDP offer
+
+## Response
+
+If everything went well you should get a Janus event with specified `transaction` and following body:
+
+Name   | Type   | Default    | Description
+------ | ------ | ---------- | -----------
+result | String | _required_ | Always `ok`
