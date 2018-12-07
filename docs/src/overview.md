@@ -18,18 +18,7 @@ This manager should receive SDP offers from clients, validate
 and pass verified offers down to plugin, then return answers
 back to clients.
 
-## How to use
+## How to start hacking
 
-In order to start Janus instance with this plugin included run
-following commands:
-
-```bash
-bash docker/dev.run.sh
-open examples/conference/index.html
-```
-
-Click `Start translation` button (page should ask for permission
-to use web camera) then open page again in another tab and click
-`Join translation`. On publisher page you should see local stream
-on the left and on listener page you should see remote stream on
-the right.
+You can find instructions on development environment setup
+in README.md.
