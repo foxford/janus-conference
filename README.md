@@ -1,5 +1,7 @@
 # Janus Conference
 
+[![Build Status][travis-img]][travis]
+
 A Janus Gateway plugin implementing Conference rooms.
 
 
@@ -39,3 +41,5 @@ docker build -t netologygroup/janus-gateway --target deploy -f docker/Dockerfile
 The source code is provided under the terms of [the MIT license][license].
 
 [license]:http://www.opensource.org/licenses/MIT
+[travis]:https://travis-ci.com/netology-group/janus-conference?branch=master
+[travis-img]:https://travis-ci.com/netology-group/janus-conference.png?branch=master
