@@ -3,11 +3,12 @@ FROM rust:latest as build-janus
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
 ## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.3.0
+ARG PAHO_MQTT_VERSION=1.1.0
 
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
+        libconfig-dev \
         libmicrohttpd-dev \
         libjansson-dev \
         libnice-dev \
@@ -28,13 +29,13 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_VERSION=0.4.5
+ARG JANUS_GATEWAY_COMMIT='c8ee38780a6cdb75e3c459238c65b078273d60bd'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
     && git clone 'https://github.com/meetecho/janus-gateway' . \
-    && git checkout "v${JANUS_GATEWAY_VERSION}" \
+    && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus \
     && make -j $(nproc) \
