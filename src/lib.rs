@@ -317,7 +317,8 @@ fn handle_jsep(session: &Session, transaction: *mut c_char, jsep: &JanssonValue)
         JsepKind::Offer { sdp } => {
             let offer = sdp::Sdp::parse(
                 &CString::new(sdp).expect("Failed to create string from SDP offer"),
-            ).expect("Failed to parse SDP offer");
+            )
+            .expect("Failed to parse SDP offer");
             janus_verb!("[CONFERENCE] offer: {:?}", offer);
 
             let answer = answer_sdp!(offer);
