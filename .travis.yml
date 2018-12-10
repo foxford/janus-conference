@@ -5,6 +5,7 @@ addons:
   apt:
     packages:
       - libjansson-dev
+      - lftp
 cache:
   directories:
     - ${TRAVIS_HOME}/.cargo
@@ -26,6 +27,10 @@ jobs:
       name: Clippy
       install: rustup component add clippy-preview
       script: cargo clippy
+    - stage: deploy
+      name: Docs
+      install: cargo install mdbook --vers 0.2 --force
+      script: mdbook build docs && bash deploy/docs.sh
     - stage: deploy
       name: Kubernetes
       script: bash deploy/run.sh
