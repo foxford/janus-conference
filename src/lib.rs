@@ -11,6 +11,8 @@ extern crate serde_derive;
 extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
+#[macro_use]
+extern crate ffmpeg;
 
 #[macro_use]
 extern crate failure;
@@ -33,6 +35,7 @@ mod janus_callbacks;
 mod messages;
 mod session;
 mod switchboard;
+mod recorder;
 #[macro_use]
 mod utils;
 
@@ -112,6 +115,9 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
             }
         }
     });
+
+    ffmpeg::init().expect("Failed to init FFMPEG");
+    ffmpeg::format::network::init();
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
@@ -255,6 +261,12 @@ fn incoming_rtp_impl(
 
     for subscriber in switchboard.subscribers_to(&sess) {
         janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
+    }
+
+    unsafe {
+        let buf = std::slice::from_raw_parts(buf as *const u8, len as usize);
+        let recorder = switchboard.recorder_for(sess).unwrap();
+        recorder.relay(buf);
     }
 
     Ok(())

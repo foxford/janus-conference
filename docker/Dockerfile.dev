@@ -47,5 +47,7 @@ RUN set -xe \
 ## Install development tools
 ## -----------------------------------------------------------------------------
 RUN set -xe \
-    && apt-get install -y gdb vim \
+    && apt-get install -y \
+        gdb libavutil-dev libavcodec-dev libavformat-dev \
+        libavfilter-dev libavdevice-dev \
     && rustup component add clippy-preview

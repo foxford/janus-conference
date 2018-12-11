@@ -18,3 +18,7 @@ failure = "0.1"
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
+
+[dependencies.ffmpeg]
+version = "0.2.0-alpha.1"
+features = ["codec", "format"]

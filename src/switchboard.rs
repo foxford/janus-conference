@@ -4,12 +4,14 @@ use std::sync::Arc;
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::RoomId;
 use session::Session;
+use recorder::Recorder;
 
 #[derive(Debug)]
 pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<RoomId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
+    recorders: HashMap<Arc<Session>, Recorder>
 }
 
 impl Switchboard {
@@ -18,6 +20,7 @@ impl Switchboard {
             sessions: Vec::new(),
             publishers: HashMap::new(),
             publishers_subscribers: BidirectionalMultimap::new(),
+            recorders: HashMap::new(),
         }
     }
 
@@ -40,7 +43,8 @@ impl Switchboard {
     }
 
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        self.publishers.insert(room_id, publisher);
+        self.publishers.insert(room_id, publisher.clone());
+        self.recorders.insert(publisher, Recorder::new());
     }
 
     pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
@@ -48,5 +52,9 @@ impl Switchboard {
             self.publishers_subscribers
                 .associate(publisher.clone(), subscriber);
         }
+    }
+
+    pub fn recorder_for(&self, publisher: Arc<Session>) -> Option<&Recorder> {
+        self.recorders.get(&publisher)
     }
 }
