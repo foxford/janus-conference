@@ -15,16 +15,21 @@ impl Recorder {
             let path = Path::new("test.sdp");
             let opts = dict! {
                 "protocol_whitelist" => "file,udp,rtp",
-                "s" => "640x480"
             };
             let mut input = ffmpeg::format::input_with(&path, opts).unwrap();
 
+            let output_codec = {
+                let best = input.streams().best(ffmpeg::media::Type::Video).unwrap();
+                ffmpeg::encoder::find(best.codec().id()).expect("failed to deduce output codec")
+            };
+
             let path = Path::new("test.mp4");
             let mut output = ffmpeg::format::output_as(&path, "mp4").expect("Failed to create output");
+            output.add_stream(output_codec).expect("failed to add stream");
 
             for (stream, mut packet) in input.packets() {
                 packet.set_stream(stream.index());
-                packet.write_interleaved(&mut output).expect("failed to write packet");
+                packet.write(&mut output).expect("failed to write packet");
             }
         });
 
