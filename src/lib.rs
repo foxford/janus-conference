@@ -33,9 +33,9 @@ use janus::{
 mod bidirectional_multimap;
 mod janus_callbacks;
 mod messages;
+mod recorder;
 mod session;
 mod switchboard;
-mod recorder;
 #[macro_use]
 mod utils;
 

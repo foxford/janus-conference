@@ -3,15 +3,15 @@ use std::sync::Arc;
 
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::RoomId;
-use session::Session;
 use recorder::Recorder;
+use session::Session;
 
 #[derive(Debug)]
 pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<RoomId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
-    recorders: HashMap<Arc<Session>, Recorder>
+    recorders: HashMap<Arc<Session>, Recorder>,
 }
 
 impl Switchboard {
