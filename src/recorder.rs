@@ -1,6 +1,7 @@
 use std::net::UdpSocket;
 use std::path::Path;
 use std::thread;
+use ffmpeg::codec::packet::Mut;
 
 #[derive(Debug)]
 pub struct Recorder {
@@ -17,46 +18,34 @@ impl Recorder {
                 "protocol_whitelist" => "file,udp,rtp",
             };
             let mut input = ffmpeg::format::input_with(&path, opts).unwrap();
-            let mut decoder = input.streams().next().unwrap().codec().decoder().video().unwrap();
 
             let output_codec = ffmpeg::encoder::find(ffmpeg::codec::Id::H264)
                 .expect("failed to deduce output codec");
 
+            let opts = dict! {
+                "movflags" => "faststart",
+                "movflags" => "frag_keyframe+empty_moov",
+                "vcodec" => "copy"
+            };
+
             let path = Path::new("test.mp4");
             let mut output =
-                ffmpeg::format::output_as(&path, "mp4").expect("Failed to create output");
+                ffmpeg::format::output_as_with(&path, "mp4", opts).expect("Failed to create output");
 
-            let mut encoder = {
+            unsafe {
                 let mut out_stream = output
                     .add_stream(output_codec)
                     .expect("failed to add stream");
-                let mut encoder = out_stream.codec().encoder().video().unwrap();
 
-                out_stream.set_time_base((1, 30));
-                encoder.set_frame_rate(decoder.frame_rate());
+                ffmpeg::ffi::avcodec_copy_context(out_stream.codec().as_mut_ptr(), input.streams().next().unwrap().codec().as_mut_ptr());
 
-                unsafe {
-                    (*encoder.as_mut_ptr()).time_base.den = 30;
-                    (*encoder.as_mut_ptr()).time_base.num = 1;
-                    janus_info!("{} {}", (*encoder.as_mut_ptr()).time_base.num, (*encoder.as_mut_ptr()).time_base.den);
+                loop {
+                    let mut packet = ffmpeg::packet::Packet::empty();
+                    let mut ret = ffmpeg::ffi::av_read_frame(input.as_mut_ptr(), packet.as_mut_ptr());
+                    janus_info!("{}", ret);
+                    ret = ffmpeg::ffi::av_interleaved_write_frame(output.as_mut_ptr(), packet.as_mut_ptr());
+                    janus_info!("{}", ret);
                 }
-
-                encoder.open_as(output_codec).unwrap()
-            };
-
-            let mut decoded = ffmpeg::util::frame::Video::empty();
-            let mut encoded = ffmpeg::Packet::empty();
-
-            for (stream, mut packet) in input.packets() {
-                packet.set_stream(stream.index());
-
-                decoder.decode(&packet, &mut decoded);
-                let ts = decoded.timestamp();
-                decoded.set_pts(ts);
-
-                encoder.encode(&decoded, &mut encoded);
-                encoded.set_stream(0);
-                encoded.write_interleaved(&mut output);
             }
         });
 
