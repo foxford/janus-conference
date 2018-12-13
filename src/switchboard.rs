@@ -32,6 +32,7 @@ impl Switchboard {
         self.sessions.retain(|s| s.handle != sess.handle);
         self.publishers_subscribers.remove_key(sess);
         self.publishers_subscribers.remove_value(sess);
+        self.recorders.remove(sess);
     }
 
     pub fn subscribers_to(&self, publisher: &Session) -> &[Arc<Session>] {

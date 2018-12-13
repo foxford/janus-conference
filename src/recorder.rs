@@ -1,60 +1,92 @@
-use std::net::UdpSocket;
-use std::path::Path;
 use std::thread;
-use ffmpeg::codec::packet::Mut;
+use std::sync::mpsc;
+
+use gstreamer::prelude::*;
+use gstreamer as gst;
+use gstreamer_app as gst_app;
+use gstreamer_base::BaseSrcExt;
 
 #[derive(Debug)]
 pub struct Recorder {
-    socket: UdpSocket,
+    sender: mpsc::Sender<gst::buffer::Buffer>
 }
+
+unsafe impl Sync for Recorder {}
 
 impl Recorder {
     pub fn new() -> Self {
-        let socket = UdpSocket::bind("127.0.0.1:20000").expect("Failed to bind UDP socket");
+        let (sender, recv) = mpsc::channel();
+
+        let pipeline = gst::Pipeline::new(None);
+        let appsrc = gst::ElementFactory::make("appsrc", None).unwrap();
+        let rtph264depay = gst::ElementFactory::make("rtph264depay", None).unwrap();
+        let h264parse = gst::ElementFactory::make("h264parse", None).unwrap();
+        let mp4mux = gst::ElementFactory::make("mp4mux", None).unwrap();
+        let filesink = gst::ElementFactory::make("filesink", None).unwrap();
+
+        let caps = gst::Caps::new_simple(
+            "application/x-rtp",
+            &[
+                ("media", &"video"),
+                ("encoding-name", &"H264"),
+                ("payload", &96),
+                ("clock-rate", &90000)
+            ]
+        );
+
+        {
+            let elems = [
+                &appsrc,
+                &rtph264depay,
+                &h264parse,
+                &mp4mux,
+                &filesink
+            ];
+
+            pipeline.add_many(&elems).expect("failed to add elems to pipeline");
+            gst::Element::link_many(&elems).expect("failed to link elems in pipeline");
+        }
+
+        let appsrc = appsrc.downcast::<gst_app::AppSrc>().expect("failed downcast to AppSrc");
+
+        appsrc.set_caps(Some(&caps));
+        appsrc.set_stream_type(gst_app::AppStreamType::Stream);
+        appsrc.set_format(gst::Format::Time);
+        appsrc.set_live(true);
+        appsrc.set_do_timestamp(true);
+
+        filesink.set_property("location", &"test.mp4".to_value()).expect("failed to set location prop on filesink?!");
+
+        pipeline.set_state(gst::State::Playing);
 
         thread::spawn(move || {
-            let path = Path::new("test.sdp");
-            let opts = dict! {
-                "protocol_whitelist" => "file,udp,rtp",
-            };
-            let mut input = ffmpeg::format::input_with(&path, opts).unwrap();
-
-            let output_codec = ffmpeg::encoder::find(ffmpeg::codec::Id::H264)
-                .expect("failed to deduce output codec");
-
-            let opts = dict! {
-                "movflags" => "faststart",
-                "movflags" => "frag_keyframe+empty_moov",
-                "vcodec" => "copy"
-            };
-
-            let path = Path::new("test.mp4");
-            let mut output =
-                ffmpeg::format::output_as_with(&path, "mp4", opts).expect("Failed to create output");
-
-            unsafe {
-                let mut out_stream = output
-                    .add_stream(output_codec)
-                    .expect("failed to add stream");
-
-                ffmpeg::ffi::avcodec_copy_context(out_stream.codec().as_mut_ptr(), input.streams().next().unwrap().codec().as_mut_ptr());
-
-                loop {
-                    let mut packet = ffmpeg::packet::Packet::empty();
-                    let mut ret = ffmpeg::ffi::av_read_frame(input.as_mut_ptr(), packet.as_mut_ptr());
-                    janus_info!("{}", ret);
-                    ret = ffmpeg::ffi::av_interleaved_write_frame(output.as_mut_ptr(), packet.as_mut_ptr());
-                    janus_info!("{}", ret);
-                }
+            for buf in recv.iter() {
+                appsrc.push_buffer(buf);
             }
+
+            appsrc.end_of_stream();
+            
+            let eos_ev = gst::Event::new_eos().build();
+            pipeline.send_event(eos_ev);
+            thread::sleep(::std::time::Duration::from_secs(10));
+            pipeline.set_state(gst::State::Null);
+
+            janus_info!("end of record");
         });
 
-        Self { socket }
+        Self {
+            sender
+        }
     }
 
-    pub fn relay(&self, buf: &[u8]) {
-        self.socket
-            .send_to(buf, "127.0.0.1:20001")
-            .expect("Failed to send UDP packet");
+    pub fn record(&self, buf: &[u8]) {
+        let mut gbuf = gst::buffer::Buffer::with_size(buf.len()).unwrap();
+
+        {
+            let gbuf = gbuf.get_mut().unwrap();
+            gbuf.copy_from_slice(0, buf).expect("failed to copy buf");
+        }
+
+        self.sender.send(gbuf).expect("failed to send buf to recorder pipeline");
     }
 }

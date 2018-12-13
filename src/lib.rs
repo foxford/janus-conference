@@ -11,8 +11,10 @@ extern crate serde_derive;
 extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
-#[macro_use]
-extern crate ffmpeg;
+
+extern crate gstreamer;
+extern crate gstreamer_app;
+extern crate gstreamer_base;
 
 #[macro_use]
 extern crate failure;
@@ -116,8 +118,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
         }
     });
 
-    ffmpeg::init().expect("Failed to init FFMPEG");
-    ffmpeg::format::network::init();
+    gstreamer::init().expect("Failed to init GStreamer");
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
@@ -263,11 +264,11 @@ fn incoming_rtp_impl(
         janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
     }
 
-    unsafe {
-        let buf = std::slice::from_raw_parts(buf as *const u8, len as usize);
-        let recorder = switchboard.recorder_for(sess).unwrap();
-        recorder.relay(buf);
-    }
+    let buf = unsafe {
+        std::slice::from_raw_parts(buf as *const u8, len as usize)
+    };
+    let recorder = switchboard.recorder_for(sess).unwrap();
+    recorder.record(buf);
 
     Ok(())
 }

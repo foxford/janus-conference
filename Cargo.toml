@@ -15,10 +15,9 @@ lazy_static = "1.2"
 atom = "0.3"
 multimap = "0.4"
 failure = "0.1"
+gstreamer = "0.12"
+gstreamer-app = "0.12"
+gstreamer-base = "0.12"
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
-
-[dependencies.ffmpeg]
-version = "0.2.0-alpha.1"
-features = ["codec", "format"]
