@@ -264,9 +264,7 @@ fn incoming_rtp_impl(
         janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
     }
 
-    let buf = unsafe {
-        std::slice::from_raw_parts(buf as *const u8, len as usize)
-    };
+    let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
     let recorder = switchboard.recorder_for(sess).unwrap();
     recorder.record(buf);
 
