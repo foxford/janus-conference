@@ -84,11 +84,14 @@ impl Recorder {
 
             let eos_ev = gst::Event::new_eos().build();
             pipeline.send_event(eos_ev);
-            thread::sleep(::std::time::Duration::from_secs(10));
+
+            let bus = pipeline.get_bus().unwrap();
+            bus.set_sync_handler(|_bus, _msg| gst::BusSyncReply::Pass);
+
             let res = pipeline.set_state(gst::State::Null);
             assert_ne!(res, gst::StateChangeReturn::Failure);
 
-            janus_info!("end of record");
+            janus_info!("[CONFERENCE] End of record");
         });
 
         Self { sender }
