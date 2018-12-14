@@ -118,7 +118,11 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
         }
     });
 
-    gstreamer::init().expect("Failed to init GStreamer");
+    let res = gstreamer::init();
+    if let Err(err) = res {
+        janus_fatal!("[CONFERENCE] Failed to init GStreamer: {}", err);
+        return -1;
+    }
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
@@ -265,8 +269,11 @@ fn incoming_rtp_impl(
     }
 
     let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
-    let recorder = switchboard.recorder_for(sess).unwrap();
-    recorder.record(buf);
+    if let Some(recorder) = switchboard.recorder_for(sess) {
+        if let Err(err) = recorder.record(buf) {
+            janus_err!("Error recording packet: {}", err);
+        }
+    }
 
     Ok(())
 }
