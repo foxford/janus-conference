@@ -270,8 +270,13 @@ fn incoming_rtp_impl(
 
     let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
     if let Some(recorder) = switchboard.recorder_for(sess) {
-        if let Err(err) = recorder.record(buf) {
-            janus_err!("Error recording packet: {}", err);
+        match video {
+            0 => {}
+            _ => {
+                if let Err(err) = recorder.record_video(buf) {
+                    janus_err!("Error recording packet: {}", err);
+                }
+            }
         }
     }
 

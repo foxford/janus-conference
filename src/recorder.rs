@@ -16,7 +16,7 @@ pub enum VideoCodec {
 
 #[derive(Debug)]
 pub enum AudioCodec {
-    ACC,
+    OPUS,
 }
 
 #[derive(Debug)]
@@ -40,7 +40,7 @@ impl Recorder {
 
         let rtpdepay = match video_codec {
             VideoCodec::H264 => gst::ElementFactory::make("rtph264depay", None)
-            .expect("Failed to create GStreamer rtph264depay")
+                .expect("Failed to create GStreamer rtph264depay"),
         };
 
         let video_codec = match video_codec {
@@ -117,7 +117,7 @@ impl Recorder {
         Self { sender }
     }
 
-    pub fn record(&self, buf: &[u8]) -> Result<(), Error> {
+    pub fn record_video(&self, buf: &[u8]) -> Result<(), Error> {
         let mut gbuf =
             gst::buffer::Buffer::with_size(buf.len()).ok_or(err_msg("Failed to init GBuffer"))?;
 

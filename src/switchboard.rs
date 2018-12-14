@@ -49,7 +49,7 @@ impl Switchboard {
             let save_dir = Path::new(&room_id);
             self.recorders.insert(
                 publisher.clone(),
-                Recorder::new(&save_dir, VideoCodec::H264, AudioCodec::ACC),
+                Recorder::new(&save_dir, VideoCodec::H264, AudioCodec::OPUS),
             );
         }
 
