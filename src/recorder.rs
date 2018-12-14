@@ -1,7 +1,7 @@
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
-use std::path::{Path, PathBuf};
-use std::time::{UNIX_EPOCH, SystemTime};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use failure::{err_msg, Error};
 use gstreamer as gst;
@@ -10,23 +10,40 @@ use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
 
 #[derive(Debug)]
+pub enum VideoCodec {
+    H264,
+}
+
+#[derive(Debug)]
+pub enum AudioCodec {
+    ACC,
+}
+
+#[derive(Debug)]
 pub struct Recorder {
     sender: mpsc::Sender<gst::buffer::Buffer>,
-
 }
 
 unsafe impl Sync for Recorder {}
 
 impl Recorder {
-    pub fn new(save_directory: &Path) -> Self {
+    pub fn new(save_directory: &Path, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
         let (sender, recv) = mpsc::channel();
 
         let pipeline = gst::Pipeline::new(None);
-        let appsrc = gst::ElementFactory::make("appsrc", None).expect("Failed to create GStreamer AppSrc");
-        let rtph264depay = gst::ElementFactory::make("rtph264depay", None).expect("Failed to create GStreamer rtph264depay");
-        let h264parse = gst::ElementFactory::make("h264parse", None).expect("Failed to create GStreamer h264parse");
-        let mp4mux = gst::ElementFactory::make("mp4mux", None).expect("Failed to create GStreamer mp4mux");
-        let filesink = gst::ElementFactory::make("filesink", None).expect("Failed to create GStreamer filesink");
+        let appsrc =
+            gst::ElementFactory::make("appsrc", None).expect("Failed to create GStreamer AppSrc");
+        let rtph264depay = gst::ElementFactory::make("rtph264depay", None)
+            .expect("Failed to create GStreamer rtph264depay");
+        let mp4mux =
+            gst::ElementFactory::make("mp4mux", None).expect("Failed to create GStreamer mp4mux");
+        let filesink = gst::ElementFactory::make("filesink", None)
+            .expect("Failed to create GStreamer filesink");
+
+        let video_codec = match video_codec {
+            VideoCodec::H264 => gst::ElementFactory::make("h264parse", None)
+                .expect("Failed to create GStreamer h264parse"),
+        };
 
         let caps = gst::Caps::new_simple(
             "application/x-rtp",
@@ -39,7 +56,7 @@ impl Recorder {
         );
 
         {
-            let elems = [&appsrc, &rtph264depay, &h264parse, &mp4mux, &filesink];
+            let elems = [&appsrc, &rtph264depay, &video_codec, &mp4mux, &filesink];
 
             pipeline
                 .add_many(&elems)
@@ -116,7 +133,11 @@ impl Recorder {
     }
 
     fn generate_record_path(dir: &Path) -> PathBuf {
-        let filename = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+        let filename = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
         let mut path = dir.to_path_buf();
         path.push(filename);
 
