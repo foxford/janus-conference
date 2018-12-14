@@ -33,12 +33,15 @@ impl Recorder {
         let pipeline = gst::Pipeline::new(None);
         let appsrc =
             gst::ElementFactory::make("appsrc", None).expect("Failed to create GStreamer AppSrc");
-        let rtph264depay = gst::ElementFactory::make("rtph264depay", None)
-            .expect("Failed to create GStreamer rtph264depay");
         let mp4mux =
             gst::ElementFactory::make("mp4mux", None).expect("Failed to create GStreamer mp4mux");
         let filesink = gst::ElementFactory::make("filesink", None)
             .expect("Failed to create GStreamer filesink");
+
+        let rtpdepay = match video_codec {
+            VideoCodec::H264 => gst::ElementFactory::make("rtph264depay", None)
+            .expect("Failed to create GStreamer rtph264depay")
+        };
 
         let video_codec = match video_codec {
             VideoCodec::H264 => gst::ElementFactory::make("h264parse", None)
@@ -56,7 +59,7 @@ impl Recorder {
         );
 
         {
-            let elems = [&appsrc, &rtph264depay, &video_codec, &mp4mux, &filesink];
+            let elems = [&appsrc, &rtpdepay, &video_codec, &mp4mux, &filesink];
 
             pipeline
                 .add_many(&elems)
