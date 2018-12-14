@@ -1,5 +1,7 @@
 use std::sync::mpsc;
 use std::thread;
+use std::path::{Path, PathBuf};
+use std::time::{UNIX_EPOCH, SystemTime};
 
 use failure::{err_msg, Error};
 use gstreamer as gst;
@@ -10,12 +12,13 @@ use gstreamer_base::BaseSrcExt;
 #[derive(Debug)]
 pub struct Recorder {
     sender: mpsc::Sender<gst::buffer::Buffer>,
+
 }
 
 unsafe impl Sync for Recorder {}
 
 impl Recorder {
-    pub fn new() -> Self {
+    pub fn new(save_directory: &Path) -> Self {
         let (sender, recv) = mpsc::channel();
 
         let pipeline = gst::Pipeline::new(None);
@@ -54,12 +57,17 @@ impl Recorder {
         appsrc.set_live(true);
         appsrc.set_do_timestamp(true);
 
+        let mut path = Self::generate_record_path(save_directory);
+        path.set_extension("mp4");
+        let path = path.to_string_lossy();
+
+        janus_info!("[CONFERENCE] Saving video to {}", path);
+
         filesink
-            .set_property("location", &"test.mp4".to_value())
+            .set_property("location", &path.to_value())
             .expect("failed to set location prop on filesink?!");
 
-        let res = pipeline.set_state(gst::State::Playing);
-        assert_ne!(res, gst::StateChangeReturn::Failure);
+        pipeline.set_state(gst::State::Playing);
 
         thread::spawn(move || {
             for buf in recv.iter() {
@@ -102,5 +110,13 @@ impl Recorder {
         }
 
         self.sender.send(gbuf).map_err(|err| Error::from(err))
+    }
+
+    fn generate_record_path(dir: &Path) -> PathBuf {
+        let filename = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+        let mut path = dir.to_path_buf();
+        path.push(filename);
+
+        path
     }
 }
