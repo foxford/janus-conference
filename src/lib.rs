@@ -278,9 +278,7 @@ fn incoming_rtp_impl(
             _ => true,
         };
 
-        if let Err(err) = recorder.record_packet(buf, is_video) {
-            janus_err!("Error recording packet: {}", err);
-        }
+        recorder.record_packet(buf, is_video)?;
     }
 
     Ok(())
