@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::RoomId;
-use recorder::{AudioCodec, Recorder, VideoCodec};
+use recorder::Recorder;
 use session::Session;
 
 #[derive(Debug)]
@@ -45,15 +44,11 @@ impl Switchboard {
     }
 
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        {
-            let save_dir = Path::new(&room_id);
-            self.recorders.insert(
-                publisher.clone(),
-                Recorder::new(&save_dir, VideoCodec::H264, AudioCodec::OPUS),
-            );
-        }
-
         self.publishers.insert(room_id, publisher);
+    }
+
+    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
+        self.recorders.insert(publisher, recorder);
     }
 
     pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {

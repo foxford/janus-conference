@@ -22,6 +22,7 @@ extern crate failure;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
+use std::path::Path;
 use std::slice;
 use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
@@ -43,6 +44,7 @@ mod switchboard;
 mod utils;
 
 use messages::{JsepKind, StreamOperation};
+use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -384,8 +386,19 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
             .map_err(|err| format_err!("{}", err))?;
 
         match message {
-            StreamOperation::Create { id } => switchboard.create_room(id, received.session.clone()),
-            StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
+            StreamOperation::Create { id } => {
+                {
+                    let save_dir = Path::new(&id);
+                    let recorder = Recorder::new(&save_dir, VideoCodec::H264, AudioCodec::OPUS);
+
+                    switchboard.attach_recorder(received.session.clone(), recorder);
+                }
+
+                switchboard.create_room(id, received.session.clone());
+            }
+            StreamOperation::Read { id } => {
+                switchboard.join_room(id, received.session.clone())
+            }
         }
     }
 
