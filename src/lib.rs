@@ -12,6 +12,7 @@ extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
 
+extern crate glib;
 extern crate gstreamer;
 extern crate gstreamer_app;
 extern crate gstreamer_base;

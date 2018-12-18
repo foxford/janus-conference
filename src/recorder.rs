@@ -4,6 +4,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use failure::{err_msg, Error};
+use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
@@ -53,10 +54,20 @@ impl Recorder {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
         let pipeline = gst::Pipeline::new(None);
-        let mp4mux =
-            gst::ElementFactory::make("mp4mux", None).expect("Failed to create GStreamer mp4mux");
+        let matroskamux = gst::ElementFactory::make("matroskamux", None)
+            .expect("Failed to create GStreamer matroskamux");
+
         let filesink = gst::ElementFactory::make("filesink", None)
             .expect("Failed to create GStreamer filesink");
+        let mut path = Self::generate_record_path(save_directory);
+        path.set_extension("mkv");
+        let path = path.to_string_lossy();
+
+        janus_info!("[CONFERENCE] Saving video to {}", path);
+
+        filesink
+            .set_property("location", &path.to_value())
+            .expect("failed to set location prop on filesink?!");
 
         let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(video_codec);
         let video_queue =
@@ -76,7 +87,7 @@ impl Recorder {
                 &audio_rtpdepay,
                 &audio_codec,
                 &audio_queue,
-                &mp4mux,
+                &matroskamux,
                 &filesink,
             ];
 
@@ -103,39 +114,30 @@ impl Recorder {
                 .expect("Failed to link audio elements in pipeline");
         }
 
-        mp4mux
+        matroskamux
             .link(&filesink)
-            .expect("Failed to link mp4mux to filesink");
+            .expect("Failed to link matroskamux to filesink");
 
         let video_src_pad = video_queue
             .get_static_pad("src")
             .expect("Failed to get src pad on video src");
-        let video_sink_pad = mp4mux
+        let video_sink_pad = matroskamux
             .get_request_pad("video_%u")
             .expect("Failed to request video pad");
         let res = video_src_pad.link(&video_sink_pad);
-        janus_info!("video - {:?}", res);
+        assert_eq!(res, gst::PadLinkReturn::Ok);
 
         let audio_src_pad = audio_queue
             .get_static_pad("src")
             .expect("Failed to get src pad on audio src");
-        let audio_sink_pad = mp4mux
+        let audio_sink_pad = matroskamux
             .get_request_pad("audio_%u")
             .expect("Failed to request audio pad");
         let res = audio_src_pad.link(&audio_sink_pad);
-        janus_info!("audio - {:?}", res);
+        assert_eq!(res, gst::PadLinkReturn::Ok);
 
-        let mut path = Self::generate_record_path(save_directory);
-        path.set_extension("mp4");
-        let path = path.to_string_lossy();
-
-        janus_info!("[CONFERENCE] Saving video to {}", path);
-
-        filesink
-            .set_property("location", &path.to_value())
-            .expect("failed to set location prop on filesink?!");
-
-        pipeline.set_state(gst::State::Playing);
+        let res = pipeline.set_state(gst::State::Playing);
+        assert_ne!(res, gst::StateChangeReturn::Failure);
 
         thread::spawn(move || {
             for msg in recv.iter() {
@@ -165,18 +167,30 @@ impl Recorder {
                 );
             }
 
+            let main_loop = glib::MainLoop::new(None, false);
+
             let eos_ev = gst::Event::new_eos().build();
             pipeline.send_event(eos_ev);
 
-            mp4mux.release_request_pad(&audio_sink_pad);
-            mp4mux.release_request_pad(&video_sink_pad);
-
             let bus = pipeline.get_bus().unwrap();
-            bus.set_sync_handler(|_bus, _msg| gst::BusSyncReply::Pass);
-            thread::sleep(::std::time::Duration::from_secs(5));
+            let main_loop_clone = main_loop.clone();
+            bus.add_watch(move |_bus, msg| {
+                if let gst::MessageView::Eos(..) = msg.view() {
+                    main_loop_clone.quit();
+                }
+
+                glib::Continue(true)
+            });
+
+            main_loop.run();
+
+            matroskamux.release_request_pad(&audio_sink_pad);
+            matroskamux.release_request_pad(&video_sink_pad);
 
             let res = pipeline.set_state(gst::State::Null);
             assert_ne!(res, gst::StateChangeReturn::Failure);
+
+            bus.remove_watch();
 
             janus_info!("[CONFERENCE] End of record");
         });
@@ -188,12 +202,12 @@ impl Recorder {
         let buf = Self::wrap_buf(buf)?;
         let msg = RecorderMsg { buf, is_video };
 
-        self.sender.send(msg).map_err(|err| Error::from(err))
+        self.sender.send(msg).map_err(Error::from)
     }
 
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
-        let mut gbuf =
-            gst::buffer::Buffer::with_size(buf.len()).ok_or(err_msg("Failed to init GBuffer"))?;
+        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
+            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
 
         {
             let gbuf = gbuf.get_mut().unwrap();
@@ -268,8 +282,8 @@ impl Recorder {
         };
 
         let codec_elem = match codec {
-            AudioCodec::OPUS => gst::ElementFactory::make("opusdec", None)
-                .expect("Failed to create GStreamer opusdec"),
+            AudioCodec::OPUS => gst::ElementFactory::make("opusparse", None)
+                .expect("Failed to create GStreamer opusparse"),
         };
 
         let caps = gst::Caps::new_simple(

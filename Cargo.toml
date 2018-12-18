@@ -18,6 +18,7 @@ failure = "0.1"
 gstreamer = "0.12"
 gstreamer-app = "0.12"
 gstreamer-base = "0.12"
+glib = "0.6"
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
