@@ -43,12 +43,16 @@ impl Switchboard {
         self.publishers_subscribers.get_key(subscriber)
     }
 
-    pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        self.publishers.insert(room_id, publisher);
-    }
-
     pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
         self.recorders.insert(publisher, recorder);
+    }
+
+    pub fn recorder_for(&self, publisher: Arc<Session>) -> Option<&Recorder> {
+        self.recorders.get(&publisher)
+    }
+
+    pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
+        self.publishers.insert(room_id, publisher);
     }
 
     pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
@@ -56,9 +60,5 @@ impl Switchboard {
             self.publishers_subscribers
                 .associate(publisher.clone(), subscriber);
         }
-    }
-
-    pub fn recorder_for(&self, publisher: Arc<Session>) -> Option<&Recorder> {
-        self.recorders.get(&publisher)
     }
 }
