@@ -53,6 +53,42 @@ impl Recorder {
     pub fn new(save_directory: &Path, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
+        Self::setup_recording(save_directory, video_codec, audio_codec, recv);
+
+        Self { sender }
+    }
+
+    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
+        let buf = Self::wrap_buf(buf)?;
+        let msg = RecorderMsg { buf, is_video };
+
+        self.sender.send(msg).map_err(Error::from)
+    }
+
+    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
+        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
+            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
+
+        {
+            let gbuf = gbuf.get_mut().unwrap();
+            gbuf.copy_from_slice(0, buf).map_err(|copied| {
+                format_err!(
+                    "Failed to copy buf into GBuffer: copied {} out of {} bytes",
+                    copied,
+                    buf.len()
+                )
+            })?;
+        }
+
+        Ok(gbuf)
+    }
+
+    fn setup_recording(
+        save_directory: &Path,
+        video_codec: VideoCodec,
+        audio_codec: AudioCodec,
+        recv: mpsc::Receiver<RecorderMsg>,
+    ) {
         let pipeline = gst::Pipeline::new(None);
         let matroskamux = gst::ElementFactory::make("matroskamux", None)
             .expect("Failed to create GStreamer matroskamux");
@@ -194,33 +230,6 @@ impl Recorder {
 
             janus_info!("[CONFERENCE] End of record");
         });
-
-        Self { sender }
-    }
-
-    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
-        let buf = Self::wrap_buf(buf)?;
-        let msg = RecorderMsg { buf, is_video };
-
-        self.sender.send(msg).map_err(Error::from)
-    }
-
-    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
-        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
-            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
-
-        {
-            let gbuf = gbuf.get_mut().unwrap();
-            gbuf.copy_from_slice(0, buf).map_err(|copied| {
-                format_err!(
-                    "Failed to copy buf into GBuffer: copied {} out of {} bytes",
-                    copied,
-                    buf.len()
-                )
-            })?;
-        }
-
-        Ok(gbuf)
     }
 
     fn generate_record_path(dir: &Path) -> PathBuf {
