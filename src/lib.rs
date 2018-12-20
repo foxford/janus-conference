@@ -126,16 +126,6 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
         return -1;
     }
 
-    let recorder = Recorder::new("demo-conference-room", VideoCodec::H264, AudioCodec::OPUS);
-    match recorder.finish_record() {
-        Ok(_) => {
-            janus_info!("SUCCESS!!11");
-        }
-        Err(err) => {
-            janus_err!("{}", err);
-        }
-    }
-
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
     0

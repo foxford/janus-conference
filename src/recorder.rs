@@ -71,7 +71,7 @@ impl Recorder {
     pub fn new(room_id: &str, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
-        // Self::setup_recording(room_id, video_codec, audio_codec, recv);
+        Self::setup_recording(room_id, video_codec, audio_codec, recv);
 
         Self {
             sender,
@@ -171,30 +171,36 @@ impl Recorder {
             let video_parse = self.video_codec.new_parse_elem();
             pipeline.add(&video_parse)?;
 
-            // let video_src_pad = demux
-            //     .get_static_pad("video_0")
-            //     .expect("Failed to get src pad for video");
-            // let video_sink_pad = video_parse
-            //     .get_static_pad("sink")
-            //     .expect("Failed to request video pad sink");
-            // let res = video_src_pad.link(&video_sink_pad);
-            // assert_eq!(res, gst::PadLinkReturn::Ok);
-
             video_parse.link(&concat_video)?;
 
             let audio_parse = self.audio_codec.new_parse_elem();
             pipeline.add(&audio_parse)?;
 
-            // let audio_src_pad = demux
-            //     .get_static_pad("audio_0")
-            //     .expect("Failed to get src pad for audio");
-            // let audio_sink_pad = video_parse
-            //     .get_static_pad("sink")
-            //     .expect("Failed to request audio pad sink");
-            // let res = audio_src_pad.link(&audio_sink_pad);
-            // assert_eq!(res, gst::PadLinkReturn::Ok);
-
             audio_parse.link(&concat_audio)?;
+
+            demux.connect("pad-added", true, move |args| {
+                let pad = args[1].get::<gst::Pad>().expect("Second argument is not a Pad");
+
+                match pad.get_name().as_ref() {
+                    "video_0" => {
+                        let video_sink_pad = video_parse
+                            .get_static_pad("sink")
+                            .expect("Failed to request video pad sink");
+                        let res = pad.link(&video_sink_pad);
+                        assert!(res == gst::PadLinkReturn::Ok or res == gst::PadLinkReturn::WasLinked);
+                    }
+                    "audio_0" => {
+                        let audio_sink_pad = audio_parse
+                            .get_static_pad("sink")
+                            .expect("Failed to request audio pad sink");
+                        let res = pad.link(&audio_sink_pad);
+                        assert!(res == gst::PadLinkReturn::Ok or res == gst::PadLinkReturn::WasLinked);
+                    }
+                    _ => {}
+                }
+
+                None
+            })?;
         }
 
         let res = pipeline.set_state(gst::State::Playing);
