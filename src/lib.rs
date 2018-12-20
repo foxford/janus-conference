@@ -22,7 +22,6 @@ extern crate failure;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::path::Path;
 use std::slice;
 use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
@@ -125,6 +124,16 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
     if let Err(err) = res {
         janus_fatal!("[CONFERENCE] Failed to init GStreamer: {}", err);
         return -1;
+    }
+
+    let recorder = Recorder::new("demo-conference-room", VideoCodec::H264, AudioCodec::OPUS);
+    match recorder.finish_record() {
+        Ok(_) => {
+            janus_info!("SUCCESS!!11");
+        }
+        Err(err) => {
+            janus_err!("{}", err);
+        }
     }
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
@@ -386,8 +395,7 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
         match message {
             StreamOperation::Create { id } => {
                 {
-                    let save_dir = Path::new(&id);
-                    let recorder = Recorder::new(&save_dir, VideoCodec::H264, AudioCodec::OPUS);
+                    let recorder = Recorder::new(&id, VideoCodec::H264, AudioCodec::OPUS);
 
                     switchboard.attach_recorder(received.session.clone(), recorder);
                 }
