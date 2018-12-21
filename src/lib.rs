@@ -176,7 +176,9 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
             match switchboard {
                 Ok(mut switchboard) => {
-                    switchboard.disconnect(&sess);
+                    switchboard
+                        .disconnect(&sess)
+                        .map(|recorder| report_error(recorder.finish_record()));
                 }
                 Err(err) => {
                     janus_err!("[CONFERENCE] {}", err);

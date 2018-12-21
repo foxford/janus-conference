@@ -103,14 +103,16 @@ impl Recorder {
     pub fn new(room_id: &str, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
-        Self::setup_recording(room_id, video_codec, audio_codec, recv);
-
-        Self {
+        let rec = Self {
             sender,
             room_id: String::from(room_id),
             video_codec,
             audio_codec,
-        }
+        };
+
+        rec.setup_recording(recv);
+
+        rec
     }
 
     pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
@@ -258,12 +260,7 @@ impl Recorder {
         Ok(gbuf)
     }
 
-    fn setup_recording(
-        room_id: &str,
-        video_codec: VideoCodec,
-        audio_codec: AudioCodec,
-        recv: mpsc::Receiver<RecorderMsg>,
-    ) {
+    fn setup_recording(&self, recv: mpsc::Receiver<RecorderMsg>) {
         /*
         GStreamer pipeline we create here:
 
@@ -279,7 +276,7 @@ impl Recorder {
         let matroskamux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let path = Self::generate_record_path(room_id, None, MKV);
+        let path = Self::generate_record_path(&self.room_id, None, MKV);
         let path = path.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving video to {}", path);
@@ -292,10 +289,10 @@ impl Recorder {
             .add_many(&[&matroskamux, &filesink])
             .expect("Failed to add elems to pipeline");
 
-        let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(video_codec);
+        let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(self.video_codec);
         let video_queue = GstElement::Queue.make();
 
-        let (audio_src, audio_rtpdepay, audio_codec) = Self::setup_audio_elements(audio_codec);
+        let (audio_src, audio_rtpdepay, audio_codec) = Self::setup_audio_elements(self.audio_codec);
         let audio_queue = GstElement::Queue.make();
 
         {
