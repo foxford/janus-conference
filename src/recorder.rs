@@ -28,6 +28,12 @@ impl VideoCodec {
             VideoCodec::H264 => GstElement::H264Parse.make(),
         }
     }
+
+    pub fn new_depay_elem(self) -> gst::Element {
+        match self {
+            VideoCodec::H264 => GstElement::RTPH264Depay.make(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +53,12 @@ impl AudioCodec {
             AudioCodec::OPUS => GstElement::OpusParse.make(),
         }
     }
+
+    pub fn new_depay_elem(self) -> gst::Element {
+        match self {
+            AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
+        }
+    }
 }
 
 const MKV: &str = "mkv";
@@ -58,6 +70,25 @@ struct RecorderMsg {
     is_video: bool,
 }
 
+/// Records video from RTP stream identified by RoomId.
+///
+/// RoomId is used as a directory for parts of a record.
+/// In case of Janus restart stream newly created recorder
+/// for old room resumes recording but writes to new file
+/// in that directory. Filename for record part is generated
+/// by the following rule: `unix_timestamp.extension`.
+///
+/// Look at `VideoCodec` and `AudioCodec` enums to find out
+/// which codecs are supported. It's up to you to determine
+/// exact codecs during signaling.
+///
+/// GStreamer recording pipeline runs in separate thread.
+/// You're able to write buffers using `record_packet` method.
+///
+/// It's possible to make a full concatenated record
+/// (e.g. stream is over and you need to pass full record
+/// to some external service). Use method `finish_record`
+/// for that.
 #[derive(Debug)]
 pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
@@ -91,7 +122,7 @@ impl Recorder {
 
     pub fn finish_record(&self) -> Result<(), Error> {
         /*
-        GStreamer pipeline we creating here:
+        GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
             demux0.video_0 ! h264parse ! v.
@@ -233,6 +264,17 @@ impl Recorder {
         audio_codec: AudioCodec,
         recv: mpsc::Receiver<RecorderMsg>,
     ) {
+        /*
+        GStreamer pipeline we create here:
+
+            appsrc ! rtph264depay ! h264parse ! queue name=v
+            appsrc ! rtpopusdepay ! opusparse ! queue name=a
+
+            v. ! mux.video_0
+            a. ! mux.audio_0
+
+            matroskamux name=mux ! filesink location=${ROOM_ID}/${CURRENT_UNIX_TIMESTAMP}.mkv
+        */
         let pipeline = gst::Pipeline::new(None);
         let matroskamux = GstElement::MatroskaMux.make();
 
@@ -370,10 +412,6 @@ impl Recorder {
     }
 
     fn setup_video_elements(codec: VideoCodec) -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let rtpdepay = match codec {
-            VideoCodec::H264 => GstElement::RTPH264Depay.make(),
-        };
-
         let caps = gst::Caps::new_simple(
             "application/x-rtp",
             &[
@@ -386,14 +424,10 @@ impl Recorder {
 
         let src = Self::init_app_src(caps);
 
-        (src, rtpdepay, codec.new_parse_elem())
+        (src, codec.new_depay_elem(), codec.new_parse_elem())
     }
 
     fn setup_audio_elements(codec: AudioCodec) -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let rtpdepay = match codec {
-            AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
-        };
-
         let caps = gst::Caps::new_simple(
             "application/x-rtp",
             &[
@@ -406,7 +440,7 @@ impl Recorder {
 
         let src = Self::init_app_src(caps);
 
-        (src, rtpdepay, codec.new_parse_elem())
+        (src, codec.new_depay_elem(), codec.new_parse_elem())
     }
 
     fn run_pipeline_to_completion(pipeline: &gst::Pipeline) {
