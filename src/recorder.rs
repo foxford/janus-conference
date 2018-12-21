@@ -50,6 +50,7 @@ impl AudioCodec {
 }
 
 const MKV: &str = "mkv";
+const FULL_RECORD_FILENAME: &str = "full";
 
 #[derive(Debug)]
 struct RecorderMsg {
@@ -107,7 +108,11 @@ impl Recorder {
         let mux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let location = Self::generate_record_path(&self.room_id, Some(String::from("full")), MKV);
+        let location = Self::generate_record_path(
+            &self.room_id,
+            Some(String::from(FULL_RECORD_FILENAME)),
+            MKV,
+        );
         let location = location.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving full record to {}", location);
@@ -143,9 +148,22 @@ impl Recorder {
 
         let parts = fs::read_dir(&self.room_id)?;
 
-        for file in parts {
+        for entry in parts {
+            let file = entry?;
+
+            match file.path().as_path().file_stem() {
+                None => {
+                    continue;
+                }
+                Some(stem) => {
+                    if stem == FULL_RECORD_FILENAME {
+                        continue;
+                    }
+                }
+            }
+
             let filesrc = GstElement::Filesrc.make();
-            filesrc.set_property("location", &file?.path().to_string_lossy().to_value())?;
+            filesrc.set_property("location", &file.path().to_string_lossy().to_value())?;
 
             let demux = GstElement::MatroskaDemux.make();
             let video_parse = self.video_codec.new_parse_elem();
