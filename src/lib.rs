@@ -6,6 +6,7 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate toml;
 
 #[macro_use]
 extern crate lazy_static;
@@ -25,6 +26,7 @@ use std::os::raw::{c_char, c_int};
 use std::slice;
 use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
+use std::path::Path;
 
 use atom::AtomSetOnce;
 use failure::Error;
@@ -34,6 +36,7 @@ use janus::{
 };
 
 mod bidirectional_multimap;
+mod config;
 mod janus_callbacks;
 mod messages;
 mod recorder;
@@ -43,6 +46,7 @@ mod switchboard;
 mod utils;
 
 use messages::{JsepKind, StreamOperation};
+use config::Config;
 use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
@@ -57,16 +61,20 @@ struct Message {
 
 unsafe impl Send for Message {}
 
+const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
+
 #[derive(Debug)]
 struct State {
     pub message_channel: AtomSetOnce<Box<mpsc::SyncSender<Message>>>,
     pub switchboard: RwLock<Switchboard>,
+    pub config: AtomSetOnce<Box<Config>>,
 }
 
 lazy_static! {
     static ref STATE: State = State {
         message_channel: AtomSetOnce::empty(),
         switchboard: RwLock::new(Switchboard::new()),
+        config: AtomSetOnce::empty(),
     };
 }
 
@@ -104,7 +112,28 @@ fn report_error(res: Result<(), Error>) {
     }
 }
 
-extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
+fn init_config(config_path: *const c_char) -> Result<config::Config, Error> {
+    let config_path = unsafe { CStr::from_ptr(config_path) };
+    let config_path = config_path.to_str()?;
+    let config_path = Path::new(config_path);
+    let mut config_path = config_path.to_path_buf();
+    config_path.push(CONFIG_FILE_NAME);
+    janus_info!("[CONFERENCE] Reading config located at {}", config_path.to_string_lossy());
+
+    Ok(config::Config::from_path(&config_path)?)
+}
+
+extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
+    match init_config(config_path) {
+        Ok(config) => {
+            STATE.config.set_if_none(Box::new(config));
+        },
+        Err(err) => {
+            janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
+            return -1;
+        }
+    }
+
     janus_callbacks::init(callbacks);
 
     let (messages_tx, messages_rx) = mpsc::sync_channel(0);
@@ -387,7 +416,8 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
         match message {
             StreamOperation::Create { id } => {
                 {
-                    let recorder = Recorder::new(&id, VideoCodec::H264, AudioCodec::OPUS);
+                    let config = STATE.config.get().expect("Empty config?!");
+                    let recorder = Recorder::new(&config.recording.root_save_directory, &id, VideoCodec::H264, AudioCodec::OPUS);
 
                     switchboard.attach_recorder(received.session.clone(), recorder);
                 }

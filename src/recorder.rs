@@ -93,6 +93,7 @@ struct RecorderMsg {
 pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
     room_id: String,
+    save_root_dir: String,
     video_codec: VideoCodec,
     audio_codec: AudioCodec,
 }
@@ -100,12 +101,13 @@ pub struct Recorder {
 unsafe impl Sync for Recorder {}
 
 impl Recorder {
-    pub fn new(room_id: &str, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
+    pub fn new(save_root_dir: &str, room_id: &str, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
         let rec = Self {
             sender,
             room_id: String::from(room_id),
+            save_root_dir: String::from(save_root_dir),
             video_codec,
             audio_codec,
         };
@@ -141,8 +143,7 @@ impl Recorder {
         let mux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let location = Self::generate_record_path(
-            &self.room_id,
+        let location = self.generate_record_path(
             Some(String::from(FULL_RECORD_FILENAME)),
             MKV,
         );
@@ -276,7 +277,7 @@ impl Recorder {
         let matroskamux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let path = Self::generate_record_path(&self.room_id, None, MKV);
+        let path = self.generate_record_path(None, MKV);
         let path = path.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving video to {}", path);
@@ -374,9 +375,10 @@ impl Recorder {
         });
     }
 
-    fn generate_record_path(room_id: &str, filename: Option<String>, extension: &str) -> PathBuf {
+    fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
         let mut path = PathBuf::new();
-        path.push(room_id);
+        path.push(&self.save_root_dir);
+        path.push(&self.room_id);
 
         let filename = match filename {
             Some(filename) => filename,
