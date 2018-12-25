@@ -10,6 +10,8 @@ where you can send subscribers. So if you have 2 separate video
 streams you want to combine in a single client page you need to
 subscribe the client to 2 separate rooms.
 
+Plugin configuration is descibed [here](./configuration.md).
+
 ## Auth
 
 Plugin itself doesn't do any authentication/authorization so
