@@ -101,7 +101,12 @@ pub struct Recorder {
 unsafe impl Sync for Recorder {}
 
 impl Recorder {
-    pub fn new(save_root_dir: &str, room_id: &str, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
+    pub fn new(
+        save_root_dir: &str,
+        room_id: &str,
+        video_codec: VideoCodec,
+        audio_codec: AudioCodec,
+    ) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
         let rec = Self {
@@ -143,10 +148,7 @@ impl Recorder {
         let mux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let location = self.generate_record_path(
-            Some(String::from(FULL_RECORD_FILENAME)),
-            MKV,
-        );
+        let location = self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MKV);
         let location = location.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving full record to {}", location);

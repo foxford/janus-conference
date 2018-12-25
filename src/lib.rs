@@ -23,10 +23,10 @@ extern crate failure;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
+use std::path::Path;
 use std::slice;
 use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
-use std::path::Path;
 
 use atom::AtomSetOnce;
 use failure::Error;
@@ -118,7 +118,10 @@ fn init_config(config_path: *const c_char) -> Result<config::Config, Error> {
     let config_path = Path::new(config_path);
     let mut config_path = config_path.to_path_buf();
     config_path.push(CONFIG_FILE_NAME);
-    janus_info!("[CONFERENCE] Reading config located at {}", config_path.to_string_lossy());
+    janus_info!(
+        "[CONFERENCE] Reading config located at {}",
+        config_path.to_string_lossy()
+    );
 
     Ok(config::Config::from_path(&config_path)?)
 }
@@ -127,7 +130,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     match init_config(config_path) {
         Ok(config) => {
             STATE.config.set_if_none(Box::new(config));
-        },
+        }
         Err(err) => {
             janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
             return -1;
@@ -417,7 +420,12 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
             StreamOperation::Create { id } => {
                 {
                     let config = STATE.config.get().expect("Empty config?!");
-                    let recorder = Recorder::new(&config.recording.root_save_directory, &id, VideoCodec::H264, AudioCodec::OPUS);
+                    let recorder = Recorder::new(
+                        &config.recording.root_save_directory,
+                        &id,
+                        VideoCodec::H264,
+                        AudioCodec::OPUS,
+                    );
 
                     switchboard.attach_recorder(received.session.clone(), recorder);
                 }

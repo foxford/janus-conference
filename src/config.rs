@@ -1,6 +1,6 @@
-use std::path::Path;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 
 use failure::Error;
 use toml;
@@ -26,13 +26,16 @@ impl Config {
 
 #[derive(Deserialize, Debug)]
 pub struct Recording {
-    pub root_save_directory: String
+    pub root_save_directory: String,
 }
 
 impl Recording {
     pub fn check(&self) -> Result<(), Error> {
         if !Path::new(&self.root_save_directory).exists() {
-            return Err(format_err!("Recording: root_save_directory {} does not exist", self.root_save_directory));
+            return Err(format_err!(
+                "Recording: root_save_directory {} does not exist",
+                self.root_save_directory
+            ));
         }
 
         Ok(())
