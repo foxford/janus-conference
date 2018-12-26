@@ -100,6 +100,7 @@ pub struct Recorder {
     save_root_dir: String,
     video_codec: VideoCodec,
     audio_codec: AudioCodec,
+    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
 }
 
 unsafe impl Sync for Recorder {}
@@ -113,15 +114,17 @@ impl Recorder {
     ) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
-        let rec = Self {
+        let mut rec = Self {
             sender,
             room_id: String::from(room_id),
             save_root_dir: String::from(save_root_dir),
             video_codec,
             audio_codec,
+            recorder_thread_handle: None,
         };
 
-        rec.setup_recording(recv);
+        let handle = rec.setup_recording(recv);
+        rec.recorder_thread_handle = Some(handle);
 
         rec
     }
@@ -151,7 +154,17 @@ impl Recorder {
 
         self.sender.send(RecorderMsg::Stop)?;
 
-        thread::sleep_ms(10000);
+        let _res = self
+            .recorder_thread_handle
+            .take()
+            .ok_or_else(|| err_msg("Missing thread handle?!"))?
+            .join()
+            .map_err(|err| {
+                format_err!(
+                    "Error during finalization of current record part: {:?}",
+                    err
+                )
+            })?;
 
         let mux = GstElement::MP4Mux.make();
 
@@ -274,7 +287,10 @@ impl Recorder {
         Ok(gbuf)
     }
 
-    fn setup_recording(&self, recv: mpsc::Receiver<RecorderMsg>) {
+    fn setup_recording(
+        &self,
+        recv: mpsc::Receiver<RecorderMsg>,
+    ) -> thread::JoinHandle<Result<(), Error>> {
         /*
         GStreamer pipeline we create here:
 
@@ -357,7 +373,8 @@ impl Recorder {
                             audio_src.push_buffer(buf)
                         };
                         if res != gst::FlowReturn::Ok {
-                            janus_err!("[CONFERENCE] Error pushing buffer to AppSrc: {:?}", res);
+                            let err = format_err!("Error pushing buffer to AppSrc: {:?}", res);
+                            return Err(err);
                         };
                     }
                     RecorderMsg::Stop => {
@@ -368,18 +385,14 @@ impl Recorder {
 
             let res = video_src.end_of_stream();
             if res != gst::FlowReturn::Ok {
-                janus_err!(
-                    "[CONFERENCE] Error trying to finish video stream: {:?}",
-                    res
-                );
+                let err = format_err!("Error trying to finish video stream: {:?}", res);
+                return Err(err);
             }
 
             let res = audio_src.end_of_stream();
             if res != gst::FlowReturn::Ok {
-                janus_err!(
-                    "[CONFERENCE] Error trying to finish audio stream: {:?}",
-                    res
-                );
+                let err = format_err!("Error trying to finish audio stream: {:?}", res);
+                return Err(err);
             }
 
             let eos_ev = gst::Event::new_eos().build();
@@ -391,7 +404,9 @@ impl Recorder {
             mux.release_request_pad(&video_sink_pad);
 
             janus_info!("[CONFERENCE] End of record");
-        });
+
+            Ok(())
+        })
     }
 
     fn get_records_dir(&self) -> PathBuf {
