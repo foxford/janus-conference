@@ -13,6 +13,7 @@ read -r DOCKER_RUN_COMMAND <<-EOF
     cargo build \
     && (rm "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" || true) \
     && ln -s "${PROJECT_DIR}/target/debug/${PLUGIN}" "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" \
+    && cp janus.plugin.conference.toml ${JANUS_DIR}/etc/janus \
     && ${JANUS_DIR}/bin/janus --event-handlers --debug-level=5
 EOF
 
