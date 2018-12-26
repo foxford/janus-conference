@@ -62,12 +62,16 @@ impl AudioCodec {
 }
 
 const MKV: &str = "mkv";
+const MP4: &str = "mp4";
 const FULL_RECORD_FILENAME: &str = "full";
 
 #[derive(Debug)]
-struct RecorderMsg {
-    buf: gst::buffer::Buffer,
-    is_video: bool,
+enum RecorderMsg {
+    Stop,
+    Packet {
+        buf: gst::buffer::Buffer,
+        is_video: bool,
+    },
 }
 
 /// Records video from RTP stream identified by RoomId.
@@ -124,12 +128,12 @@ impl Recorder {
 
     pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
         let buf = Self::wrap_buf(buf)?;
-        let msg = RecorderMsg { buf, is_video };
+        let msg = RecorderMsg::Packet { buf, is_video };
 
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&self) -> Result<(), Error> {
+    pub fn finish_record(&mut self) -> Result<(), Error> {
         /*
         GStreamer pipeline we create here:
 
@@ -139,16 +143,20 @@ impl Recorder {
 
             ...
 
-            concat name=v ! queue ! matroskamux name=mux
+            concat name=v ! queue ! mp4mux name=mux
             concat name=a ! queue ! mux.audio_0
 
             mux. ! filesink location=concat.mkv
         */
 
-        let mux = GstElement::MatroskaMux.make();
+        self.sender.send(RecorderMsg::Stop)?;
+
+        thread::sleep_ms(10000);
+
+        let mux = GstElement::MP4Mux.make();
 
         let filesink = GstElement::Filesink.make();
-        let location = self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MKV);
+        let location = self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MP4);
         let location = location.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving full record to {}", location);
@@ -182,7 +190,8 @@ impl Recorder {
         let audio_sink_pad =
             Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
 
-        let parts = fs::read_dir(&self.room_id)?;
+        let records_dir = self.get_records_dir();
+        let parts = fs::read_dir(&records_dir)?;
 
         for entry in parts {
             let file = entry?;
@@ -242,6 +251,8 @@ impl Recorder {
         mux.release_request_pad(&video_sink_pad);
         mux.release_request_pad(&audio_sink_pad);
 
+        janus_info!("[CONFERENCE] End of full record");
+
         Ok(())
     }
 
@@ -276,7 +287,7 @@ impl Recorder {
             matroskamux name=mux ! filesink location=${ROOM_ID}/${CURRENT_UNIX_TIMESTAMP}.mkv
         */
         let pipeline = gst::Pipeline::new(None);
-        let matroskamux = GstElement::MatroskaMux.make();
+        let mux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
         let path = self.generate_record_path(None, MKV);
@@ -289,7 +300,7 @@ impl Recorder {
             .expect("failed to set location prop on filesink?!");
 
         pipeline
-            .add_many(&[&matroskamux, &filesink])
+            .add_many(&[&mux, &filesink])
             .expect("Failed to add elems to pipeline");
 
         let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(self.video_codec);
@@ -322,16 +333,15 @@ impl Recorder {
             }
         }
 
-        matroskamux
-            .link(&filesink)
+        mux.link(&filesink)
             .expect("Failed to link matroskamux -> filesink");
 
         let video_sink_pad =
-            Self::link_static_and_request_pads((&video_queue, "src"), (&matroskamux, "video_%u"))
+            Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))
                 .expect("Failed to link video -> mux");
 
         let audio_sink_pad =
-            Self::link_static_and_request_pads((&audio_queue, "src"), (&matroskamux, "audio_%u"))
+            Self::link_static_and_request_pads((&audio_queue, "src"), (&mux, "audio_%u"))
                 .expect("Failed to link audio -> mux");
 
         let res = pipeline.set_state(gst::State::Playing);
@@ -339,14 +349,21 @@ impl Recorder {
 
         thread::spawn(move || {
             for msg in recv.iter() {
-                let res = if msg.is_video {
-                    video_src.push_buffer(msg.buf)
-                } else {
-                    audio_src.push_buffer(msg.buf)
-                };
-                if res != gst::FlowReturn::Ok {
-                    janus_err!("[CONFERENCE] Error pushing buffer to AppSrc: {:?}", res);
-                };
+                match msg {
+                    RecorderMsg::Packet { is_video, buf } => {
+                        let res = if is_video {
+                            video_src.push_buffer(buf)
+                        } else {
+                            audio_src.push_buffer(buf)
+                        };
+                        if res != gst::FlowReturn::Ok {
+                            janus_err!("[CONFERENCE] Error pushing buffer to AppSrc: {:?}", res);
+                        };
+                    }
+                    RecorderMsg::Stop => {
+                        break;
+                    }
+                }
             }
 
             let res = video_src.end_of_stream();
@@ -370,17 +387,23 @@ impl Recorder {
 
             Self::run_pipeline_to_completion(&pipeline);
 
-            matroskamux.release_request_pad(&audio_sink_pad);
-            matroskamux.release_request_pad(&video_sink_pad);
+            mux.release_request_pad(&audio_sink_pad);
+            mux.release_request_pad(&video_sink_pad);
 
             janus_info!("[CONFERENCE] End of record");
         });
     }
 
-    fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
+    fn get_records_dir(&self) -> PathBuf {
         let mut path = PathBuf::new();
         path.push(&self.save_root_dir);
         path.push(&self.room_id);
+
+        path
+    }
+
+    fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
+        let mut path = self.get_records_dir();
 
         let filename = match filename {
             Some(filename) => filename,
@@ -500,6 +523,7 @@ enum GstElement {
     Concat,
     MatroskaMux,
     MatroskaDemux,
+    MP4Mux,
     OpusParse,
     RTPOpusDepay,
     H264Parse,
@@ -516,6 +540,7 @@ impl GstElement {
             GstElement::Concat => "concat",
             GstElement::MatroskaMux => "matroskamux",
             GstElement::MatroskaDemux => "matroskademux",
+            GstElement::MP4Mux => "mp4mux",
             GstElement::OpusParse => "opusparse",
             GstElement::RTPOpusDepay => "rtpopusdepay",
             GstElement::H264Parse => "h264parse",
