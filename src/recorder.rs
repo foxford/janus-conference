@@ -123,8 +123,8 @@ impl Recorder {
             recorder_thread_handle: None,
         };
 
-        // let handle = rec.setup_recording(recv);
-        // rec.recorder_thread_handle = Some(handle);
+        let handle = rec.setup_recording(recv);
+        rec.recorder_thread_handle = Some(handle);
 
         rec
     }
@@ -141,32 +141,30 @@ impl Recorder {
         GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! h264parse ! v.
-            demux0.audio_0 ! opusparse ! a.
+            demux0.video_0 ! queue ! h264parse ! v.
+            demux0.audio_0 ! queue ! opusparse ! a.
 
             ...
 
             concat name=v ! queue ! mp4mux name=mux
             concat name=a ! queue ! mux.audio_0
 
-            mux. ! filesink location=concat.mkv
+            mux. ! filesink location=full.mp4
         */
 
-        // self.sender.send(RecorderMsg::Stop)?;
+        self.sender.send(RecorderMsg::Stop)?;
 
-        // let _res = self
-        //     .recorder_thread_handle
-        //     .take()
-        //     .ok_or_else(|| err_msg("Missing thread handle?!"))?
-        //     .join()
-        //     .map_err(|err| {
-        //         format_err!(
-        //             "Error during finalization of current record part: {:?}",
-        //             err
-        //         )
-        //     })?;
-
-        // thread::sleep_ms(10000);
+        let _res = self
+            .recorder_thread_handle
+            .take()
+            .ok_or_else(|| err_msg("Missing thread handle?!"))?
+            .join()
+            .map_err(|err| {
+                format_err!(
+                    "Error during finalization of current record part: {:?}",
+                    err
+                )
+            })?;
 
         let mux = GstElement::MP4Mux.make();
 
@@ -206,10 +204,12 @@ impl Recorder {
             Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
 
         let records_dir = self.get_records_dir();
-        let parts = fs::read_dir(&records_dir)?;
+        let mut parts: Vec<fs::DirEntry> =
+            fs::read_dir(&records_dir)?.filter_map(|r| r.ok()).collect();
 
-        for entry in parts {
-            let file = entry?;
+        parts.sort_by_key(|f| f.path());
+
+        for file in parts {
             let metadata = file.metadata()?;
 
             if metadata.is_dir() {
@@ -218,30 +218,40 @@ impl Recorder {
 
             match file.path().as_path().file_stem() {
                 None => {
-                    janus_info!("{}: file stem - None", file.path().to_string_lossy());
                     continue;
                 }
                 Some(stem) => {
-                    janus_info!("{}: file stem - {}", file.path().to_string_lossy(), stem.to_string_lossy());
                     if stem.to_string_lossy().starts_with(".") || stem == FULL_RECORD_FILENAME {
                         continue;
                     }
                 }
             }
 
-            janus_info!("processing file {}", file.path().to_string_lossy());
-
             let filesrc = GstElement::Filesrc.make();
             filesrc.set_property("location", &file.path().to_string_lossy().to_value())?;
 
             let demux = GstElement::MatroskaDemux.make();
-            let video_parse = self.video_codec.new_parse_elem();
-            let audio_parse = self.audio_codec.new_parse_elem();
 
-            pipeline.add_many(&[&filesrc, &demux, &video_parse, &audio_parse])?;
+            let video_parse = self.video_codec.new_parse_elem();
+            let video_queue = GstElement::Queue.make();
+
+            let audio_parse = self.audio_codec.new_parse_elem();
+            let audio_queue = GstElement::Queue.make();
+
+            pipeline.add_many(&[
+                &filesrc,
+                &demux,
+                &video_parse,
+                &audio_parse,
+                &video_queue,
+                &audio_queue,
+            ])?;
 
             filesrc.link(&demux)?;
+            video_queue.link(&video_parse)?;
             video_parse.link(&concat_video)?;
+
+            audio_queue.link(&audio_parse)?;
             audio_parse.link(&concat_audio)?;
 
             demux.connect("pad-added", true, move |args| {
@@ -250,8 +260,8 @@ impl Recorder {
                     .expect("Second argument is not a Pad");
 
                 let sink = match pad.get_name().as_ref() {
-                    "video_0" => Some(&video_parse),
-                    "audio_0" => Some(&audio_parse),
+                    "video_0" => Some(&video_queue),
+                    "audio_0" => Some(&audio_queue),
                     _ => None,
                 };
 
@@ -266,10 +276,9 @@ impl Recorder {
                 None
             })?;
         }
-        janus_info!("0");
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
-        janus_info!("1");
+
         Self::run_pipeline_to_completion(&pipeline);
 
         mux.release_request_pad(&video_sink_pad);
@@ -431,9 +440,9 @@ impl Recorder {
     fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
         let mut path = self.get_records_dir();
 
-        if let Err(err) =  fs::create_dir(&path) {
+        if let Err(err) = fs::create_dir(&path) {
             match err.kind() {
-                ::std::io::ErrorKind::AlreadyExists => {},
+                ::std::io::ErrorKind::AlreadyExists => {}
                 err => {
                     panic!("Failed to create directory for record: {:?}", err);
                 }
@@ -511,8 +520,6 @@ impl Recorder {
             if let gst::MessageView::Eos(..) = msg.view() {
                 main_loop_clone.quit();
             }
-
-            janus_info!("{:?}", msg);
 
             glib::Continue(true)
         });
