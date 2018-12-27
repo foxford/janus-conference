@@ -420,6 +420,15 @@ impl Recorder {
     fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
         let mut path = self.get_records_dir();
 
+        if let Err(err) =  fs::create_dir(&path) {
+            match err.kind() {
+                ::std::io::ErrorKind::AlreadyExists => {},
+                err => {
+                    panic!("Failed to create directory for record: {:?}", err);
+                }
+            }
+        }
+
         let filename = match filename {
             Some(filename) => filename,
             None => SystemTime::now()
