@@ -123,8 +123,8 @@ impl Recorder {
             recorder_thread_handle: None,
         };
 
-        let handle = rec.setup_recording(recv);
-        rec.recorder_thread_handle = Some(handle);
+        // let handle = rec.setup_recording(recv);
+        // rec.recorder_thread_handle = Some(handle);
 
         rec
     }
@@ -152,19 +152,21 @@ impl Recorder {
             mux. ! filesink location=concat.mkv
         */
 
-        self.sender.send(RecorderMsg::Stop)?;
+        // self.sender.send(RecorderMsg::Stop)?;
 
-        let _res = self
-            .recorder_thread_handle
-            .take()
-            .ok_or_else(|| err_msg("Missing thread handle?!"))?
-            .join()
-            .map_err(|err| {
-                format_err!(
-                    "Error during finalization of current record part: {:?}",
-                    err
-                )
-            })?;
+        // let _res = self
+        //     .recorder_thread_handle
+        //     .take()
+        //     .ok_or_else(|| err_msg("Missing thread handle?!"))?
+        //     .join()
+        //     .map_err(|err| {
+        //         format_err!(
+        //             "Error during finalization of current record part: {:?}",
+        //             err
+        //         )
+        //     })?;
+
+        // thread::sleep_ms(10000);
 
         let mux = GstElement::MP4Mux.make();
 
@@ -208,17 +210,26 @@ impl Recorder {
 
         for entry in parts {
             let file = entry?;
+            let metadata = file.metadata()?;
+
+            if metadata.is_dir() {
+                continue;
+            }
 
             match file.path().as_path().file_stem() {
                 None => {
+                    janus_info!("{}: file stem - None", file.path().to_string_lossy());
                     continue;
                 }
                 Some(stem) => {
-                    if stem == FULL_RECORD_FILENAME {
+                    janus_info!("{}: file stem - {}", file.path().to_string_lossy(), stem.to_string_lossy());
+                    if stem.to_string_lossy().starts_with(".") || stem == FULL_RECORD_FILENAME {
                         continue;
                     }
                 }
             }
+
+            janus_info!("processing file {}", file.path().to_string_lossy());
 
             let filesrc = GstElement::Filesrc.make();
             filesrc.set_property("location", &file.path().to_string_lossy().to_value())?;
@@ -255,10 +266,10 @@ impl Recorder {
                 None
             })?;
         }
-
+        janus_info!("0");
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
-
+        janus_info!("1");
         Self::run_pipeline_to_completion(&pipeline);
 
         mux.release_request_pad(&video_sink_pad);
@@ -500,6 +511,8 @@ impl Recorder {
             if let gst::MessageView::Eos(..) = msg.view() {
                 main_loop_clone.quit();
             }
+
+            janus_info!("{:?}", msg);
 
             glib::Continue(true)
         });
