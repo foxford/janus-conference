@@ -18,6 +18,10 @@ extern crate gstreamer;
 extern crate gstreamer_app;
 extern crate gstreamer_base;
 
+extern crate rusoto_core;
+extern crate rusoto_credential;
+extern crate rusoto_s3;
+
 #[macro_use]
 extern crate failure;
 
@@ -44,12 +48,14 @@ mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
+mod uploader;
 
 use messages::{JsepKind, StreamOperation};
 use config::Config;
 use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
+use uploader::Uploader;
 
 #[derive(Debug)]
 struct Message {
@@ -68,6 +74,7 @@ struct State {
     pub message_channel: AtomSetOnce<Box<mpsc::SyncSender<Message>>>,
     pub switchboard: RwLock<Switchboard>,
     pub config: AtomSetOnce<Box<Config>>,
+    pub uploader: AtomSetOnce<Box<Uploader>>,
 }
 
 lazy_static! {
@@ -75,6 +82,7 @@ lazy_static! {
         message_channel: AtomSetOnce::empty(),
         switchboard: RwLock::new(Switchboard::new()),
         config: AtomSetOnce::empty(),
+        uploader: AtomSetOnce::empty(),
     };
 }
 
@@ -133,6 +141,17 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
         }
         Err(err) => {
             janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
+            return -1;
+        }
+    }
+
+    let config = STATE.config.get().expect("Empty config?!");
+    match Uploader::new(config.uploading.clone()) {
+        Ok(uploader) => {
+            STATE.uploader.set_if_none(Box::new(uploader));
+        }
+        Err(err) => {
+            janus_fatal!("[CONFERENCE] Failed to init uploader: {}", err);
             return -1;
         }
     }

@@ -20,6 +20,9 @@ gstreamer = "0.12"
 gstreamer-app = "0.12"
 gstreamer-base = "0.12"
 glib = "0.6"
+rusoto_core = "0.36"
+rusoto_s3 = "0.36"
+rusoto_credential = "0.15"
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
