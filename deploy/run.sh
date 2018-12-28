@@ -20,9 +20,9 @@ else
 
     ## Initializing deploy for Travis CI
 
-    if [[ "${TRAVIS_TAG}" ]]; then
+    if [[ "${PRODUCTION_TAG}" ]]; then
         NAMESPACE='production'
-        DOCKER_IMAGE_TAG="${TRAVIS_TAG}"
+        DOCKER_IMAGE_TAG="${PRODUCTION_TAG}"
     else
         NAMESPACE='staging'
         DOCKER_IMAGE_TAG="$(git rev-parse --short HEAD)"

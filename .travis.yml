@@ -37,6 +37,6 @@ jobs:
 stages:
   - name: check
   - name: deploy
-    if: (branch = master AND type = push) OR tag IS present
+    if: branch = master AND type = push
 notifications:
   email: false
