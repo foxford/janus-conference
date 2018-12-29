@@ -19,8 +19,12 @@ extern crate gstreamer_app;
 extern crate gstreamer_base;
 
 extern crate rusoto_core;
-extern crate rusoto_credential;
 extern crate rusoto_s3;
+extern crate s4;
+extern crate futures;
+extern crate futures_fs;
+extern crate env_logger;
+extern crate fallible_iterator;
 
 #[macro_use]
 extern crate failure;
@@ -148,10 +152,12 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     let config = STATE.config.get().expect("Empty config?!");
     match Uploader::new(config.uploading.clone()) {
         Ok(uploader) => {
+            uploader.upload_file(&Path::new("/build/records/demo-conference-room/full.mp4"), &config.uploading.bucket).unwrap();
+
             STATE.uploader.set_if_none(Box::new(uploader));
         }
         Err(err) => {
-            janus_fatal!("[CONFERENCE] Failed to init uploader: {}", err);
+            janus_fatal!("[CONFERENCE] Failed to init uploader: {:?}", err);
             return -1;
         }
     }
