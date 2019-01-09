@@ -40,8 +40,6 @@ impl Uploader {
 
         let client = s4::new_s3client_with_credentials(region, config.access_key, config.secret_key)?;
 
-        client.iter_objects(&config.bucket).next()?;
-
         Ok(Self {
             client,
             fs_pool: FsPool::default(),
@@ -56,6 +54,7 @@ impl Uploader {
         let req = PutObjectRequest {
             bucket: String::from(bucket),
             // body: Some(streaming_body),
+            // TODO: filename as ${FILENAME}.source.mp4
             key: String::from("demo-conference-room.source.mp4"),
             ..Default::default()
         };
