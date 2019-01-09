@@ -32,7 +32,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{JsepKind, RTCOperation};
+use messages::{JsepKind, StreamOperation};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -287,7 +287,7 @@ fn handle_message_async(received: Message) -> JanusResult {
     if let Some(message) = received.message {
         let message = message.to_libcstring(JanssonEncodingFlags::empty());
         let message = message.to_string_lossy();
-        let message: RTCOperation =
+        let message: StreamOperation =
             serde_json::from_str(&message).expect("Failed to parse message");
 
         let mut switchboard = STATE
@@ -296,12 +296,8 @@ fn handle_message_async(received: Message) -> JanusResult {
             .expect("Switchboard lock poisoned; can't continue");
 
         match message {
-            RTCOperation::Create { room_id } => {
-                switchboard.create_room(room_id, received.session.clone())
-            }
-            RTCOperation::Read { room_id } => {
-                switchboard.join_room(room_id, received.session.clone())
-            }
+            StreamOperation::Create { id } => switchboard.create_room(id, received.session.clone()),
+            StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
         }
     }
 

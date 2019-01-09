@@ -1,4 +1,4 @@
-# rtc.create
+# stream.create
 
 Creates a real-time connection in order to initialize signaling phase and send media.
 
@@ -10,8 +10,8 @@ You can send a request over [any configured Janus transport](https://janus.conf.
 
 Name         | Type   | Default    | Description
 ------------ | ------ | ---------- | -----------
-body.method  | String | _required_ | Always `rtc.create`
-body.room_id | String | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
+body.method  | String | _required_ | Always `stream.create`
+body.id | String | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
 jsep.type    | String | _required_ | Always `offer`
 jsep.sdp     | String | _required_ | An SDP offer
 

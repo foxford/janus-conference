@@ -9,9 +9,9 @@ pub enum JsepKind {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "method")]
-pub enum RTCOperation {
-    #[serde(rename = "rtc.create")]
-    Create { room_id: RoomId },
-    #[serde(rename = "rtc.read")]
-    Read { room_id: RoomId },
+pub enum StreamOperation {
+    #[serde(rename = "stream.create")]
+    Create { id: RoomId },
+    #[serde(rename = "stream.read")]
+    Read { id: RoomId },
 }
