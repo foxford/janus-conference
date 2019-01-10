@@ -2,5 +2,5 @@
 
 - [Overview](./overview.md)
 - [API](./api.md)
-  * [rtc.create](./api.rtc.create.md)
-  * [rtc.read](./api.rtc.read.md)
+  * [stream.create](./api.stream.create.md)
+  * [stream.read](./api.stream.read.md)
