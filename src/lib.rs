@@ -12,6 +12,9 @@ extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
 
+#[macro_use]
+extern crate failure;
+
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::slice;
@@ -19,9 +22,10 @@ use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
 use std::thread;
 
 use atom::AtomSetOnce;
+use failure::Error;
 use janus::{
-    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, JanusResult, LibraryMetadata,
-    Plugin, PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
+    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin,
+    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
@@ -84,6 +88,15 @@ fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     }
 }
 
+fn report_error(res: Result<(), Error>) {
+    match res {
+        Ok(_) => {}
+        Err(err) => {
+            janus_err!("[CONFERENCE] {}", err);
+        }
+    }
+}
+
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
     janus_callbacks::init(callbacks);
 
@@ -115,14 +128,22 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     match unsafe { Session::associate(handle, initial_state) } {
         Ok(sess) => {
             janus_info!("[CONFERENCE] Initializing session {:p}...", sess.handle);
-            STATE
-                .switchboard
-                .write()
-                .expect("Switchboard is poisoned")
-                .connect(sess)
+            let mut switchboard = STATE.switchboard.write();
+
+            match switchboard {
+                Ok(mut switchboard) => {
+                    switchboard.connect(sess);
+                }
+                Err(err) => {
+                    janus_err!("[CONFERENCE] {}", err);
+                    unsafe {
+                        *error = -1;
+                    }
+                }
+            }
         }
         Err(e) => {
-            janus_err!("{}", e);
+            janus_err!("[CONFERENCE] {}", e);
             unsafe {
                 *error = -1;
             }
@@ -138,8 +159,19 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
                 sess.handle
             );
 
-            let mut switchboard = STATE.switchboard.write().expect("Switchboard is poisoned");
-            switchboard.disconnect(&sess);
+            let mut switchboard = STATE.switchboard.write();
+
+            match switchboard {
+                Ok(mut switchboard) => {
+                    switchboard.disconnect(&sess);
+                }
+                Err(err) => {
+                    janus_err!("[CONFERENCE] {}", err);
+                    unsafe {
+                        *error = -1;
+                    }
+                }
+            }
         }
         Err(e) => {
             janus_err!("{}", e);
@@ -184,44 +216,66 @@ extern "C" fn handle_message(
     }
 }
 
-extern "C" fn setup_media(handle: *mut PluginSession) {
-    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null!") };
-    let switchboard = STATE.switchboard.read().expect("Switchboard is poisoned");
+fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
+    let sess = unsafe { Session::from_ptr(handle)? };
+    let switchboard = STATE
+        .switchboard
+        .read()
+        .map_err(|err| format_err!("{}", err))?;
+
     send_fir(switchboard.publisher_to(&sess));
 
     janus_info!(
         "[CONFERENCE] WebRTC media is now available on {:p}.",
         handle
     );
+
+    Ok(())
+}
+
+extern "C" fn setup_media(handle: *mut PluginSession) {
+    report_error(setup_media_impl(handle));
 }
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
     janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
 }
 
-extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null") };
-    let switchboard = STATE
-        .switchboard
-        .read()
-        .expect("Switchboard lock poisoned; can't continue");
-    for subscriber in switchboard.subscribers_to(&sess) {
-        janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
-    }
-}
-
-extern "C" fn incoming_rtcp(
+fn incoming_rtp_impl(
     handle: *mut PluginSession,
     video: c_int,
     buf: *mut c_char,
     len: c_int,
-) {
-    let sess = unsafe { Session::from_ptr(handle).expect("Session can't be null") };
+) -> Result<(), Error> {
+    let sess = unsafe { Session::from_ptr(handle)? };
+    let switchboard = STATE
+        .switchboard
+        .read()
+        .map_err(|err| format_err!("{}", err))?;
+
+    for subscriber in switchboard.subscribers_to(&sess) {
+        janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
+    }
+
+    Ok(())
+}
+
+extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+    report_error(incoming_rtp_impl(handle, video, buf, len));
+}
+
+fn incoming_rtcp_impl(
+    handle: *mut PluginSession,
+    video: c_int,
+    buf: *mut c_char,
+    len: c_int,
+) -> Result<(), Error> {
+    let sess = unsafe { Session::from_ptr(handle)? };
 
     let switchboard = STATE
         .switchboard
         .read()
-        .expect("Switchboard lock poisoned; can't continue");
+        .map_err(|err| format_err!("{}", err))?;
 
     let packet = unsafe { slice::from_raw_parts(buf, len as usize) };
 
@@ -238,6 +292,17 @@ extern "C" fn incoming_rtcp(
             }
         }
     }
+
+    Ok(())
+}
+
+extern "C" fn incoming_rtcp(
+    handle: *mut PluginSession,
+    video: c_int,
+    buf: *mut c_char,
+    len: c_int,
+) {
+    report_error(incoming_rtcp_impl(handle, video, buf, len));
 }
 
 extern "C" fn incoming_data(_handle: *mut PluginSession, _buf: *mut c_char, _len: c_int) {
@@ -274,7 +339,7 @@ const PLUGIN: Plugin = build_plugin!(
 
 export_plugin!(&PLUGIN);
 
-fn handle_message_async(received: Message) -> JanusResult {
+fn handle_message_async(received: Message) -> Result<(), Error> {
     match received.jsep {
         Some(jsep) => {
             handle_jsep(&received.session, received.transaction, &jsep)?;
@@ -287,13 +352,12 @@ fn handle_message_async(received: Message) -> JanusResult {
     if let Some(message) = received.message {
         let message = message.to_libcstring(JanssonEncodingFlags::empty());
         let message = message.to_string_lossy();
-        let message: StreamOperation =
-            serde_json::from_str(&message).expect("Failed to parse message");
+        let message: StreamOperation = serde_json::from_str(&message)?;
 
         let mut switchboard = STATE
             .switchboard
             .write()
-            .expect("Switchboard lock poisoned; can't continue");
+            .map_err(|err| format_err!("{}", err))?;
 
         match message {
             StreamOperation::Create { id } => switchboard.create_room(id, received.session.clone()),
@@ -304,17 +368,18 @@ fn handle_message_async(received: Message) -> JanusResult {
     Ok(())
 }
 
-fn handle_jsep(session: &Session, transaction: *mut c_char, jsep: &JanssonValue) -> JanusResult {
+fn handle_jsep(
+    session: &Session,
+    transaction: *mut c_char,
+    jsep: &JanssonValue,
+) -> Result<(), Error> {
     let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
     let jsep = jsep.to_string_lossy();
-    let jsep_json: JsepKind = serde_json::from_str(&jsep).expect("Failed to parse JSEP kind");
+    let jsep_json: JsepKind = serde_json::from_str(&jsep)?;
 
     let answer: serde_json::Value = match jsep_json {
         JsepKind::Offer { sdp } => {
-            let offer = sdp::Sdp::parse(
-                &CString::new(sdp).expect("Failed to create string from SDP offer"),
-            )
-            .expect("Failed to parse SDP offer");
+            let offer = sdp::Sdp::parse(&CString::new(sdp)?)?;
             janus_verb!("[CONFERENCE] offer: {:?}", offer);
 
             let answer = answer_sdp!(offer);
@@ -322,8 +387,7 @@ fn handle_jsep(session: &Session, transaction: *mut c_char, jsep: &JanssonValue)
 
             let answer = answer.to_glibstring().to_string_lossy().to_string();
 
-            serde_json::to_value(JsepKind::Answer { sdp: answer })
-                .expect("Failed to create JSON string from SDP answer")
+            serde_json::to_value(JsepKind::Answer { sdp: answer })?
         }
         JsepKind::Answer { .. } => unreachable!(),
     };
@@ -331,16 +395,15 @@ fn handle_jsep(session: &Session, transaction: *mut c_char, jsep: &JanssonValue)
     let event_json = json!({ "result": "ok" });
     let mut event_serde: JanssonValue =
         JanssonValue::from_str(&event_json.to_string(), JanssonDecodingFlags::empty())
-            .expect("Failed to create Jansson value with event");
+            .map_err(|err| format_err!("{}", err))?;
     let event = event_serde.as_mut_ref();
 
     let mut jsep_serde: JanssonValue =
         JanssonValue::from_str(&answer.to_string(), JanssonDecodingFlags::empty())
-            .expect("Failed to create Jansson value with JSEP");
+            .map_err(|err| format_err!("{}", err))?;
     let jsep = jsep_serde.as_mut_ref();
 
-    janus_callbacks::push_event(session.handle, transaction, event, jsep)
-        .expect("Pushing event has failed");
+    janus_callbacks::push_event(session.handle, transaction, event, jsep)?;
 
     Ok(())
 }
