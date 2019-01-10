@@ -161,8 +161,8 @@ function publisherGotLocalDescription(desc) {
         "handle_id": pluginHandleId,
         "transaction": getTransactionId(),
         "body": {
-            "method": "rtc.create",
-            "room_id": roomId
+            "method": "stream.create",
+            "id": roomId
         },
         "jsep": {
             "type": "offer",
@@ -187,8 +187,8 @@ function listenerGotLocalDescription(desc) {
         "handle_id": pluginHandleId,
         "transaction": getTransactionId(),
         "body": {
-            "method": "rtc.read",
-            "room_id": roomId
+            "method": "stream.read",
+            "id": roomId
         },
         "jsep": {
             "type": "offer",
