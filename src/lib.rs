@@ -12,6 +12,9 @@ extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
 
+#[macro_use]
+extern crate failure;
+
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::slice;
