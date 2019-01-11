@@ -25,7 +25,7 @@ var janusHost = "ws://localhost:8188";
 var roomId = "demo-conference-room";
 
 function startTranslation() {
-    navigator.mediaDevices.getUserMedia({ video: true })
+    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
         .then(stream => {
             localStream = stream;
             localVideo.srcObject = stream;
