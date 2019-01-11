@@ -389,15 +389,6 @@ fn handle_jsep(
                 sdp::OfferAnswerParameters::VideoCodec,
                 sdp::VideoCodec::H264.to_cstr().as_ptr()
             );
-            let video_payload_type = answer.get_payload_type(sdp::VideoCodec::H264.to_cstr());
-            if let Some(pt) = video_payload_type {
-                let settings = CString::new(format!(
-                    "{} profile-level-id=42e01f; packetization-mode=1",
-                    pt
-                ))?;
-                answer.add_attribute(pt, c_str!("fmtp"), &settings);
-            }
-
             janus_verb!("[CONFERENCE] answer: {:?}", answer);
 
             let answer = answer.to_glibstring().to_string_lossy().to_string();
