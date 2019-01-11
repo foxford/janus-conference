@@ -27,6 +27,8 @@ docker run ${DOCKER_RUN_OPTIONS} \
     -v $(pwd):${PROJECT_DIR} \
     -v ${BUILD_CACHE_VOLUME}:/usr/local/cargo \
     -p ${DOCKER_WS_PORT}:8188 \
+    -p 7088:7088 \
+    -p 30000-30020:30000-30020 \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
     ${DOCKER_CONTAINER_NAME} \
     /bin/bash -c "set -x && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"
