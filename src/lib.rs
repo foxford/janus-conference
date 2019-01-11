@@ -18,13 +18,10 @@ extern crate gstreamer;
 extern crate gstreamer_app;
 extern crate gstreamer_base;
 
-extern crate rusoto_core;
-extern crate rusoto_s3;
-extern crate s4;
 extern crate futures;
 extern crate futures_fs;
-extern crate env_logger;
-extern crate fallible_iterator;
+extern crate rusoto_core;
+extern crate rusoto_s3;
 
 #[macro_use]
 extern crate failure;
@@ -54,8 +51,8 @@ mod switchboard;
 mod utils;
 mod uploader;
 
-use messages::{JsepKind, StreamOperation};
 use config::Config;
+use messages::{JsepKind, StreamOperation};
 use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
@@ -152,8 +149,6 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     let config = STATE.config.get().expect("Empty config?!");
     match Uploader::new(config.uploading.clone()) {
         Ok(uploader) => {
-            uploader.upload_file(&Path::new("/build/records/demo-conference-room/full.mp4"), &config.uploading.bucket).unwrap();
-
             STATE.uploader.set_if_none(Box::new(uploader));
         }
         Err(err) => {
@@ -457,9 +452,7 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
 
                 switchboard.create_room(id, received.session.clone());
             }
-            StreamOperation::Read { id } => {
-                switchboard.join_room(id, received.session.clone())
-            }
+            StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
         }
     }
 

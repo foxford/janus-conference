@@ -1,15 +1,12 @@
 use std::fmt;
-use std::path::Path;
 use std::fs::File;
+use std::path::Path;
 
 use failure::Error;
-use rusoto_core::{request::HttpClient, Region, ByteStream, credential::StaticProvider};
-use rusoto_s3::{PutObjectRequest, S3Client, S3};
-use s4;
-use s4::S4;
-use futures_fs::FsPool;
 use futures::Stream;
-use fallible_iterator::FallibleIterator;
+use futures_fs::FsPool;
+use rusoto_core::{credential::StaticProvider, request::HttpClient, ByteStream, Region};
+use rusoto_s3::{PutObjectRequest, S3Client, S3};
 
 use config::Uploading as UploadingConfig;
 
@@ -28,17 +25,14 @@ impl fmt::Debug for Uploader {
 
 impl Uploader {
     pub fn new(config: UploadingConfig) -> Result<Self, Error> {
-        env_logger::init();
-        janus_info!("{:?}", config);
-
-        // let request_dispatcher = HttpClient::new()?;
-        // let credential_provider = StaticProvider::new_minimal(config.access_key, config.secret_key);
+        let request_dispatcher = HttpClient::new()?;
+        let credential_provider = StaticProvider::new_minimal(config.access_key, config.secret_key);
         let region = Region::Custom {
             name: config.region,
             endpoint: config.endpoint,
         };
 
-        let client = s4::new_s3client_with_credentials(region, config.access_key, config.secret_key)?;
+        let client = S3Client::new_with(request_dispatcher, credential_provider, region);
 
         Ok(Self {
             client,
@@ -46,19 +40,23 @@ impl Uploader {
         })
     }
 
-    pub fn upload_file(&self, file: &Path, bucket: &str) -> Result<(), Error> {
-        // let file = File::open(file)?;
-        // let read = self.fs_pool.read_file(file, Default::default()).map(|buf| buf.to_vec());
-        // let streaming_body = ByteStream::new(read);
+    pub fn upload_file(&self, file: &Path, bucket: &str, room_id: &str) -> Result<(), Error> {
+        let file = File::open(file)?;
+        let read = self
+            .fs_pool
+            .read_file(file, Default::default())
+            .map(|buf| buf.to_vec());
+        let streaming_body = ByteStream::new(read);
+
+        let key = format!("{}.source.mp4", room_id);
 
         let req = PutObjectRequest {
             bucket: String::from(bucket),
-            // body: Some(streaming_body),
-            // TODO: filename as ${FILENAME}.source.mp4
-            key: String::from("demo-conference-room.source.mp4"),
+            body: Some(streaming_body),
+            key: key,
             ..Default::default()
         };
-        self.client.upload_from_file(file, req)?;
+        self.client.put_object(req).sync()?;
         Ok(())
     }
 }
