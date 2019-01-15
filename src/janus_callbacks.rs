@@ -1,6 +1,8 @@
 use std::os::raw::{c_char, c_int};
 
-use janus::{JanusError, JanusResult, PluginCallbacks, PluginSession, RawJanssonValue, JanssonValue};
+use janus::{
+    JanssonValue, JanusError, JanusResult, PluginCallbacks, PluginSession, RawJanssonValue,
+};
 
 use super::PLUGIN;
 
@@ -44,5 +46,6 @@ pub fn push_event(
 }
 
 fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue {
-    val.and_then(|val| Some(val.into_raw())).unwrap_or(std::ptr::null_mut())
+    val.and_then(|val| Some(val.into_raw()))
+        .unwrap_or(std::ptr::null_mut())
 }

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use failure::{err_msg, Error};
+
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::RoomId;
 use session::Session;
@@ -43,10 +45,16 @@ impl Switchboard {
         self.publishers.insert(room_id, publisher);
     }
 
-    pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
-        if let Some(publisher) = self.publishers.get(&room_id) {
-            self.publishers_subscribers
-                .associate(publisher.clone(), subscriber);
+    pub fn join_room(&mut self, room_id: &RoomId, subscriber: Arc<Session>) -> Result<(), Error> {
+        match self.publishers.get(room_id) {
+            Some(publisher) => self
+                .publishers_subscribers
+                .associate(publisher.clone(), subscriber),
+            None => {
+                return Err(err_msg("Failed to join non-existent room"));
+            }
         }
+
+        Ok(())
     }
 }
