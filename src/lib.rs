@@ -24,8 +24,8 @@ use std::thread;
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin,
-    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
+    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
@@ -36,7 +36,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{JsepKind, StreamOperation};
+use messages::{APIError, ErrorKind, JsepKind, StreamOperation, ToAPIError};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -100,15 +100,49 @@ fn report_error(res: Result<(), Error>) {
 extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
     janus_callbacks::init(callbacks);
 
-    let (messages_tx, messages_rx) = mpsc::sync_channel(0);
+    let (messages_tx, messages_rx) = mpsc::sync_channel(10);
 
     STATE.message_channel.set_if_none(Box::new(messages_tx));
 
     thread::spawn(move || {
         janus_info!("[CONFERENCE] Message processing thread is alive.");
         for msg in messages_rx.iter() {
-            if let Some(err) = handle_message_async(msg).err() {
-                janus_err!("Error processing message: {}", err);
+            let push_result = match handle_message_async(&msg) {
+                Ok((event, jsep)) => {
+                    janus_callbacks::push_event(msg.session.handle, msg.transaction, event, jsep)
+                        .map_err(Error::from)
+                }
+                Err(err) => {
+                    janus_err!("Error processing message: {}", err);
+
+                    let event = match err.kind {
+                        ErrorKind::Internal => json!({
+                            "success": false,
+                            "error": {
+                                "kind": err.kind,
+                                "detail": "Contact developers"
+                            }
+                        }),
+                        _ => json!({
+                            "success": false,
+                            "error": err
+                        }),
+                    };
+
+                    utils::serde_to_jansson(&event).and_then(|event| {
+                        janus_callbacks::push_event(
+                            msg.session.handle,
+                            msg.transaction,
+                            Some(event),
+                            None,
+                        )
+                        .map_err(Error::from)
+                    })
+                }
+            };
+
+            if let Err(err) = push_result {
+                janus_err!("Error pushing event: {}", err);
             }
         }
     });
@@ -339,77 +373,82 @@ const PLUGIN: Plugin = build_plugin!(
 
 export_plugin!(&PLUGIN);
 
-fn handle_message_async(received: Message) -> Result<(), Error> {
-    match received.jsep {
-        Some(jsep) => {
-            handle_jsep(&received.session, received.transaction, &jsep)?;
-        }
-        None => {
-            janus_info!("[CONFERENCE] JSEP is empty, skipping");
-        }
-    };
+fn handle_message_async(
+    received: &Message,
+) -> Result<(Option<JanssonValue>, Option<JanssonValue>), APIError> {
+    let success_event = json!({ "success": true });
 
-    if let Some(message) = received.message {
-        let message = message.to_libcstring(JanssonEncodingFlags::empty());
-        let message = message.to_string_lossy();
-        let message: StreamOperation = serde_json::from_str(&message)?;
+    match received.message {
+        Some(ref message) => {
+            let message: StreamOperation = utils::jansson_to_serde(&message).map_err(|err| {
+                err.to_bad_request("Unknown method name or invalid method parameters")
+            })?;
 
-        let mut switchboard = STATE
-            .switchboard
-            .write()
-            .map_err(|err| format_err!("{}", err))?;
+            let mut switchboard = STATE.switchboard.write().map_err(|err| {
+                let err = format_err!("{}", err);
+                err.to_internal()
+            })?;
 
-        match message {
-            StreamOperation::Create { id } => switchboard.create_room(id, received.session.clone()),
-            StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
+            let jsep = match message {
+                StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
+                    let jsep = handle_jsep(&received.jsep)
+                        .map_err(|err| err.to_bad_request("Invalid SDP"))?;
+
+                    Some(jsep)
+                }
+            };
+
+            let event = match message {
+                StreamOperation::Create { id } => {
+                    switchboard.create_room(id, received.session.clone());
+                    success_event
+                }
+                StreamOperation::Read { id } => {
+                    switchboard
+                        .join_room(&id, received.session.clone())
+                        .map_err(|err| err.to_non_existent_room(id))?;
+                    success_event
+                }
+            };
+
+            let event = utils::serde_to_jansson(&event).map_err(|err| err.to_internal())?;
+
+            Ok((Some(event), jsep))
         }
+        None => Ok((None, None)),
     }
-
-    Ok(())
 }
 
-fn handle_jsep(
-    session: &Session,
-    transaction: *mut c_char,
-    jsep: &JanssonValue,
-) -> Result<(), Error> {
-    let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
-    let jsep = jsep.to_string_lossy();
-    let jsep_json: JsepKind = serde_json::from_str(&jsep)?;
+fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<JanssonValue, Error> {
+    match jsep {
+        Some(jsep) => {
+            let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
 
-    let answer: serde_json::Value = match jsep_json {
-        JsepKind::Offer { sdp } => {
-            let offer = sdp::Sdp::parse(&CString::new(sdp)?)?;
-            janus_verb!("[CONFERENCE] offer: {:?}", offer);
+            let response = match jsep_json {
+                JsepKind::Offer { sdp } => {
+                    let offer = sdp::Sdp::parse(&CString::new(sdp)?)?;
+                    janus_verb!("[CONFERENCE] offer: {:?}", offer);
 
-            let mut answer = answer_sdp!(
-                offer,
-                sdp::OfferAnswerParameters::AudioCodec,
-                sdp::AudioCodec::Opus.to_cstr().as_ptr(),
-                sdp::OfferAnswerParameters::VideoCodec,
-                sdp::VideoCodec::H264.to_cstr().as_ptr()
-            );
-            janus_verb!("[CONFERENCE] answer: {:?}", answer);
+                    let mut answer = answer_sdp!(
+                        offer,
+                        sdp::OfferAnswerParameters::AudioCodec,
+                        sdp::AudioCodec::Opus.to_cstr().as_ptr(),
+                        sdp::OfferAnswerParameters::VideoCodec,
+                        sdp::VideoCodec::H264.to_cstr().as_ptr()
+                    );
+                    janus_verb!("[CONFERENCE] answer: {:?}", answer);
 
-            let answer = answer.to_glibstring().to_string_lossy().to_string();
+                    let answer = answer.to_glibstring().to_string_lossy().to_string();
+                    JsepKind::Answer { sdp: answer }
+                }
+                JsepKind::Answer { .. } => unreachable!(),
+            };
 
-            serde_json::to_value(JsepKind::Answer { sdp: answer })?
+            let response = serde_json::to_value(response)?;
+            let response = utils::serde_to_jansson(&response)?;
+
+            Ok(response)
         }
-        JsepKind::Answer { .. } => unreachable!(),
-    };
-
-    let event_json = json!({ "result": "ok" });
-    let mut event_serde: JanssonValue =
-        JanssonValue::from_str(&event_json.to_string(), JanssonDecodingFlags::empty())
-            .map_err(|err| format_err!("{}", err))?;
-    let event = event_serde.as_mut_ref();
-
-    let mut jsep_serde: JanssonValue =
-        JanssonValue::from_str(&answer.to_string(), JanssonDecodingFlags::empty())
-            .map_err(|err| format_err!("{}", err))?;
-    let jsep = jsep_serde.as_mut_ref();
-
-    janus_callbacks::push_event(session.handle, transaction, event, jsep)?;
-
-    Ok(())
+        None => Err(failure::err_msg("JSEP is empty")),
+    }
 }
