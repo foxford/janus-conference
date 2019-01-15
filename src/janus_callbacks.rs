@@ -1,6 +1,6 @@
 use std::os::raw::{c_char, c_int};
 
-use janus::{JanusError, JanusResult, PluginCallbacks, PluginSession, RawJanssonValue};
+use janus::{JanusError, JanusResult, PluginCallbacks, PluginSession, RawJanssonValue, JanssonValue};
 
 use super::PLUGIN;
 
@@ -30,12 +30,19 @@ pub fn relay_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, le
 pub fn push_event(
     handle: *mut PluginSession,
     transaction: *mut c_char,
-    body: *mut RawJanssonValue,
-    jsep: *mut RawJanssonValue,
+    body: Option<JanssonValue>,
+    jsep: Option<JanssonValue>,
 ) -> JanusResult {
     let push_event_fn = acquire_callbacks().push_event;
+
+    let body = unwrap_jansson_option_mut(body);
+    let jsep = unwrap_jansson_option_mut(jsep);
 
     let res = push_event_fn(handle, &mut PLUGIN, transaction, body, jsep);
 
     JanusError::from(res)
+}
+
+fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue {
+    val.and_then(|val| Some(val.into_raw())).unwrap_or(std::ptr::null_mut())
 }
