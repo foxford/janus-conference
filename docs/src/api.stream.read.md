@@ -17,8 +17,13 @@ jsep.sdp     | String | _required_ | An SDP offer
 
 ## Response
 
-If everything went well you should get a Janus event with specified `transaction` and following body:
+You should get a Janus event with specified `transaction` and following body:
 
 Name    | Type   | Default    | Description
-------  | ------ | ---------- | -----------
-success | Bool   | _required_ | Whether operation succeeded or not
+------- | ------ | ---------- | -----------
+success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false 
+then `error` object is also returned.
+error.detail                  | String | _required_ | Human-readable description of failure.
+error.kind                    | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentRoom`.
+error.kind.BadRequest.reason  | String | _required_ | Why exactly `BadRequest` happened.
+error.kind.NonExistentRoom.id | String | _required_ | Id of non-existent room.
