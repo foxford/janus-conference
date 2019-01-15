@@ -11,7 +11,7 @@ macro_rules! c_str {
     };
 }
 
-pub fn serde_to_jansson(json: Value) -> Result<JanssonValue, Error> {
+pub fn serde_to_jansson(json: &Value) -> Result<JanssonValue, Error> {
     JanssonValue::from_str(&json.to_string(), JanssonDecodingFlags::empty())
         .map_err(|err| format_err!("{}", err))
 }
@@ -21,5 +21,5 @@ pub fn jansson_to_serde<T: DeserializeOwned>(json: &JanssonValue) -> Result<T, E
     let json = json.to_string_lossy();
     let res = serde_json::from_str(&json);
 
-    res.map_err(|err| Error::from(err))
+    res.map_err(Error::from)
 }

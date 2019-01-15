@@ -129,7 +129,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
                         }),
                     };
 
-                    utils::serde_to_jansson(event).and_then(|event| {
+                    utils::serde_to_jansson(&event).and_then(|event| {
                         janus_callbacks::push_event(
                             msg.session.handle,
                             msg.transaction,
@@ -411,7 +411,7 @@ fn handle_message_async(
                 }
             };
 
-            let event = utils::serde_to_jansson(event).map_err(|err| err.to_internal())?;
+            let event = utils::serde_to_jansson(&event).map_err(|err| err.to_internal())?;
 
             Ok((Some(event), jsep))
         }
@@ -445,7 +445,7 @@ fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<JanssonValue, Error> {
             };
 
             let response = serde_json::to_value(response)?;
-            let response = utils::serde_to_jansson(response)?;
+            let response = utils::serde_to_jansson(&response)?;
 
             Ok(response)
         }
