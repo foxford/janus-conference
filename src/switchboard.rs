@@ -42,7 +42,22 @@ impl Switchboard {
     }
 
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        self.publishers.insert(room_id, publisher);
+        let old_publisher = self.publishers.remove(&room_id);
+        self.publishers.insert(room_id, publisher.clone());
+
+        match old_publisher {
+            Some(old_publisher) => {
+                let maybe_subscribers = self.publishers_subscribers.remove_key(&old_publisher);
+
+                if let Some(subscribers) = maybe_subscribers {
+                    for subscriber in subscribers {
+                        self.publishers_subscribers
+                            .associate(publisher.clone(), subscriber.clone());
+                    }
+                }
+            }
+            None => {}
+        }
     }
 
     pub fn join_room(&mut self, room_id: &RoomId, subscriber: Arc<Session>) -> Result<(), Error> {
