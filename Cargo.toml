@@ -22,8 +22,12 @@ gstreamer-base = "0.12"
 glib = "0.6"
 rusoto_core = "0.36"
 rusoto_s3 = "0.36"
+s4 = { version = "0.0.*", default_features = false }
 futures = "0.1"
 futures-fs = "0.0.5"
+
+[features]
+default = ["s4/native-tls"]
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
