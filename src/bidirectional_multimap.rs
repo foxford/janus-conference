@@ -43,16 +43,20 @@ where
         self.inverse_mapping.remove(v);
     }
 
-    pub fn remove_key<T>(&mut self, k: &T)
+    pub fn remove_key<T>(&mut self, k: &T) -> Option<Vec<V>>
     where
         K: Borrow<T>,
         T: Hash + Eq + Debug,
     {
-        if let Some(vs) = self.forward_mapping.remove(k) {
+        let vs = self.forward_mapping.remove(k);
+
+        if let Some(ref vs) = vs {
             for v in vs {
                 self.inverse_mapping.remove(&v);
             }
         }
+
+        vs
     }
 
     pub fn remove_value<U>(&mut self, v: &U)
