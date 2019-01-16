@@ -2,8 +2,7 @@
 
 [![Build Status][travis-img]][travis]
 
-A Janus Gateway plugin implementing Conference rooms.
-
+A Janus Gateway plugin implementing Conference streams.
 
 
 ### How To Use

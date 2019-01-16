@@ -1,6 +1,6 @@
 use failure;
 
-pub type RoomId = String;
+pub type StreamId = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -13,9 +13,9 @@ pub enum JsepKind {
 #[serde(tag = "method")]
 pub enum StreamOperation {
     #[serde(rename = "stream.create")]
-    Create { id: RoomId },
+    Create { id: StreamId },
     #[serde(rename = "stream.read")]
-    Read { id: RoomId },
+    Read { id: StreamId },
 }
 
 #[derive(Debug, Fail, Serialize)]
@@ -31,14 +31,14 @@ pub enum ErrorKind {
     Internal,
     #[fail(display = "Bad request ({})", reason)]
     BadRequest { reason: String },
-    #[fail(display = "Room {} does not exist", id)]
-    NonExistentRoom { id: RoomId },
+    #[fail(display = "Stream {} does not exist", id)]
+    NonExistentStream { id: StreamId },
 }
 
 pub trait ToAPIError {
     fn to_internal(&self) -> APIError;
     fn to_bad_request(&self, reason: &'static str) -> APIError;
-    fn to_non_existent_room(&self, id: RoomId) -> APIError;
+    fn to_non_existent_stream(&self, id: StreamId) -> APIError;
 }
 
 impl ToAPIError for failure::Error {
@@ -58,9 +58,9 @@ impl ToAPIError for failure::Error {
         }
     }
 
-    fn to_non_existent_room(&self, id: RoomId) -> APIError {
+    fn to_non_existent_stream(&self, id: StreamId) -> APIError {
         APIError {
-            kind: ErrorKind::NonExistentRoom { id },
+            kind: ErrorKind::NonExistentStream { id },
             detail: self.to_string(),
         }
     }

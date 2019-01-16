@@ -4,13 +4,13 @@ use std::sync::Arc;
 use failure::{err_msg, Error};
 
 use bidirectional_multimap::BidirectionalMultimap;
-use messages::RoomId;
+use messages::StreamId;
 use session::Session;
 
 #[derive(Debug)]
 pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
-    publishers: HashMap<RoomId, Arc<Session>>,
+    publishers: HashMap<StreamId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
 }
 
@@ -41,9 +41,9 @@ impl Switchboard {
         self.publishers_subscribers.get_key(subscriber)
     }
 
-    pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        let old_publisher = self.publishers.remove(&room_id);
-        self.publishers.insert(room_id, publisher.clone());
+    pub fn create_stream(&mut self, id: StreamId, publisher: Arc<Session>) {
+        let old_publisher = self.publishers.remove(&id);
+        self.publishers.insert(id, publisher.clone());
 
         match old_publisher {
             Some(old_publisher) => {
@@ -60,13 +60,13 @@ impl Switchboard {
         }
     }
 
-    pub fn join_room(&mut self, room_id: &RoomId, subscriber: Arc<Session>) -> Result<(), Error> {
-        match self.publishers.get(room_id) {
+    pub fn join_stream(&mut self, id: &StreamId, subscriber: Arc<Session>) -> Result<(), Error> {
+        match self.publishers.get(id) {
             Some(publisher) => self
                 .publishers_subscribers
                 .associate(publisher.clone(), subscriber),
             None => {
-                return Err(err_msg("Failed to join non-existent room"));
+                return Err(err_msg("Failed to join non-existent stream"));
             }
         }
 
