@@ -36,7 +36,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{APIError, ErrorKind, JsepKind, StreamOperation, ToAPIError};
+use messages::{APIError, ErrorStatus, JsepKind, StreamOperation, ToAPIError};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -115,11 +115,11 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
                 Err(err) => {
                     janus_err!("Error processing message: {}", err);
 
-                    let event = match err.kind {
-                        ErrorKind::Internal => json!({
+                    let event = match err.status {
+                        ErrorStatus::Internal => json!({
                             "success": false,
                             "error": {
-                                "kind": err.kind,
+                                "status": err.status,
                                 "detail": "Contact developers"
                             }
                         }),

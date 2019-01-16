@@ -19,14 +19,14 @@ pub enum StreamOperation {
 }
 
 #[derive(Debug, Fail, Serialize)]
-#[fail(display = "{}: {}", kind, detail)]
+#[fail(display = "{}: {}", status, detail)]
 pub struct APIError {
-    pub kind: ErrorKind,
+    pub status: ErrorStatus,
     detail: String,
 }
 
 #[derive(Debug, Fail, Serialize)]
-pub enum ErrorKind {
+pub enum ErrorStatus {
     #[fail(display = "Internal error")]
     Internal,
     #[fail(display = "Bad request ({})", reason)]
@@ -44,14 +44,14 @@ pub trait ToAPIError {
 impl ToAPIError for failure::Error {
     fn to_internal(&self) -> APIError {
         APIError {
-            kind: ErrorKind::Internal,
+            status: ErrorStatus::Internal,
             detail: self.to_string(),
         }
     }
 
     fn to_bad_request(&self, title: &'static str) -> APIError {
         APIError {
-            kind: ErrorKind::BadRequest {
+            status: ErrorStatus::BadRequest {
                 reason: self.to_string(),
             },
             detail: String::from(title),
@@ -60,7 +60,7 @@ impl ToAPIError for failure::Error {
 
     fn to_non_existent_room(&self, id: RoomId) -> APIError {
         APIError {
-            kind: ErrorKind::NonExistentRoom { id },
+            status: ErrorStatus::NonExistentRoom { id },
             detail: self.to_string(),
         }
     }

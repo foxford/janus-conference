@@ -24,6 +24,6 @@ Name    | Type   | Default    | Description
 success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false 
 then `error` object is also returned.
 error.detail                  | String | _required_ | Human-readable description of failure.
-error.kind                    | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentRoom`.
-error.kind.BadRequest.reason  | String | _required_ | Why exactly `BadRequest` happened.
-error.kind.NonExistentRoom.id | String | _required_ | Id of non-existent room.
+error.status                  | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentRoom`.
+error.status.BadRequest.reason  | String | _required_ | Why exactly `BadRequest` happened.
+error.status.NonExistentRoom.id | String | _required_ | Id of non-existent room.
