@@ -120,7 +120,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
                             "success": false,
                             "error": {
                                 "status": err.status,
-                                "detail": "Contact developers"
+                                "title": "Internal error - please, contact developers"
                             }
                         }),
                         _ => json!({

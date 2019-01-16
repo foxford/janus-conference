@@ -19,10 +19,10 @@ pub enum StreamOperation {
 }
 
 #[derive(Debug, Fail, Serialize)]
-#[fail(display = "{}: {}", status, detail)]
+#[fail(display = "{}: {}", status, title)]
 pub struct APIError {
     pub status: ErrorStatus,
-    detail: String,
+    title: String,
 }
 
 #[derive(Debug, Fail, Serialize)]
@@ -45,7 +45,7 @@ impl ToAPIError for failure::Error {
     fn to_internal(&self) -> APIError {
         APIError {
             status: ErrorStatus::Internal,
-            detail: self.to_string(),
+            title: self.to_string(),
         }
     }
 
@@ -54,14 +54,14 @@ impl ToAPIError for failure::Error {
             status: ErrorStatus::BadRequest {
                 reason: self.to_string(),
             },
-            detail: String::from(title),
+            title: String::from(title),
         }
     }
 
     fn to_non_existent_room(&self, id: RoomId) -> APIError {
         APIError {
             status: ErrorStatus::NonExistentRoom { id },
-            detail: self.to_string(),
+            title: self.to_string(),
         }
     }
 }
