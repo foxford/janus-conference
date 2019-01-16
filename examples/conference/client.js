@@ -22,7 +22,7 @@ hangupButton.onclick = hangup;
 
 var websocket, sessionId, pluginHandleId, sessionTransaction, handleTransaction;
 var janusHost = "ws://localhost:8188";
-var roomId = "demo-conference-room";
+var streamId = "demo-conference-stream";
 
 function startTranslation() {
     navigator.mediaDevices.getUserMedia({ audio: true, video: true })
@@ -162,7 +162,7 @@ function publisherGotLocalDescription(desc) {
         "transaction": getTransactionId(),
         "body": {
             "method": "stream.create",
-            "id": roomId
+            "id": streamId
         },
         "jsep": {
             "type": "offer",
@@ -188,7 +188,7 @@ function listenerGotLocalDescription(desc) {
         "transaction": getTransactionId(),
         "body": {
             "method": "stream.read",
-            "id": roomId
+            "id": streamId
         },
         "jsep": {
             "type": "offer",

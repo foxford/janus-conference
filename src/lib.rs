@@ -400,13 +400,13 @@ fn handle_message_async(
 
             let event = match message {
                 StreamOperation::Create { id } => {
-                    switchboard.create_room(id, received.session.clone());
+                    switchboard.create_stream(id, received.session.clone());
                     success_event
                 }
                 StreamOperation::Read { id } => {
                     switchboard
-                        .join_room(&id, received.session.clone())
-                        .map_err(|err| err.to_non_existent_room(id))?;
+                        .join_stream(&id, received.session.clone())
+                        .map_err(|err| err.to_non_existent_stream(id))?;
                     success_event
                 }
             };
