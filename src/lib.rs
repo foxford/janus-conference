@@ -36,7 +36,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{APIError, ErrorStatus, JsepKind, StreamOperation, ToAPIError};
+use messages::{APIError, ErrorStatus, JsepKind, OperationError, StreamOperation};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -380,38 +380,51 @@ fn handle_message_async(
 
     match received.message {
         Some(ref message) => {
-            let message: StreamOperation = utils::jansson_to_serde(&message).map_err(|err| {
-                err.to_bad_request("Unknown method name or invalid method parameters")
+            let operation: StreamOperation = utils::jansson_to_serde(&message).map_err(|err| {
+                APIError::new(ErrorStatus::BadRequest, err, OperationError::unknown())
             })?;
 
             let mut switchboard = STATE.switchboard.write().map_err(|err| {
                 let err = format_err!("{}", err);
-                err.to_internal()
+                APIError::new(ErrorStatus::Internal, err, OperationError::new(&operation))
             })?;
 
-            let jsep = match message {
+            let jsep = match operation {
                 StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
-                    let jsep = handle_jsep(&received.jsep)
-                        .map_err(|err| err.to_bad_request("Invalid SDP"))?;
+                    let jsep = handle_jsep(&received.jsep).map_err(|err| {
+                        APIError::new(
+                            ErrorStatus::BadRequest,
+                            err,
+                            OperationError::new(&operation),
+                        )
+                    })?;
 
                     Some(jsep)
                 }
             };
 
-            let event = match message {
+            let event = match &operation {
                 StreamOperation::Create { id } => {
-                    switchboard.create_room(id, received.session.clone());
+                    switchboard.create_room(id.to_string(), received.session.clone());
                     success_event
                 }
                 StreamOperation::Read { id } => {
                     switchboard
                         .join_room(&id, received.session.clone())
-                        .map_err(|err| err.to_non_existent_room(id))?;
+                        .map_err(|err| {
+                            APIError::new(
+                                ErrorStatus::NonExistentRoom,
+                                err,
+                                OperationError::new(&operation),
+                            )
+                        })?;
                     success_event
                 }
             };
 
-            let event = utils::serde_to_jansson(&event).map_err(|err| err.to_internal())?;
+            let event = utils::serde_to_jansson(&event).map_err(|err| {
+                APIError::new(ErrorStatus::Internal, err, OperationError::new(&operation))
+            })?;
 
             Ok((Some(event), jsep))
         }

@@ -19,49 +19,65 @@ pub enum StreamOperation {
 }
 
 #[derive(Debug, Fail, Serialize)]
-#[fail(display = "{}: {}", status, title)]
+#[fail(display = "[{}] {}: {}", ty, status, title)]
 pub struct APIError {
-    pub status: ErrorStatus,
+    #[serde(rename = "type")]
+    ty: String,
     title: String,
+    pub status: ErrorStatus,
+    detail: String,
+}
+
+impl APIError {
+    pub fn new(status: ErrorStatus, detail: failure::Error, operation: OperationError) -> Self {
+        Self {
+            ty: operation.ty,
+            title: operation.title,
+            status,
+            detail: detail.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Fail, Serialize)]
 pub enum ErrorStatus {
     #[fail(display = "Internal error")]
     Internal,
-    #[fail(display = "Bad request ({})", reason)]
-    BadRequest { reason: String },
-    #[fail(display = "Room {} does not exist", id)]
-    NonExistentRoom { id: RoomId },
+    #[fail(display = "Bad request")]
+    BadRequest,
+    #[fail(display = "Room does not exist")]
+    NonExistentRoom,
 }
 
-pub trait ToAPIError {
-    fn to_internal(&self) -> APIError;
-    fn to_bad_request(&self, reason: &'static str) -> APIError;
-    fn to_non_existent_room(&self, id: RoomId) -> APIError;
+pub struct OperationError {
+    ty: String,
+    title: String,
 }
 
-impl ToAPIError for failure::Error {
-    fn to_internal(&self) -> APIError {
-        APIError {
-            status: ErrorStatus::Internal,
-            title: self.to_string(),
+const UNKNOWN_ERROR: &str = "unknown_error";
+const UNKNOWN_ERROR_TITLE: &str = "An error occured during unknown operation";
+const CREATE_ERROR: &str = "stream_create_error";
+const CREATE_ERROR_TITLE: &str = "Error creating a stream";
+const READ_ERROR: &str = "stream_read_error";
+const READ_ERROR_TITLE: &str = "Error reading a stream";
+
+impl OperationError {
+    pub fn new(operation: &StreamOperation) -> Self {
+        let (ty, title) = match operation {
+            StreamOperation::Create { .. } => (CREATE_ERROR, CREATE_ERROR_TITLE),
+            StreamOperation::Read { .. } => (READ_ERROR, READ_ERROR_TITLE),
+        };
+
+        Self {
+            ty: ty.to_string(),
+            title: title.to_string(),
         }
     }
 
-    fn to_bad_request(&self, title: &'static str) -> APIError {
-        APIError {
-            status: ErrorStatus::BadRequest {
-                reason: self.to_string(),
-            },
-            title: String::from(title),
-        }
-    }
-
-    fn to_non_existent_room(&self, id: RoomId) -> APIError {
-        APIError {
-            status: ErrorStatus::NonExistentRoom { id },
-            title: self.to_string(),
+    pub fn unknown() -> Self {
+        Self {
+            ty: UNKNOWN_ERROR.to_string(),
+            title: UNKNOWN_ERROR_TITLE.to_string(),
         }
     }
 }
