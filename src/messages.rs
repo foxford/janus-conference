@@ -42,10 +42,13 @@ impl APIError {
 #[derive(Debug, Fail, Serialize)]
 pub enum ErrorStatus {
     #[fail(display = "Internal error")]
+    #[serde(rename = "500")]
     Internal,
     #[fail(display = "Bad request")]
+    #[serde(rename = "400")]
     BadRequest,
     #[fail(display = "Room does not exist")]
+    #[serde(rename = "404")]
     NonExistentRoom,
 }
 

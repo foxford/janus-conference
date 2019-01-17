@@ -21,9 +21,5 @@ You should get a Janus event with specified `transaction` and following body:
 
 Name    | Type   | Default    | Description
 ------- | ------ | ---------- | -----------
-success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false 
-then `error` object is also returned.
-error.type                    | String | _required_ | Failed operation name.
-error.title                   | String | _required_ | Human-readable description of failure.
-error.status                  | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentRoom`.
-error.detail                  | String | _required_ | Detailed description of an error.
+success | Bool   | _required_ | Whether operation succeeded or not. If it's false then `error` object is also returned.
+error   | Error  | null       | See [Error object](./api.error.md)

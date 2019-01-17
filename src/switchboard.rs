@@ -51,7 +51,7 @@ impl Switchboard {
                 .publishers_subscribers
                 .associate(publisher.clone(), subscriber),
             None => {
-                return Err(err_msg("Failed to join non-existent room"));
+                return Err(format_err!("Room with Id = {} does not exist", room_id));
             }
         }
 
