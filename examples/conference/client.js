@@ -44,7 +44,6 @@ function start(isPublisher) {
     listenerStartButton.disabled = true;
     hangupButton.disabled = false;
 
-    var gotLocalDescription = isPublisher ? publisherGotLocalDescription : listenerGotLocalDescription;
     var options = { offerToReceiveVideo: !isPublisher };
 
     websocket = new WebSocket(janusHost, 'janus-protocol');
@@ -97,7 +96,11 @@ function start(isPublisher) {
                     pluginHandleId = data.data.id;
 
                     console.log('creating offer');
-                    peerConnection.createOffer(gotLocalDescription, onSignalingError, options);
+                    if (isPublisher) {
+                        peerConnection.createOffer(publisherGotLocalDescription, onSignalingError, options);
+                    } else {
+                        listenerStreamRead();
+                    }
                 }
                 break;
 
@@ -108,6 +111,11 @@ function start(isPublisher) {
                 if (jsep.type == 'answer') {
                     console.info("Stream has been started!");
                     peerConnection.setRemoteDescription(jsep);
+                } else if (jsep.type == "offer") {
+                    var answer = peerConnection.setRemoteDescription(jsep).then(_ => peerConnection.createAnswer());
+                    var local = answer.then(a => peerConnection.setLocalDescription(a));
+                    var remote = answer.then(j => sendJsep(j));
+                    Promise.all([local, remote]).catch(e => console.error(e));
                 }
                 break;
 
@@ -170,17 +178,12 @@ function publisherGotLocalDescription(desc) {
         }
     };
 
-    console.log('Uploading offer');
+    console.log('Uploading stream.create request');
     console.log(payload);
     websocket.send(JSON.stringify(payload));
 }
 
-function listenerGotLocalDescription(desc) {
-    console.log("got local SDP");
-    console.log(desc);
-
-    peerConnection.setLocalDescription(desc);
-
+function listenerStreamRead() {
     var payload = {
         "janus": "message",
         "session_id": sessionId,
@@ -190,14 +193,24 @@ function listenerGotLocalDescription(desc) {
             "method": "stream.read",
             "id": streamId
         },
-        "jsep": {
-            "type": "offer",
-            "sdp": desc.sdp
-        }
     };
 
-    console.log('Uploading offer');
-    console.log(payload);
+    console.log('Uploading stream.read request');
+    websocket.send(JSON.stringify(payload));
+}
+
+function sendJsep(jsep) {
+    var payload = {
+        janus: "message",
+        session_id: sessionId,
+        handle_id: pluginHandleId,
+        transaction: getTransactionId(),
+        body: {},
+        jsep: {
+            type: "answer",
+            sdp: jsep.sdp
+        }
+    };
     websocket.send(JSON.stringify(payload));
 }
 

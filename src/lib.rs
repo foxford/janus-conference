@@ -18,13 +18,14 @@ extern crate failure;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::slice;
-use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    sdp::{self, OfferAnswerParameters},
+    JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
     RawJanssonValue, RawPluginResult,
 };
 
@@ -49,6 +50,9 @@ struct Message {
 }
 
 unsafe impl Send for Message {}
+
+const AUDIO_CODEC: sdp::AudioCodec = sdp::AudioCodec::Opus;
+const VIDEO_CODEC: sdp::VideoCodec = sdp::VideoCodec::H264;
 
 #[derive(Debug)]
 struct State {
@@ -77,7 +81,7 @@ fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
 
 fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
-        let mut seq = publisher.as_ref().fir_seq.fetch_add(1, Ordering::Relaxed) as i32;
+        let mut seq = publisher.as_ref().incr_fir_seq() as i32;
         let mut fir = janus::rtcp::gen_fir(&mut seq);
         janus_callbacks::relay_rtcp(
             publisher.as_ref().as_ptr(),
@@ -390,11 +394,24 @@ fn handle_message_async(
             })?;
 
             let jsep = match message {
-                StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
-                    let jsep = handle_jsep(&received.jsep)
+                StreamOperation::Create { .. } => {
+                    let jsep = handle_jsep(&received.jsep, &received.session)
                         .map_err(|err| err.to_bad_request("Invalid SDP"))?;
 
                     Some(jsep)
+                }
+                StreamOperation::Read { ref id } => {
+                    let publisher = switchboard.publisher_by_stream(&id).unwrap();
+                    let offer = publisher
+                        .subscriber_offer
+                        .lock()
+                        .map_err(|err| format_err!("{}", err).to_internal())?;
+                    let offer = offer.as_ref().unwrap();
+                    let offer = serde_json::to_value(offer)
+                        .map_err(|err| Error::from(err).to_internal())?;
+                    let offer = utils::serde_to_jansson(&offer).map_err(|err| err.to_internal())?;
+
+                    Some(offer)
                 }
             };
 
@@ -419,7 +436,7 @@ fn handle_message_async(
     }
 }
 
-fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<JanssonValue, Error> {
+fn handle_jsep(jsep: &Option<JanssonValue>, from: &Session) -> Result<JanssonValue, Error> {
     match jsep {
         Some(jsep) => {
             let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
@@ -431,20 +448,45 @@ fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<JanssonValue, Error> {
 
                     let mut answer = answer_sdp!(
                         offer,
-                        sdp::OfferAnswerParameters::AudioCodec,
-                        sdp::AudioCodec::Opus.to_cstr().as_ptr(),
-                        sdp::OfferAnswerParameters::VideoCodec,
-                        sdp::VideoCodec::H264.to_cstr().as_ptr()
+                        OfferAnswerParameters::AudioCodec,
+                        AUDIO_CODEC.to_cstr().as_ptr(),
+                        OfferAnswerParameters::VideoCodec,
+                        VIDEO_CODEC.to_cstr().as_ptr()
                     );
                     janus_verb!("[CONFERENCE] answer: {:?}", answer);
 
+                    let audio_payload_type = answer.get_payload_type(AUDIO_CODEC.to_cstr());
+                    let video_payload_type = answer.get_payload_type(VIDEO_CODEC.to_cstr());
+
+                    let offer = offer_sdp!(
+                        std::ptr::null(),
+                        answer.c_addr as *const _,
+                        OfferAnswerParameters::Audio,
+                        1,
+                        OfferAnswerParameters::AudioCodec,
+                        AUDIO_CODEC.to_cstr().as_ptr(),
+                        OfferAnswerParameters::AudioPayloadType,
+                        audio_payload_type.unwrap_or(111),
+                        OfferAnswerParameters::AudioDirection,
+                        sdp::MediaDirection::JANUS_SDP_SENDONLY,
+                        OfferAnswerParameters::Video,
+                        1,
+                        OfferAnswerParameters::VideoCodec,
+                        VIDEO_CODEC.to_cstr().as_ptr(),
+                        OfferAnswerParameters::VideoPayloadType,
+                        video_payload_type.unwrap_or(96),
+                        OfferAnswerParameters::VideoDirection,
+                        sdp::MediaDirection::JANUS_SDP_SENDONLY
+                    );
+
+                    from.set_subscriber_offer(offer)?;
+
                     let answer = answer.to_glibstring().to_string_lossy().to_string();
-                    JsepKind::Answer { sdp: answer }
+                    serde_json::to_value(JsepKind::Answer { sdp: answer })?
                 }
-                JsepKind::Answer { .. } => unreachable!(),
+                JsepKind::Answer { .. } => json!({}),
             };
 
-            let response = serde_json::to_value(response)?;
             let response = utils::serde_to_jansson(&response)?;
 
             Ok(response)
