@@ -1,6 +1,6 @@
 use failure;
 
-pub type RoomId = String;
+pub type StreamId = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -13,9 +13,9 @@ pub enum JsepKind {
 #[serde(tag = "method")]
 pub enum StreamOperation {
     #[serde(rename = "stream.create")]
-    Create { id: RoomId },
+    Create { id: StreamId },
     #[serde(rename = "stream.read")]
-    Read { id: RoomId },
+    Read { id: StreamId },
 }
 
 #[derive(Debug, Fail, Serialize)]

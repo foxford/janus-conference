@@ -405,12 +405,12 @@ fn handle_message_async(
 
             let event = match &operation {
                 StreamOperation::Create { id } => {
-                    switchboard.create_room(id.to_string(), received.session.clone());
+                    switchboard.create_stream(id.to_string(), received.session.clone());
                     success_event
                 }
                 StreamOperation::Read { id } => {
                     switchboard
-                        .join_room(&id, received.session.clone())
+                        .join_stream(&id, received.session.clone())
                         .map_err(|err| {
                             APIError::new(
                                 ErrorStatus::NonExistentRoom,
