@@ -240,7 +240,7 @@ extern "C" fn handle_message(
 
             STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
 
-            PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
+            PluginResult::ok_wait(None).into_raw()
         }
         Err(e) => {
             janus_err!("[CONFERENCE] Failed to restore session state: {}", e);
