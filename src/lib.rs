@@ -393,38 +393,38 @@ fn handle_message_async(
                 err.to_internal()
             })?;
 
-            let jsep = match message {
-                StreamOperation::Create { .. } => {
-                    let jsep = handle_jsep(&received.jsep, &received.session)
-                        .map_err(|err| err.to_bad_request("Invalid SDP"))?;
-
-                    Some(jsep)
-                }
-                StreamOperation::Read { ref id } => {
-                    let publisher = switchboard.publisher_by_stream(&id).unwrap();
-                    let offer = publisher
-                        .subscriber_offer
-                        .lock()
-                        .map_err(|err| format_err!("{}", err).to_internal())?;
-                    let offer = offer.as_ref().unwrap();
-                    let offer = serde_json::to_value(offer)
-                        .map_err(|err| Error::from(err).to_internal())?;
-                    let offer = utils::serde_to_jansson(&offer).map_err(|err| err.to_internal())?;
-
-                    Some(offer)
-                }
-            };
-
-            let event = match message {
+            let (event, jsep) = match message {
                 StreamOperation::Create { id } => {
                     switchboard.create_stream(id, received.session.clone());
-                    success_event
+
+                    let answer = handle_jsep(&received.jsep)
+                        .map_err(|err| err.to_bad_request("Invalid SDP"))?;
+
+                    let offer = generate_subsciber_offer(&answer);
+
+                    let event = json!({
+                        "success": true,
+                        "offer": offer.to_glibstring().to_string_lossy().to_string()
+                    });
+
+                    received
+                        .session
+                        .set_subscriber_offer(offer)
+                        .map_err(|err| err.to_internal())?;
+
+                    let answer = answer.to_glibstring().to_string_lossy().to_string();
+                    let jsep = serde_json::to_value(JsepKind::Answer { sdp: answer })
+                        .map_err(|err| Error::from(err).to_internal())?;
+                    let jsep = utils::serde_to_jansson(&jsep).map_err(|err| err.to_internal())?;
+
+                    (event, Some(jsep))
                 }
                 StreamOperation::Read { id } => {
                     switchboard
                         .join_stream(&id, received.session.clone())
                         .map_err(|err| err.to_non_existent_stream(id))?;
-                    success_event
+
+                    (success_event, None)
                 }
             };
 
@@ -436,7 +436,33 @@ fn handle_message_async(
     }
 }
 
-fn handle_jsep(jsep: &Option<JanssonValue>, from: &Session) -> Result<JanssonValue, Error> {
+fn generate_subsciber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
+    let audio_payload_type = answer_to_publisher.get_payload_type(AUDIO_CODEC.to_cstr());
+    let video_payload_type = answer_to_publisher.get_payload_type(VIDEO_CODEC.to_cstr());
+
+    offer_sdp!(
+        std::ptr::null(),
+        answer_to_publisher.c_addr as *const _,
+        OfferAnswerParameters::Audio,
+        1,
+        OfferAnswerParameters::AudioCodec,
+        AUDIO_CODEC.to_cstr().as_ptr(),
+        OfferAnswerParameters::AudioPayloadType,
+        audio_payload_type.unwrap_or(111),
+        OfferAnswerParameters::AudioDirection,
+        sdp::MediaDirection::JANUS_SDP_SENDONLY,
+        OfferAnswerParameters::Video,
+        1,
+        OfferAnswerParameters::VideoCodec,
+        VIDEO_CODEC.to_cstr().as_ptr(),
+        OfferAnswerParameters::VideoPayloadType,
+        video_payload_type.unwrap_or(96),
+        OfferAnswerParameters::VideoDirection,
+        sdp::MediaDirection::JANUS_SDP_SENDONLY
+    )
+}
+
+fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<sdp::Sdp, Error> {
     match jsep {
         Some(jsep) => {
             let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
@@ -455,39 +481,10 @@ fn handle_jsep(jsep: &Option<JanssonValue>, from: &Session) -> Result<JanssonVal
                     );
                     janus_verb!("[CONFERENCE] answer: {:?}", answer);
 
-                    let audio_payload_type = answer.get_payload_type(AUDIO_CODEC.to_cstr());
-                    let video_payload_type = answer.get_payload_type(VIDEO_CODEC.to_cstr());
-
-                    let offer = offer_sdp!(
-                        std::ptr::null(),
-                        answer.c_addr as *const _,
-                        OfferAnswerParameters::Audio,
-                        1,
-                        OfferAnswerParameters::AudioCodec,
-                        AUDIO_CODEC.to_cstr().as_ptr(),
-                        OfferAnswerParameters::AudioPayloadType,
-                        audio_payload_type.unwrap_or(111),
-                        OfferAnswerParameters::AudioDirection,
-                        sdp::MediaDirection::JANUS_SDP_SENDONLY,
-                        OfferAnswerParameters::Video,
-                        1,
-                        OfferAnswerParameters::VideoCodec,
-                        VIDEO_CODEC.to_cstr().as_ptr(),
-                        OfferAnswerParameters::VideoPayloadType,
-                        video_payload_type.unwrap_or(96),
-                        OfferAnswerParameters::VideoDirection,
-                        sdp::MediaDirection::JANUS_SDP_SENDONLY
-                    );
-
-                    from.set_subscriber_offer(offer)?;
-
-                    let answer = answer.to_glibstring().to_string_lossy().to_string();
-                    serde_json::to_value(JsepKind::Answer { sdp: answer })?
+                    answer
                 }
-                JsepKind::Answer { .. } => json!({}),
+                JsepKind::Answer { .. } => unreachable!(),
             };
-
-            let response = utils::serde_to_jansson(&response)?;
 
             Ok(response)
         }
