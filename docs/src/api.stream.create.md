@@ -22,6 +22,7 @@ You should get a Janus event with specified `transaction` and following body:
 Name                          | Type   | Default    | Description
 ----------------------------- | ------ | ---------- | -----------
 success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false then `error` object is also returned.
+offer                         | String | _required_ | Offer for subscribers allowing them to join newly created stream. 
 error.detail                  | String | _required_ | Human-readable description of failure.
 error.kind                    | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentStream`.
 error.kind.BadRequest.reason  | String | _required_ | Why exactly `BadRequest` happened.
