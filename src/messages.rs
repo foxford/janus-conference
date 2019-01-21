@@ -1,4 +1,5 @@
 use failure;
+use http::StatusCode;
 
 pub type StreamId = String;
 
@@ -18,18 +19,57 @@ pub enum StreamOperation {
     Read { id: StreamId },
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum StreamResponse {
+    Create {},
+    Read {},
+}
+
+pub type ErrorStatus = StatusCode;
+
+#[derive(Serialize)]
+#[serde(remote = "http::StatusCode")]
+struct Status(#[serde(getter = "http::StatusCode::as_u16")] u16);
+
+#[derive(Serialize)]
+pub struct Response {
+    #[serde(with = "Status")]
+    status: ErrorStatus,
+    #[serde(flatten)]
+    response: Option<StreamResponse>,
+    #[serde(flatten)]
+    error: Option<APIError>,
+}
+
+impl Response {
+    pub fn new(response: Option<StreamResponse>, error: Option<APIError>) -> Self {
+        let status = match &error {
+            None => StatusCode::OK,
+            Some(err) => err.status,
+        };
+
+        Self {
+            status,
+            response,
+            error,
+        }
+    }
+}
+
 #[derive(Debug, Fail, Serialize)]
-#[fail(display = "[{}] {}: {}", ty, status, title)]
+#[fail(display = "[{} - {}] {}: {}", ty, status, title, detail)]
 pub struct APIError {
     #[serde(rename = "type")]
     ty: String,
     title: String,
+    #[serde(skip)]
     pub status: ErrorStatus,
     detail: String,
 }
 
 impl APIError {
-    pub fn new(status: ErrorStatus, detail: failure::Error, operation: OperationError) -> Self {
+    pub fn new(status: StatusCode, detail: failure::Error, operation: OperationError) -> Self {
         Self {
             ty: operation.ty,
             title: operation.title,
@@ -37,19 +77,6 @@ impl APIError {
             detail: detail.to_string(),
         }
     }
-}
-
-#[derive(Debug, Fail, Serialize)]
-pub enum ErrorStatus {
-    #[fail(display = "Internal error")]
-    #[serde(rename = "500")]
-    Internal,
-    #[fail(display = "Bad request")]
-    #[serde(rename = "400")]
-    BadRequest,
-    #[fail(display = "Room does not exist")]
-    #[serde(rename = "404")]
-    NonExistentRoom,
 }
 
 pub struct OperationError {

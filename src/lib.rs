@@ -2,10 +2,10 @@
 extern crate janus_plugin as janus;
 
 extern crate serde;
-#[macro_use]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate http;
 
 #[macro_use]
 extern crate lazy_static;
@@ -36,7 +36,9 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{APIError, ErrorStatus, JsepKind, OperationError, StreamOperation};
+use messages::{
+    APIError, ErrorStatus, JsepKind, OperationError, Response, StreamOperation, StreamResponse,
+};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -108,36 +110,28 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
         janus_info!("[CONFERENCE] Message processing thread is alive.");
         for msg in messages_rx.iter() {
             let push_result = match handle_message_async(&msg) {
-                Ok((event, jsep)) => {
-                    janus_callbacks::push_event(msg.session.handle, msg.transaction, event, jsep)
+                Ok((response, jsep)) => {
+                    janus_callbacks::push_event(msg.session.handle, msg.transaction, response, jsep)
                         .map_err(Error::from)
                 }
                 Err(err) => {
                     janus_err!("Error processing message: {}", err);
 
-                    let event = match err.status {
-                        ErrorStatus::Internal => json!({
-                            "success": false,
-                            "error": {
-                                "status": err.status,
-                                "title": "Internal error - please, contact developers"
-                            }
-                        }),
-                        _ => json!({
-                            "success": false,
-                            "error": err
-                        }),
-                    };
+                    let response = Response::new(None, Some(err));
 
-                    utils::serde_to_jansson(&event).and_then(|event| {
-                        janus_callbacks::push_event(
-                            msg.session.handle,
-                            msg.transaction,
-                            Some(event),
-                            None,
-                        )
+                    serde_json::to_value(response)
                         .map_err(Error::from)
-                    })
+                        .and_then(|response| {
+                            utils::serde_to_jansson(&response).and_then(|response| {
+                                janus_callbacks::push_event(
+                                    msg.session.handle,
+                                    msg.transaction,
+                                    Some(response),
+                                    None,
+                                )
+                                .map_err(Error::from)
+                            })
+                        })
                 }
             };
 
@@ -376,24 +370,26 @@ export_plugin!(&PLUGIN);
 fn handle_message_async(
     received: &Message,
 ) -> Result<(Option<JanssonValue>, Option<JanssonValue>), APIError> {
-    let success_event = json!({ "success": true });
-
     match received.message {
         Some(ref message) => {
             let operation: StreamOperation = utils::jansson_to_serde(&message).map_err(|err| {
-                APIError::new(ErrorStatus::BadRequest, err, OperationError::unknown())
+                APIError::new(ErrorStatus::BAD_REQUEST, err, OperationError::unknown())
             })?;
 
             let mut switchboard = STATE.switchboard.write().map_err(|err| {
                 let err = format_err!("{}", err);
-                APIError::new(ErrorStatus::Internal, err, OperationError::new(&operation))
+                APIError::new(
+                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                    err,
+                    OperationError::new(&operation),
+                )
             })?;
 
             let jsep = match operation {
                 StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
                     let jsep = handle_jsep(&received.jsep).map_err(|err| {
                         APIError::new(
-                            ErrorStatus::BadRequest,
+                            ErrorStatus::BAD_REQUEST,
                             err,
                             OperationError::new(&operation),
                         )
@@ -403,30 +399,43 @@ fn handle_message_async(
                 }
             };
 
-            let event = match &operation {
+            let response = match &operation {
                 StreamOperation::Create { id } => {
                     switchboard.create_stream(id.to_string(), received.session.clone());
-                    success_event
+                    StreamResponse::Create {}
                 }
                 StreamOperation::Read { id } => {
                     switchboard
                         .join_stream(&id, received.session.clone())
                         .map_err(|err| {
                             APIError::new(
-                                ErrorStatus::NonExistentRoom,
+                                ErrorStatus::NOT_FOUND,
                                 err,
                                 OperationError::new(&operation),
                             )
                         })?;
-                    success_event
+                    StreamResponse::Read {}
                 }
             };
 
-            let event = utils::serde_to_jansson(&event).map_err(|err| {
-                APIError::new(ErrorStatus::Internal, err, OperationError::new(&operation))
+            let response = Response::new(Some(response), None);
+
+            let response = serde_json::to_value(response).map_err(|err| {
+                APIError::new(
+                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                    Error::from(err),
+                    OperationError::new(&operation),
+                )
+            })?;
+            let response = utils::serde_to_jansson(&response).map_err(|err| {
+                APIError::new(
+                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                    err,
+                    OperationError::new(&operation),
+                )
             })?;
 
-            Ok((Some(event), jsep))
+            Ok((Some(response), jsep))
         }
         None => Ok((None, None)),
     }

@@ -21,5 +21,4 @@ You should get a Janus event with specified `transaction` and following body:
 
 Name    | Type   | Default    | Description
 ------- | ------ | ---------- | -----------
-success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false then `error` object is also returned.
-error   | Error  | null       | See [Error object](./api.error.md)
+status  | Int    | _required_ | If status is equal to 200 then everything went well otherwise an error occurred (see [error object](./api.error.md)).
