@@ -18,8 +18,6 @@ extern crate gstreamer;
 extern crate gstreamer_app;
 extern crate gstreamer_base;
 
-extern crate futures;
-extern crate futures_fs;
 extern crate rusoto_core;
 extern crate rusoto_s3;
 extern crate s4;
@@ -150,9 +148,13 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     let config = STATE.config.get().expect("Empty config?!");
     match Uploader::new(config.uploading.clone()) {
         Ok(uploader) => {
-            let res = uploader.upload_file(Path::new("/build/test_bd"), "origin.webinar.beta.foxford.ru", "test-test");
+            // let res = uploader.upload_file(
+            //     Path::new("/build/test_bd"),
+            //     "origin.webinar.beta.foxford.ru",
+            //     "test-test",
+            // );
 
-            janus_info!("{:?}", res);
+            // janus_info!("{:?}", res);
 
             STATE.uploader.set_if_none(Box::new(uploader));
         }
@@ -233,9 +235,10 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
             match switchboard {
                 Ok(mut switchboard) => {
-                    switchboard
-                        .disconnect(&sess)
-                        .map(|mut recorder| report_error(recorder.finish_record()));
+                    switchboard.disconnect(&sess);
+                    if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
+                        report_error(recorder.finish_record());
+                    }
                 }
                 Err(err) => {
                     janus_err!("[CONFERENCE] {}", err);
@@ -330,7 +333,7 @@ fn incoming_rtp_impl(
     }
 
     let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
-    if let Some(recorder) = switchboard.recorder_for(sess) {
+    if let Some(recorder) = switchboard.recorder_for(&sess) {
         let is_video = match video {
             0 => false,
             _ => true,
@@ -458,6 +461,18 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
                 switchboard.create_room(id, received.session.clone());
             }
             StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
+            StreamOperation::Upload { id, bucket, object } => {
+                if let Some(publisher) = switchboard.publisher_by_stream(&id) {
+                    if let Some(recorder) = switchboard.recorder_for(publisher) {
+                        let path = recorder.get_full_record_path();
+                        STATE
+                            .uploader
+                            .get()
+                            .expect("Empty uploader?!")
+                            .upload_file(&path, &bucket, &object)?;
+                    }
+                }
+            }
         }
     }
 

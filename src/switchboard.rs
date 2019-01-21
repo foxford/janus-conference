@@ -28,11 +28,12 @@ impl Switchboard {
         self.sessions.push(session);
     }
 
-    pub fn disconnect(&mut self, sess: &Session) -> Option<Recorder> {
+    // We don't remove room/publisher and publisher/recorder relations
+    // since they can be useful even when this publisher is not active anymore.
+    pub fn disconnect(&mut self, sess: &Session) {
         self.sessions.retain(|s| s.handle != sess.handle);
         self.publishers_subscribers.remove_key(sess);
         self.publishers_subscribers.remove_value(sess);
-        self.recorders.remove(sess)
     }
 
     pub fn subscribers_to(&self, publisher: &Session) -> &[Arc<Session>] {
@@ -47,8 +48,16 @@ impl Switchboard {
         self.recorders.insert(publisher, recorder);
     }
 
-    pub fn recorder_for(&self, publisher: Arc<Session>) -> Option<&Recorder> {
-        self.recorders.get(&publisher)
+    pub fn publisher_by_stream(&self, id: &RoomId) -> Option<&Arc<Session>> {
+        self.publishers.get(id)
+    }
+
+    pub fn recorder_for(&self, publisher: &Session) -> Option<&Recorder> {
+        self.recorders.get(publisher)
+    }
+
+    pub fn recorder_for_mut(&mut self, publisher: &Session) -> Option<&mut Recorder> {
+        self.recorders.get_mut(publisher)
     }
 
     pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {

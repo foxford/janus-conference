@@ -14,4 +14,10 @@ pub enum StreamOperation {
     Create { id: RoomId },
     #[serde(rename = "stream.read")]
     Read { id: RoomId },
+    #[serde(rename = "stream.upload")]
+    Upload {
+        id: RoomId,
+        bucket: String,
+        object: String,
+    },
 }

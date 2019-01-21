@@ -169,7 +169,7 @@ impl Recorder {
         let mux = GstElement::MP4Mux.make();
 
         let filesink = GstElement::Filesink.make();
-        let location = self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MP4);
+        let location = self.get_full_record_path();
         let location = location.to_string_lossy();
 
         janus_info!("[CONFERENCE] Saving full record to {}", location);
@@ -462,6 +462,10 @@ impl Recorder {
         path.set_extension(extension);
 
         path
+    }
+
+    pub fn get_full_record_path(&self) -> PathBuf {
+        self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MP4)
     }
 
     fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {
