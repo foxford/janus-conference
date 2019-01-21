@@ -37,9 +37,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 
-use messages::{
-    APIError, ErrorStatus, JsepKind, OperationError, Response, StreamOperation, StreamResponse,
-};
+use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 
@@ -376,17 +374,12 @@ fn handle_message_async(
 ) -> Result<(Option<JanssonValue>, Option<JanssonValue>), APIError> {
     match received.message {
         Some(ref message) => {
-            let operation: StreamOperation = utils::jansson_to_serde(&message).map_err(|err| {
-                APIError::new(ErrorStatus::BAD_REQUEST, err, OperationError::unknown())
-            })?;
+            let operation: StreamOperation = utils::jansson_to_serde(&message)
+                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, None))?;
 
             let mut switchboard = STATE.switchboard.write().map_err(|err| {
                 let err = format_err!("{}", err);
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    err,
-                    OperationError::new(&operation),
-                )
+                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
             })?;
 
             let (response, jsep) = match operation {
@@ -394,11 +387,7 @@ fn handle_message_async(
                     switchboard.create_stream(id.to_string(), received.session.clone());
 
                     let answer = handle_jsep(&received.jsep).map_err(|err| {
-                        APIError::new(
-                            ErrorStatus::BAD_REQUEST,
-                            err,
-                            OperationError::new(&operation),
-                        )
+                        APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation))
                     })?;
 
                     let offer = generate_subsciber_offer(&answer);
@@ -411,11 +400,7 @@ fn handle_message_async(
                         .session
                         .set_subscriber_offer(offer)
                         .map_err(|err| {
-                            APIError::new(
-                                ErrorStatus::INTERNAL_SERVER_ERROR,
-                                err,
-                                OperationError::new(&operation),
-                            )
+                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                         })?;
 
                     let answer = answer.to_glibstring().to_string_lossy().to_string();
@@ -424,15 +409,11 @@ fn handle_message_async(
                             APIError::new(
                                 ErrorStatus::INTERNAL_SERVER_ERROR,
                                 Error::from(err),
-                                OperationError::new(&operation),
+                                Some(&operation),
                             )
                         })?;
                     let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
-                        APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            err,
-                            OperationError::new(&operation),
-                        )
+                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                     })?;
 
                     (response, Some(jsep))
@@ -441,11 +422,7 @@ fn handle_message_async(
                     switchboard
                         .join_stream(&id, received.session.clone())
                         .map_err(|err| {
-                            APIError::new(
-                                ErrorStatus::NOT_FOUND,
-                                err,
-                                OperationError::new(&operation),
-                            )
+                            APIError::new(ErrorStatus::NOT_FOUND, err, Some(&operation))
                         })?;
 
                     (StreamResponse::Read {}, None)
@@ -458,15 +435,11 @@ fn handle_message_async(
                 APIError::new(
                     ErrorStatus::INTERNAL_SERVER_ERROR,
                     Error::from(err),
-                    OperationError::new(&operation),
+                    Some(&operation),
                 )
             })?;
             let response = utils::serde_to_jansson(&response).map_err(|err| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    err,
-                    OperationError::new(&operation),
-                )
+                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
             })?;
 
             Ok((Some(response), jsep))

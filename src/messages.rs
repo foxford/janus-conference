@@ -69,7 +69,16 @@ pub struct APIError {
 }
 
 impl APIError {
-    pub fn new(status: StatusCode, detail: failure::Error, operation: OperationError) -> Self {
+    pub fn new(
+        status: StatusCode,
+        detail: failure::Error,
+        operation: Option<&StreamOperation>,
+    ) -> Self {
+        let operation = match operation {
+            None => OperationErrorDescription::unknown(),
+            Some(op) => OperationErrorDescription::new(op),
+        };
+
         Self {
             ty: operation.ty,
             title: operation.title,
@@ -79,7 +88,7 @@ impl APIError {
     }
 }
 
-pub struct OperationError {
+struct OperationErrorDescription {
     ty: String,
     title: String,
 }
@@ -91,8 +100,8 @@ const CREATE_ERROR_TITLE: &str = "Error creating a stream";
 const READ_ERROR: &str = "stream_read_error";
 const READ_ERROR_TITLE: &str = "Error reading a stream";
 
-impl OperationError {
-    pub fn new(operation: &StreamOperation) -> Self {
+impl OperationErrorDescription {
+    fn new(operation: &StreamOperation) -> Self {
         let (ty, title) = match operation {
             StreamOperation::Create { .. } => (CREATE_ERROR, CREATE_ERROR_TITLE),
             StreamOperation::Read { .. } => (READ_ERROR, READ_ERROR_TITLE),
@@ -104,7 +113,7 @@ impl OperationError {
         }
     }
 
-    pub fn unknown() -> Self {
+    fn unknown() -> Self {
         Self {
             ty: UNKNOWN_ERROR.to_string(),
             title: UNKNOWN_ERROR_TITLE.to_string(),
