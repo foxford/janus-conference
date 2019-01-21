@@ -41,6 +41,10 @@ impl Switchboard {
         self.publishers_subscribers.get_key(subscriber)
     }
 
+    pub fn publisher_by_stream(&self, id: &StreamId) -> Option<&Arc<Session>> {
+        self.publishers.get(id)
+    }
+
     pub fn create_stream(&mut self, id: StreamId, publisher: Arc<Session>) {
         let old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher.clone());
