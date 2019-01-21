@@ -3,8 +3,11 @@
 Janus server requires client to [initialize session and get plugin handle](https://janus.conf.meetecho.com/docs/rest.html)
 before interaction with plugin.
 
+- [Error object](./api.error.md)
+
 - [stream.create](./api.stream.create.md)
 - [stream.read](./api.stream.read.md)
+
 
 ## Common properties
 

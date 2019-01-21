@@ -21,8 +21,4 @@ You should get a Janus event with specified `transaction` and following body:
 
 Name    | Type   | Default    | Description
 ------- | ------ | ---------- | -----------
-success                       | Bool   | _required_ | Whether operation succeeded or not. If it's false then `error` object is also returned.
-error.detail                  | String | _required_ | Human-readable description of failure.
-error.kind                    | String | _required_ | Whether `Internal`, `BadRequest`, `NonExistentStream`.
-error.kind.BadRequest.reason  | String | _required_ | Why exactly `BadRequest` happened.
-error.kind.NonExistentStream.id | String | _required_ | Id of non-existent stream.
+status  | Int    | _required_ | If status is equal to 200 then everything went well otherwise an error occurred (see [error object](./api.error.md)).

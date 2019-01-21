@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use failure::{err_msg, Error};
+use failure::Error;
 
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::StreamId;
@@ -70,7 +70,7 @@ impl Switchboard {
                 .publishers_subscribers
                 .associate(publisher.clone(), subscriber),
             None => {
-                return Err(err_msg("Failed to join non-existent stream"));
+                return Err(format_err!("Stream with Id = {} does not exist", id));
             }
         }
 

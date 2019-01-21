@@ -1,4 +1,5 @@
 use failure;
+use http::StatusCode;
 
 pub type StreamId = String;
 
@@ -18,50 +19,104 @@ pub enum StreamOperation {
     Read { id: StreamId },
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum StreamResponse {
+    Create { offer: String },
+    Read {},
+}
+
+pub type ErrorStatus = StatusCode;
+
+#[derive(Serialize)]
+#[serde(remote = "http::StatusCode")]
+struct Status(#[serde(getter = "http::StatusCode::as_u16")] u16);
+
+#[derive(Serialize)]
+pub struct Response {
+    #[serde(with = "Status")]
+    status: ErrorStatus,
+    #[serde(flatten)]
+    response: Option<StreamResponse>,
+    #[serde(flatten)]
+    error: Option<APIError>,
+}
+
+impl Response {
+    pub fn new(response: Option<StreamResponse>, error: Option<APIError>) -> Self {
+        let status = match &error {
+            None => StatusCode::OK,
+            Some(err) => err.status,
+        };
+
+        Self {
+            status,
+            response,
+            error,
+        }
+    }
+}
+
 #[derive(Debug, Fail, Serialize)]
-#[fail(display = "{}: {}", kind, detail)]
+#[fail(display = "[{} - {}] {}: {}", ty, status, title, detail)]
 pub struct APIError {
-    pub kind: ErrorKind,
+    #[serde(rename = "type")]
+    ty: String,
+    title: String,
+    #[serde(skip)]
+    pub status: ErrorStatus,
     detail: String,
 }
 
-#[derive(Debug, Fail, Serialize)]
-pub enum ErrorKind {
-    #[fail(display = "Internal error")]
-    Internal,
-    #[fail(display = "Bad request ({})", reason)]
-    BadRequest { reason: String },
-    #[fail(display = "Stream {} does not exist", id)]
-    NonExistentStream { id: StreamId },
+impl APIError {
+    pub fn new(
+        status: StatusCode,
+        detail: failure::Error,
+        operation: Option<&StreamOperation>,
+    ) -> Self {
+        let operation = match operation {
+            None => OperationErrorDescription::unknown(),
+            Some(op) => OperationErrorDescription::new(op),
+        };
+
+        Self {
+            ty: operation.ty,
+            title: operation.title,
+            status,
+            detail: detail.to_string(),
+        }
+    }
 }
 
-pub trait ToAPIError {
-    fn to_internal(&self) -> APIError;
-    fn to_bad_request(&self, reason: &'static str) -> APIError;
-    fn to_non_existent_stream(&self, id: StreamId) -> APIError;
+struct OperationErrorDescription {
+    ty: String,
+    title: String,
 }
 
-impl ToAPIError for failure::Error {
-    fn to_internal(&self) -> APIError {
-        APIError {
-            kind: ErrorKind::Internal,
-            detail: self.to_string(),
+const UNKNOWN_ERROR: &str = "unknown_error";
+const UNKNOWN_ERROR_TITLE: &str = "An error occured during unknown operation";
+const CREATE_ERROR: &str = "stream_create_error";
+const CREATE_ERROR_TITLE: &str = "Error creating a stream";
+const READ_ERROR: &str = "stream_read_error";
+const READ_ERROR_TITLE: &str = "Error reading a stream";
+
+impl OperationErrorDescription {
+    fn new(operation: &StreamOperation) -> Self {
+        let (ty, title) = match operation {
+            StreamOperation::Create { .. } => (CREATE_ERROR, CREATE_ERROR_TITLE),
+            StreamOperation::Read { .. } => (READ_ERROR, READ_ERROR_TITLE),
+        };
+
+        Self {
+            ty: ty.to_string(),
+            title: title.to_string(),
         }
     }
 
-    fn to_bad_request(&self, title: &'static str) -> APIError {
-        APIError {
-            kind: ErrorKind::BadRequest {
-                reason: self.to_string(),
-            },
-            detail: String::from(title),
-        }
-    }
-
-    fn to_non_existent_stream(&self, id: StreamId) -> APIError {
-        APIError {
-            kind: ErrorKind::NonExistentStream { id },
-            detail: self.to_string(),
+    fn unknown() -> Self {
+        Self {
+            ty: UNKNOWN_ERROR.to_string(),
+            title: UNKNOWN_ERROR_TITLE.to_string(),
         }
     }
 }
