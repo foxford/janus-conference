@@ -7,6 +7,7 @@ before interaction with plugin.
 
 - [stream.create](./api.stream.create.md)
 - [stream.read](./api.stream.read.md)
+- [stream.read.complete](./api.stream.read.complete.md)
 
 
 ## Common properties
