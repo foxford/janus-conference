@@ -75,7 +75,7 @@ impl APIError {
         operation: Option<&StreamOperation>,
     ) -> Self {
         let operation = match operation {
-            None => OperationErrorDescription::unknown(),
+            None => OperationErrorDescription::unknown(status),
             Some(op) => OperationErrorDescription::new(op),
         };
 
@@ -93,8 +93,8 @@ struct OperationErrorDescription {
     title: String,
 }
 
-const UNKNOWN_ERROR: &str = "unknown_error";
-const UNKNOWN_ERROR_TITLE: &str = "An error occured during unknown operation";
+const UNKNOWN_ERROR: &str = "about::blank";
+
 const CREATE_ERROR: &str = "stream_create_error";
 const CREATE_ERROR_TITLE: &str = "Error creating a stream";
 const READ_ERROR: &str = "stream_read_error";
@@ -113,10 +113,10 @@ impl OperationErrorDescription {
         }
     }
 
-    fn unknown() -> Self {
+    fn unknown(status: StatusCode) -> Self {
         Self {
             ty: UNKNOWN_ERROR.to_string(),
-            title: UNKNOWN_ERROR_TITLE.to_string(),
+            title: status.canonical_reason().unwrap_or("").to_string(),
         }
     }
 }
