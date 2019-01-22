@@ -391,6 +391,7 @@ fn handle_message_async(
                     })?;
 
                     let offer = generate_subsciber_offer(&answer);
+                    janus_info!("[CONFERENCE] Offer for subscriber: {:?}", offer);
 
                     let response = StreamResponse::Create {
                         offer: JsepKind::Offer {
@@ -456,7 +457,8 @@ fn generate_subsciber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
 
     offer_sdp!(
         std::ptr::null(),
-        answer_to_publisher.c_addr as *const _,
+        std::ptr::null(),
+        // answer_to_publisher.c_addr as *const _,
         OfferAnswerParameters::Audio,
         1,
         OfferAnswerParameters::AudioCodec,
