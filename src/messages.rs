@@ -22,7 +22,7 @@ pub enum StreamOperation {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum StreamResponse {
-    Create { offer: String },
+    Create { offer: JsepKind },
     Read {},
 }
 

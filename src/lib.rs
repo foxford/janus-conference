@@ -393,7 +393,9 @@ fn handle_message_async(
                     let offer = generate_subsciber_offer(&answer);
 
                     let response = StreamResponse::Create {
-                        offer: offer.to_glibstring().to_string_lossy().to_string(),
+                        offer: JsepKind::Offer {
+                            sdp: offer.to_glibstring().to_string_lossy().to_string(),
+                        },
                     };
 
                     received
