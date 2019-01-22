@@ -390,7 +390,7 @@ fn handle_message_async(
                         APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation))
                     })?;
 
-                    let offer = generate_subsciber_offer(&answer);
+                    let offer = generate_subscriber_offer(&answer);
                     janus_info!("[CONFERENCE] Offer for subscriber: {:?}", offer);
 
                     let response = StreamResponse::Create {
@@ -475,7 +475,7 @@ fn handle_message_async(
     }
 }
 
-fn generate_subsciber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
+fn generate_subscriber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
     let audio_payload_type = answer_to_publisher.get_payload_type(AUDIO_CODEC.to_cstr());
     let video_payload_type = answer_to_publisher.get_payload_type(VIDEO_CODEC.to_cstr());
 
