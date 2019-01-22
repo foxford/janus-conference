@@ -428,8 +428,32 @@ fn handle_message_async(
                             APIError::new(ErrorStatus::NOT_FOUND, err, Some(&operation))
                         })?;
 
-                    (StreamResponse::Read {}, None)
+                    let jsep = if let Some(publisher) = switchboard.publisher_by_stream(id) {
+                        let offer = publisher.subscriber_offer.lock().map_err(|err| {
+                            let err = format_err!("{}", err);
+                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                        })?;
+                        let offer = offer.as_ref().unwrap();
+
+                        let jsep = serde_json::to_value(offer).map_err(|err| {
+                            APIError::new(
+                                ErrorStatus::INTERNAL_SERVER_ERROR,
+                                Error::from(err),
+                                Some(&operation),
+                            )
+                        })?;
+                        let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
+                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                        })?;
+
+                        Some(jsep)
+                    } else {
+                        None
+                    };
+
+                    (StreamResponse::Read {}, jsep)
                 }
+                StreamOperation::ReadComplete { .. } => (StreamResponse::ReadComplete {}, None),
             };
 
             let response = Response::new(Some(response), None);
@@ -457,8 +481,7 @@ fn generate_subsciber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
 
     offer_sdp!(
         std::ptr::null(),
-        std::ptr::null(),
-        // answer_to_publisher.c_addr as *const _,
+        answer_to_publisher.c_addr as *const _,
         OfferAnswerParameters::Audio,
         1,
         OfferAnswerParameters::AudioCodec,

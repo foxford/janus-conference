@@ -17,6 +17,8 @@ pub enum StreamOperation {
     Create { id: StreamId },
     #[serde(rename = "stream.read")]
     Read { id: StreamId },
+    #[serde(rename = "stream.read.complete")]
+    ReadComplete { id: StreamId },
 }
 
 #[derive(Serialize)]
@@ -24,6 +26,7 @@ pub enum StreamOperation {
 pub enum StreamResponse {
     Create { offer: JsepKind },
     Read {},
+    ReadComplete {},
 }
 
 pub type ErrorStatus = StatusCode;
@@ -99,12 +102,17 @@ const CREATE_ERROR: &str = "stream_create_error";
 const CREATE_ERROR_TITLE: &str = "Error creating a stream";
 const READ_ERROR: &str = "stream_read_error";
 const READ_ERROR_TITLE: &str = "Error reading a stream";
+const READ_COMPLETE_ERROR: &str = "stream_read_complete_error";
+const READ_COMPLETE_ERROR_TITLE: &str = "Error completing a stream read";
 
 impl OperationErrorDescription {
     fn new(operation: &StreamOperation) -> Self {
         let (ty, title) = match operation {
             StreamOperation::Create { .. } => (CREATE_ERROR, CREATE_ERROR_TITLE),
             StreamOperation::Read { .. } => (READ_ERROR, READ_ERROR_TITLE),
+            StreamOperation::ReadComplete { .. } => {
+                (READ_COMPLETE_ERROR, READ_COMPLETE_ERROR_TITLE)
+            }
         };
 
         Self {
