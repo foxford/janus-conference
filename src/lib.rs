@@ -15,7 +15,7 @@ extern crate multimap;
 #[macro_use]
 extern crate failure;
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::slice;
 use std::sync::{mpsc, Arc, RwLock};
@@ -24,8 +24,7 @@ use std::thread;
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp::{self, OfferAnswerParameters},
-    JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
     RawJanssonValue, RawPluginResult,
 };
 
@@ -382,43 +381,38 @@ fn handle_message_async(
                 APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
             })?;
 
-            let (response, jsep) = match operation {
-                StreamOperation::Create { ref id } => {
-                    switchboard.create_stream(id.to_string(), received.session.clone());
+            let maybe_jsep = parse_jsep(&received.jsep)
+                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation)));
 
-                    let answer = handle_jsep(&received.jsep).map_err(|err| {
-                        APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation))
+            let jsep = match operation {
+                StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
+                    let offer = maybe_jsep?;
+                    let answer = offer.negotatiate(VIDEO_CODEC, AUDIO_CODEC);
+
+                    received.session.set_offer(offer).map_err(|err| {
+                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                     })?;
 
-                    let offer = generate_subsciber_offer(&answer);
-
-                    let response = StreamResponse::Create {
-                        offer: JsepKind::Offer {
-                            sdp: offer.to_glibstring().to_string_lossy().to_string(),
-                        },
-                    };
-
-                    received
-                        .session
-                        .set_subscriber_offer(offer)
-                        .map_err(|err| {
-                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                        })?;
-
-                    let answer = answer.to_glibstring().to_string_lossy().to_string();
-                    let jsep =
-                        serde_json::to_value(JsepKind::Answer { sdp: answer }).map_err(|err| {
-                            APIError::new(
-                                ErrorStatus::INTERNAL_SERVER_ERROR,
-                                Error::from(err),
-                                Some(&operation),
-                            )
-                        })?;
+                    let jsep = serde_json::to_value(answer).map_err(|err| {
+                        APIError::new(
+                            ErrorStatus::INTERNAL_SERVER_ERROR,
+                            Error::from(err),
+                            Some(&operation),
+                        )
+                    })?;
                     let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                     })?;
 
-                    (response, Some(jsep))
+                    Some(jsep)
+                }
+            };
+
+            let response = match operation {
+                StreamOperation::Create { ref id } => {
+                    switchboard.create_stream(id.to_string(), received.session.clone());
+
+                    StreamResponse::Create {}
                 }
                 StreamOperation::Read { ref id } => {
                     switchboard
@@ -427,7 +421,7 @@ fn handle_message_async(
                             APIError::new(ErrorStatus::NOT_FOUND, err, Some(&operation))
                         })?;
 
-                    (StreamResponse::Read {}, None)
+                    StreamResponse::Read {}
                 }
             };
 
@@ -450,57 +444,11 @@ fn handle_message_async(
     }
 }
 
-fn generate_subsciber_offer(answer_to_publisher: &sdp::Sdp) -> sdp::Sdp {
-    let audio_payload_type = answer_to_publisher.get_payload_type(AUDIO_CODEC.to_cstr());
-    let video_payload_type = answer_to_publisher.get_payload_type(VIDEO_CODEC.to_cstr());
-
-    offer_sdp!(
-        std::ptr::null(),
-        answer_to_publisher.c_addr as *const _,
-        OfferAnswerParameters::Audio,
-        1,
-        OfferAnswerParameters::AudioCodec,
-        AUDIO_CODEC.to_cstr().as_ptr(),
-        OfferAnswerParameters::AudioPayloadType,
-        audio_payload_type.unwrap_or(111),
-        OfferAnswerParameters::AudioDirection,
-        sdp::MediaDirection::JANUS_SDP_SENDONLY,
-        OfferAnswerParameters::Video,
-        1,
-        OfferAnswerParameters::VideoCodec,
-        VIDEO_CODEC.to_cstr().as_ptr(),
-        OfferAnswerParameters::VideoPayloadType,
-        video_payload_type.unwrap_or(96),
-        OfferAnswerParameters::VideoDirection,
-        sdp::MediaDirection::JANUS_SDP_SENDONLY
-    )
-}
-
-fn handle_jsep(jsep: &Option<JanssonValue>) -> Result<sdp::Sdp, Error> {
+fn parse_jsep(jsep: &Option<JanssonValue>) -> Result<JsepKind, Error> {
     match jsep {
         Some(jsep) => {
             let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
-
-            let response = match jsep_json {
-                JsepKind::Offer { sdp } => {
-                    let offer = sdp::Sdp::parse(&CString::new(sdp)?)?;
-                    janus_verb!("[CONFERENCE] offer: {:?}", offer);
-
-                    let mut answer = answer_sdp!(
-                        offer,
-                        OfferAnswerParameters::AudioCodec,
-                        AUDIO_CODEC.to_cstr().as_ptr(),
-                        OfferAnswerParameters::VideoCodec,
-                        VIDEO_CODEC.to_cstr().as_ptr()
-                    );
-                    janus_verb!("[CONFERENCE] answer: {:?}", answer);
-
-                    answer
-                }
-                JsepKind::Answer { .. } => unreachable!(),
-            };
-
-            Ok(response)
+            Ok(jsep_json)
         }
         None => Err(failure::err_msg("JSEP is empty")),
     }

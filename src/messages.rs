@@ -1,13 +1,36 @@
 use failure;
 use http::StatusCode;
+use janus::sdp::{AudioCodec, OfferAnswerParameters, Sdp, VideoCodec};
 
 pub type StreamId = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum JsepKind {
-    Offer { sdp: String },
-    Answer { sdp: String },
+    Offer { sdp: Sdp },
+    Answer { sdp: Sdp },
+}
+
+impl JsepKind {
+    pub fn negotatiate(&self, video_codec: VideoCodec, audio_codec: AudioCodec) -> Self {
+        match self {
+            JsepKind::Offer { sdp } => {
+                janus_verb!("[CONFERENCE] offer: {:?}", sdp);
+
+                let mut answer = answer_sdp!(
+                    sdp,
+                    OfferAnswerParameters::AudioCodec,
+                    audio_codec.to_cstr().as_ptr(),
+                    OfferAnswerParameters::VideoCodec,
+                    video_codec.to_cstr().as_ptr()
+                );
+                janus_verb!("[CONFERENCE] answer: {:?}", answer);
+
+                JsepKind::Answer { sdp: answer }
+            }
+            JsepKind::Answer { .. } => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,7 +45,7 @@ pub enum StreamOperation {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum StreamResponse {
-    Create { offer: JsepKind },
+    Create {},
     Read {},
 }
 
