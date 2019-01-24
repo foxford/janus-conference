@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +12,24 @@ use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
 
 use messages::StreamId;
+
+#[derive(Deserialize, Debug)]
+pub struct RecordingConfig {
+    pub recordings_directory: String,
+}
+
+impl RecordingConfig {
+    pub fn check(&mut self) -> Result<(), Error> {
+        if !Path::new(&self.recordings_directory).exists() {
+            return Err(format_err!(
+                "Recordings: recordings directory {} does not exist",
+                self.recordings_directory
+            ));
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum VideoCodec {
@@ -109,7 +127,7 @@ unsafe impl Sync for Recorder {}
 
 impl Recorder {
     pub fn new(
-        save_root_dir: &str,
+        recording_config: &RecordingConfig,
         stream_id: &str,
         video_codec: VideoCodec,
         audio_codec: AudioCodec,
@@ -119,7 +137,7 @@ impl Recorder {
         let mut rec = Self {
             sender,
             stream_id: String::from(stream_id),
-            save_root_dir: String::from(save_root_dir),
+            save_root_dir: recording_config.recordings_directory.clone(),
             video_codec,
             audio_codec,
             recorder_thread_handle: None,

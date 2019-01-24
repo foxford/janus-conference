@@ -1,3 +1,4 @@
+use std::env;
 use std::fmt;
 use std::path::Path;
 
@@ -6,7 +7,26 @@ use rusoto_core::Region;
 use rusoto_s3::{PutObjectRequest, S3Client};
 use s4::{self, S4};
 
-use config::Uploading as UploadingConfig;
+#[derive(Deserialize, Debug, Default, Clone)]
+pub struct UploadingConfig {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint: String,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
+impl UploadingConfig {
+    pub fn check(&mut self) -> Result<(), Error> {
+        self.region = env::var("AWS_REGION")?;
+        self.endpoint = env::var("AWS_ENDPOINT")?;
+        self.access_key = env::var("AWS_ACCESS_KEY_ID")?;
+        self.secret_key = env::var("AWS_SECRET_ACCESS_KEY")?;
+        self.bucket = env::var("AWS_BUCKET")?;
+
+        Ok(())
+    }
+}
 
 pub struct Uploader {
     client: S3Client,

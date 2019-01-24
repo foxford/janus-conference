@@ -1,4 +1,3 @@
-use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -6,11 +5,14 @@ use std::path::Path;
 use failure::Error;
 use toml;
 
+use recorder::RecordingConfig;
+use uploader::UploadingConfig;
+
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub recordings: Recordings,
+    pub recordings: RecordingConfig,
     #[serde(skip)]
-    pub uploading: Uploading,
+    pub uploading: UploadingConfig,
 }
 
 impl Config {
@@ -25,44 +27,5 @@ impl Config {
         config.uploading.check()?;
 
         Ok(config)
-    }
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Recordings {
-    pub recordings_directory: String,
-}
-
-impl Recordings {
-    pub fn check(&mut self) -> Result<(), Error> {
-        if !Path::new(&self.recordings_directory).exists() {
-            return Err(format_err!(
-                "Recordings: recordings directory {} does not exist",
-                self.recordings_directory
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Deserialize, Debug, Default, Clone)]
-pub struct Uploading {
-    pub bucket: String,
-    pub region: String,
-    pub endpoint: String,
-    pub access_key: String,
-    pub secret_key: String,
-}
-
-impl Uploading {
-    pub fn check(&mut self) -> Result<(), Error> {
-        self.region = env::var("AWS_REGION")?;
-        self.endpoint = env::var("AWS_ENDPOINT")?;
-        self.access_key = env::var("AWS_ACCESS_KEY_ID")?;
-        self.secret_key = env::var("AWS_SECRET_ACCESS_KEY")?;
-        self.bucket = env::var("AWS_BUCKET")?;
-
-        Ok(())
     }
 }

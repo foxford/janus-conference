@@ -140,6 +140,7 @@ fn init_config(config_path: *const c_char) -> Result<config::Config, Error> {
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     match init_config(config_path) {
         Ok(config) => {
+            janus_info!("{:?}", config);
             STATE.config.set_if_none(Box::new(config));
         }
         Err(err) => {
@@ -492,7 +493,7 @@ fn handle_message_async(
 
                     let config = STATE.config.get().expect("Empty config?!");
                     let recorder = Recorder::new(
-                        &config.recordings.recordings_directory,
+                        &config.recordings,
                         &id,
                         VideoCodec::H264,
                         AudioCodec::OPUS,
