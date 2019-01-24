@@ -5,8 +5,8 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate config;
 extern crate http;
-extern crate toml;
 
 #[macro_use]
 extern crate lazy_static;
@@ -40,7 +40,7 @@ use janus::{
 };
 
 mod bidirectional_multimap;
-mod config;
+mod conf;
 mod janus_callbacks;
 mod messages;
 mod recorder;
@@ -50,7 +50,7 @@ mod switchboard;
 mod utils;
 mod uploader;
 
-use config::Config;
+use conf::Config;
 use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
 use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
@@ -67,7 +67,6 @@ struct Message {
 
 unsafe impl Send for Message {}
 
-const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 // TODO: merge this with codecs for recorder
 const AUDIO_CODEC: sdp::AudioCodec = sdp::AudioCodec::Opus;
 const VIDEO_CODEC: sdp::VideoCodec = sdp::VideoCodec::H264;
@@ -123,18 +122,12 @@ fn report_error(res: Result<(), Error>) {
     }
 }
 
-fn init_config(config_path: *const c_char) -> Result<config::Config, Error> {
+fn init_config(config_path: *const c_char) -> Result<Config, Error> {
     let config_path = unsafe { CStr::from_ptr(config_path) };
     let config_path = config_path.to_str()?;
     let config_path = Path::new(config_path);
-    let mut config_path = config_path.to_path_buf();
-    config_path.push(CONFIG_FILE_NAME);
-    janus_info!(
-        "[CONFERENCE] Reading config located at {}",
-        config_path.to_string_lossy()
-    );
 
-    Ok(config::Config::from_path(&config_path)?)
+    Ok(Config::from_path(config_path)?)
 }
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
@@ -492,12 +485,8 @@ fn handle_message_async(
                     switchboard.create_stream(id.to_owned(), received.session.clone());
 
                     let config = STATE.config.get().expect("Empty config?!");
-                    let recorder = Recorder::new(
-                        &config.recordings,
-                        &id,
-                        VideoCodec::H264,
-                        AudioCodec::OPUS,
-                    );
+                    let recorder =
+                        Recorder::new(&config.recordings, &id, VideoCodec::H264, AudioCodec::OPUS);
                     switchboard.attach_recorder(received.session.clone(), recorder);
 
                     StreamResponse::Create {}

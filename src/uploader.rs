@@ -1,4 +1,3 @@
-use std::env;
 use std::fmt;
 use std::path::Path;
 
@@ -12,20 +11,8 @@ pub struct UploadingConfig {
     pub bucket: String,
     pub region: String,
     pub endpoint: String,
-    pub access_key: String,
-    pub secret_key: String,
-}
-
-impl UploadingConfig {
-    pub fn check(&mut self) -> Result<(), Error> {
-        self.region = env::var("AWS_REGION")?;
-        self.endpoint = env::var("AWS_ENDPOINT")?;
-        self.access_key = env::var("AWS_ACCESS_KEY_ID")?;
-        self.secret_key = env::var("AWS_SECRET_ACCESS_KEY")?;
-        self.bucket = env::var("AWS_BUCKET")?;
-
-        Ok(())
-    }
+    pub access_key_id: String,
+    pub secret_access_key: String,
 }
 
 pub struct Uploader {
@@ -49,8 +36,11 @@ impl Uploader {
             endpoint: config.endpoint,
         };
 
-        let client =
-            s4::new_s3client_with_credentials(region, config.access_key, config.secret_key)?;
+        let client = s4::new_s3client_with_credentials(
+            region,
+            config.access_key_id,
+            config.secret_access_key,
+        )?;
 
         Ok(Self { client })
     }
