@@ -92,12 +92,7 @@ lazy_static! {
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut pli = janus::rtcp::gen_pli();
-        janus_callbacks::relay_rtcp(
-            publisher.as_ref().as_ptr(),
-            1,
-            pli.as_mut_ptr(),
-            pli.len() as i32,
-        );
+        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut pli);
     }
 }
 
@@ -105,12 +100,7 @@ fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut seq = publisher.as_ref().incr_fir_seq() as i32;
         let mut fir = janus::rtcp::gen_fir(&mut seq);
-        janus_callbacks::relay_rtcp(
-            publisher.as_ref().as_ptr(),
-            1,
-            fir.as_mut_ptr(),
-            fir.len() as i32,
-        );
+        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut fir);
     }
 }
 
@@ -165,7 +155,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
         for msg in messages_rx.iter() {
             let push_result = match handle_message_async(&msg) {
                 Ok((response, jsep)) => {
-                    janus_callbacks::push_event(msg.session.handle, msg.transaction, response, jsep)
+                    janus_callbacks::push_event(&msg.session, msg.transaction, response, jsep)
                         .map_err(Error::from)
                 }
                 Err(err) => {
@@ -178,7 +168,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
                         .and_then(|response| {
                             utils::serde_to_jansson(&response).and_then(|response| {
                                 janus_callbacks::push_event(
-                                    msg.session.handle,
+                                    &msg.session,
                                     msg.transaction,
                                     Some(response),
                                     None,
@@ -344,16 +334,19 @@ fn incoming_rtp_impl(
         .read()
         .map_err(|err| format_err!("{}", err))?;
 
+    let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+
     for subscriber in switchboard.subscribers_to(&sess) {
-        janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
+        janus_callbacks::relay_rtp(subscriber, video, buf_slice);
     }
 
-    let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
     if let Some(recorder) = switchboard.recorder_for(&sess) {
         let is_video = match video {
             0 => false,
             _ => true,
         };
+
+        let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
 
         recorder.record_packet(buf, is_video)?;
     }
@@ -378,7 +371,7 @@ fn incoming_rtcp_impl(
         .read()
         .map_err(|err| format_err!("{}", err))?;
 
-    let packet = unsafe { slice::from_raw_parts(buf, len as usize) };
+    let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
 
     match video {
         1 if janus::rtcp::has_pli(packet) => {
@@ -389,7 +382,7 @@ fn incoming_rtcp_impl(
         }
         _ => {
             for subscriber in switchboard.subscribers_to(&sess) {
-                janus_callbacks::relay_rtcp(subscriber.as_ptr(), video, buf, len);
+                janus_callbacks::relay_rtcp(subscriber, video, packet);
             }
         }
     }

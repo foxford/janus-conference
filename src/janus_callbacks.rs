@@ -1,10 +1,9 @@
 use std::os::raw::{c_char, c_int};
 
-use janus::{
-    JanssonValue, JanusError, JanusResult, PluginCallbacks, PluginSession, RawJanssonValue,
-};
+use janus::{JanssonValue, JanusError, JanusResult, PluginCallbacks, RawJanssonValue};
 
 use super::PLUGIN;
+use session::Session;
 
 static mut CALLBACKS: Option<&PluginCallbacks> = None;
 
@@ -21,16 +20,16 @@ fn acquire_callbacks() -> &'static PluginCallbacks {
     unsafe { CALLBACKS }.expect("Gateway is not set")
 }
 
-pub fn relay_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    (acquire_callbacks().relay_rtp)(handle, video, buf, len);
+pub fn relay_rtp(session: &Session, video: c_int, buf: &mut [i8]) {
+    (acquire_callbacks().relay_rtp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
 }
 
-pub fn relay_rtcp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    (acquire_callbacks().relay_rtcp)(handle, video, buf, len);
+pub fn relay_rtcp(session: &Session, video: c_int, buf: &mut [i8]) {
+    (acquire_callbacks().relay_rtcp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
 }
 
 pub fn push_event(
-    handle: *mut PluginSession,
+    session: &Session,
     transaction: *mut c_char,
     body: Option<JanssonValue>,
     jsep: Option<JanssonValue>,
@@ -40,7 +39,7 @@ pub fn push_event(
     let body = unwrap_jansson_option_mut(body);
     let jsep = unwrap_jansson_option_mut(jsep);
 
-    let res = push_event_fn(handle, &mut PLUGIN, transaction, body, jsep);
+    let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
 
     JanusError::from(res)
 }
