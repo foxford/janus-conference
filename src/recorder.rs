@@ -136,7 +136,7 @@ impl Recorder {
 
         let mut rec = Self {
             sender,
-            stream_id: String::from(stream_id),
+            stream_id: stream_id.to_owned(),
             save_root_dir: recording_config.recordings_directory.clone(),
             video_codec,
             audio_codec,
@@ -485,7 +485,7 @@ impl Recorder {
     }
 
     pub fn get_full_record_path(&self) -> PathBuf {
-        self.generate_record_path(Some(String::from(FULL_RECORD_FILENAME)), MP4)
+        self.generate_record_path(Some(FULL_RECORD_FILENAME.to_owned()), MP4)
     }
 
     fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {

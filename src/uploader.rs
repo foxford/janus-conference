@@ -57,8 +57,8 @@ impl Uploader {
 
     pub fn upload_file(&self, file: &Path, bucket: &str, object: &str) -> Result<(), Error> {
         let req = PutObjectRequest {
-            bucket: String::from(bucket),
-            key: String::from(object),
+            bucket: bucket.to_owned(),
+            key: object.to_owned(),
             ..Default::default()
         };
         self.client
