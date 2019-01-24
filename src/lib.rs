@@ -2,10 +2,10 @@
 extern crate janus_plugin as janus;
 
 extern crate serde;
-#[macro_use]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate http;
 extern crate toml;
 
 #[macro_use]
@@ -25,18 +25,18 @@ extern crate s4;
 #[macro_use]
 extern crate failure;
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::sync::{atomic::Ordering, mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp, JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin,
-    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
+    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
@@ -51,7 +51,7 @@ mod utils;
 mod uploader;
 
 use config::Config;
-use messages::{JsepKind, StreamOperation};
+use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
 use recorder::{AudioCodec, Recorder, VideoCodec};
 use session::{Session, SessionState};
 use switchboard::Switchboard;
@@ -68,6 +68,9 @@ struct Message {
 unsafe impl Send for Message {}
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
+// TODO: merge this with codecs for recorder
+const AUDIO_CODEC: sdp::AudioCodec = sdp::AudioCodec::Opus;
+const VIDEO_CODEC: sdp::VideoCodec = sdp::VideoCodec::H264;
 
 #[derive(Debug)]
 struct State {
@@ -100,7 +103,7 @@ fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
 
 fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
-        let mut seq = publisher.as_ref().fir_seq.fetch_add(1, Ordering::Relaxed) as i32;
+        let mut seq = publisher.as_ref().incr_fir_seq() as i32;
         let mut fir = janus::rtcp::gen_fir(&mut seq);
         janus_callbacks::relay_rtcp(
             publisher.as_ref().as_ptr(),
@@ -166,15 +169,41 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
 
     janus_callbacks::init(callbacks);
 
-    let (messages_tx, messages_rx) = mpsc::sync_channel(0);
+    let (messages_tx, messages_rx) = mpsc::sync_channel(10);
 
     STATE.message_channel.set_if_none(Box::new(messages_tx));
 
     thread::spawn(move || {
         janus_info!("[CONFERENCE] Message processing thread is alive.");
         for msg in messages_rx.iter() {
-            if let Some(err) = handle_message_async(msg).err() {
-                janus_err!("Error processing message: {}", err);
+            let push_result = match handle_message_async(&msg) {
+                Ok((response, jsep)) => {
+                    janus_callbacks::push_event(msg.session.handle, msg.transaction, response, jsep)
+                        .map_err(Error::from)
+                }
+                Err(err) => {
+                    janus_err!("Error processing message: {}", err);
+
+                    let response = Response::new(None, Some(err));
+
+                    serde_json::to_value(response)
+                        .map_err(Error::from)
+                        .and_then(|response| {
+                            utils::serde_to_jansson(&response).and_then(|response| {
+                                janus_callbacks::push_event(
+                                    msg.session.handle,
+                                    msg.transaction,
+                                    Some(response),
+                                    None,
+                                )
+                                .map_err(Error::from)
+                            })
+                        })
+                }
+            };
+
+            if let Err(err) = push_result {
+                janus_err!("Error pushing event: {}", err);
             }
         }
     });
@@ -281,7 +310,7 @@ extern "C" fn handle_message(
 
             STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
 
-            PluginResult::ok_wait(Some(c_str!("Processing..."))).into_raw()
+            PluginResult::ok_wait(None).into_raw()
         }
         Err(e) => {
             janus_err!("[CONFERENCE] Failed to restore session state: {}", e);
@@ -424,29 +453,51 @@ const PLUGIN: Plugin = build_plugin!(
 
 export_plugin!(&PLUGIN);
 
-fn handle_message_async(received: Message) -> Result<(), Error> {
-    match received.jsep {
-        Some(jsep) => {
-            handle_jsep(&received.session, received.transaction, &jsep)?;
-        }
-        None => {
-            janus_info!("[CONFERENCE] JSEP is empty, skipping");
-        }
-    };
+fn handle_message_async(
+    received: &Message,
+) -> Result<(Option<JanssonValue>, Option<JanssonValue>), APIError> {
+    match received.message {
+        Some(ref message) => {
+            let operation: StreamOperation = utils::jansson_to_serde(&message)
+                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, None))?;
 
-    if let Some(message) = received.message {
-        let message = message.to_libcstring(JanssonEncodingFlags::empty());
-        let message = message.to_string_lossy();
-        let message: StreamOperation = serde_json::from_str(&message)?;
+            let mut switchboard = STATE.switchboard.write().map_err(|err| {
+                let err = format_err!("{}", err);
+                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+            })?;
 
-        let mut switchboard = STATE
-            .switchboard
-            .write()
-            .map_err(|err| format_err!("{}", err))?;
+            let maybe_jsep = parse_jsep(&received.jsep)
+                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation)));
 
-        match message {
-            StreamOperation::Create { id } => {
-                {
+            let jsep = match operation {
+                StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
+                    let offer = maybe_jsep?;
+                    let answer = offer.negotatiate(VIDEO_CODEC, AUDIO_CODEC);
+
+                    received.session.set_offer(offer).map_err(|err| {
+                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                    })?;
+
+                    let jsep = serde_json::to_value(answer).map_err(|err| {
+                        APIError::new(
+                            ErrorStatus::INTERNAL_SERVER_ERROR,
+                            Error::from(err),
+                            Some(&operation),
+                        )
+                    })?;
+                    let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
+                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                    })?;
+
+                    Some(jsep)
+                }
+                StreamOperation::Upload { .. } => None,
+            };
+
+            let response = match &operation {
+                StreamOperation::Create { ref id } => {
+                    switchboard.create_stream(id.to_string(), received.session.clone());
+
                     let config = STATE.config.get().expect("Empty config?!");
                     let recorder = Recorder::new(
                         &config.recording.root_save_directory,
@@ -454,73 +505,79 @@ fn handle_message_async(received: Message) -> Result<(), Error> {
                         VideoCodec::H264,
                         AudioCodec::OPUS,
                     );
-
                     switchboard.attach_recorder(received.session.clone(), recorder);
-                }
 
-                switchboard.create_room(id, received.session.clone());
-            }
-            StreamOperation::Read { id } => switchboard.join_room(id, received.session.clone()),
-            StreamOperation::Upload { id, bucket, object } => {
-                if let Some(publisher) = switchboard.publisher_by_stream(&id) {
-                    if let Some(recorder) = switchboard.recorder_for(publisher) {
-                        let path = recorder.get_full_record_path();
-                        STATE
-                            .uploader
-                            .get()
-                            .expect("Empty uploader?!")
-                            .upload_file(&path, &bucket, &object)?;
+                    StreamResponse::Create {}
+                }
+                StreamOperation::Read { ref id } => {
+                    switchboard
+                        .join_stream(&id, received.session.clone())
+                        .map_err(|err| {
+                            APIError::new(ErrorStatus::NOT_FOUND, err, Some(&operation))
+                        })?;
+
+                    StreamResponse::Read {}
+                }
+                StreamOperation::Upload { id, bucket, object } => {
+                    if let Some(publisher) = switchboard.publisher_by_stream(&id) {
+                        if let Some(recorder) = switchboard.recorder_for(publisher) {
+                            let path = recorder.get_full_record_path();
+                            STATE
+                                .uploader
+                                .get()
+                                .expect("Empty uploader?!")
+                                .upload_file(&path, &bucket, &object)
+                                .map_err(|err| {
+                                    APIError::new(
+                                        ErrorStatus::INTERNAL_SERVER_ERROR,
+                                        err,
+                                        Some(&operation),
+                                    )
+                                })?;
+
+                            StreamResponse::Upload {}
+                        } else {
+                            return Err(APIError::new(
+                                ErrorStatus::NOT_FOUND,
+                                format_err!("There's no recording for Stream with Id = {}", id),
+                                Some(&operation),
+                            ));
+                        }
+                    } else {
+                        return Err(APIError::new(
+                            ErrorStatus::NOT_FOUND,
+                            format_err!("Stream with Id = {} is not found", id),
+                            Some(&operation),
+                        ));
                     }
                 }
-            }
-        }
-    }
+            };
 
-    Ok(())
+            let response = Response::new(Some(response), None);
+
+            let response = serde_json::to_value(response).map_err(|err| {
+                APIError::new(
+                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                    Error::from(err),
+                    Some(&operation),
+                )
+            })?;
+            let response = utils::serde_to_jansson(&response).map_err(|err| {
+                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+            })?;
+
+            Ok((Some(response), jsep))
+        }
+        None => Ok((None, None)),
+    }
 }
 
-fn handle_jsep(
-    session: &Session,
-    transaction: *mut c_char,
-    jsep: &JanssonValue,
-) -> Result<(), Error> {
-    let jsep = jsep.to_libcstring(JanssonEncodingFlags::empty());
-    let jsep = jsep.to_string_lossy();
-    let jsep_json: JsepKind = serde_json::from_str(&jsep)?;
-
-    let answer: serde_json::Value = match jsep_json {
-        JsepKind::Offer { sdp } => {
-            let offer = sdp::Sdp::parse(&CString::new(sdp)?)?;
-            janus_verb!("[CONFERENCE] offer: {:?}", offer);
-
-            let mut answer = answer_sdp!(
-                offer,
-                sdp::OfferAnswerParameters::AudioCodec,
-                sdp::AudioCodec::Opus.to_cstr().as_ptr(),
-                sdp::OfferAnswerParameters::VideoCodec,
-                sdp::VideoCodec::H264.to_cstr().as_ptr()
-            );
-            janus_verb!("[CONFERENCE] answer: {:?}", answer);
-
-            let answer = answer.to_glibstring().to_string_lossy().to_string();
-
-            serde_json::to_value(JsepKind::Answer { sdp: answer })?
+fn parse_jsep(jsep: &Option<JanssonValue>) -> Result<JsepKind, Error> {
+    match jsep {
+        Some(jsep) => {
+            let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
+            Ok(jsep_json)
         }
-        JsepKind::Answer { .. } => unreachable!(),
-    };
-
-    let event_json = json!({ "result": "ok" });
-    let mut event_serde: JanssonValue =
-        JanssonValue::from_str(&event_json.to_string(), JanssonDecodingFlags::empty())
-            .map_err(|err| format_err!("{}", err))?;
-    let event = event_serde.as_mut_ref();
-
-    let mut jsep_serde: JanssonValue =
-        JanssonValue::from_str(&answer.to_string(), JanssonDecodingFlags::empty())
-            .map_err(|err| format_err!("{}", err))?;
-    let jsep = jsep_serde.as_mut_ref();
-
-    janus_callbacks::push_event(session.handle, transaction, event, jsep)?;
-
-    Ok(())
+        None => Err(failure::err_msg("JSEP is empty")),
+    }
 }

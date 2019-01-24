@@ -4,11 +4,11 @@ Janus Conference is a plugin for general purpose WebRTC server
 Janus. Plugin handles media stream broadcasting from publishers
 to subscribed watchers.
 
-Plugin allow users to start and join stream rooms by the means
-of an [API](./api.md). Each stream publisher is assigned its own room
-where you can send subscribers. So if you have 2 separate video
-streams you want to combine in a single client page you need to
-subscribe the client to 2 separate rooms.
+Plugin allow users to start and join streams by the means
+of an [API](./api.md). Stream is meant to include some
+video and audio tracks coming from separate sources - e.g.
+there is a stream for webcamera and there is a stream for
+screen capture software. 
 
 Plugin configuration is descibed [here](./configuration.md).
 

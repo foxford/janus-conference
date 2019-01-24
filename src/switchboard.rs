@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use failure::Error;
+
 use bidirectional_multimap::BidirectionalMultimap;
-use messages::RoomId;
+use messages::StreamId;
 use recorder::Recorder;
 use session::Session;
 
 #[derive(Debug)]
 pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
-    publishers: HashMap<RoomId, Arc<Session>>,
+    publishers: HashMap<StreamId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
     recorders: HashMap<Arc<Session>, Recorder>,
 }
@@ -48,10 +50,6 @@ impl Switchboard {
         self.recorders.insert(publisher, recorder);
     }
 
-    pub fn publisher_by_stream(&self, id: &RoomId) -> Option<&Arc<Session>> {
-        self.publishers.get(id)
-    }
-
     pub fn recorder_for(&self, publisher: &Session) -> Option<&Recorder> {
         self.recorders.get(publisher)
     }
@@ -60,14 +58,39 @@ impl Switchboard {
         self.recorders.get_mut(publisher)
     }
 
-    pub fn create_room(&mut self, room_id: RoomId, publisher: Arc<Session>) {
-        self.publishers.insert(room_id, publisher);
+    pub fn publisher_by_stream(&self, id: &StreamId) -> Option<&Arc<Session>> {
+        self.publishers.get(id)
     }
 
-    pub fn join_room(&mut self, room_id: RoomId, subscriber: Arc<Session>) {
-        if let Some(publisher) = self.publishers.get(&room_id) {
-            self.publishers_subscribers
-                .associate(publisher.clone(), subscriber);
+    pub fn create_stream(&mut self, id: StreamId, publisher: Arc<Session>) {
+        let old_publisher = self.publishers.remove(&id);
+        self.publishers.insert(id, publisher.clone());
+
+        match old_publisher {
+            Some(old_publisher) => {
+                let maybe_subscribers = self.publishers_subscribers.remove_key(&old_publisher);
+
+                if let Some(subscribers) = maybe_subscribers {
+                    for subscriber in subscribers {
+                        self.publishers_subscribers
+                            .associate(publisher.clone(), subscriber.clone());
+                    }
+                }
+            }
+            None => {}
         }
+    }
+
+    pub fn join_stream(&mut self, id: &StreamId, subscriber: Arc<Session>) -> Result<(), Error> {
+        match self.publishers.get(id) {
+            Some(publisher) => self
+                .publishers_subscribers
+                .associate(publisher.clone(), subscriber),
+            None => {
+                return Err(format_err!("Stream with Id = {} does not exist", id));
+            }
+        }
+
+        Ok(())
     }
 }
