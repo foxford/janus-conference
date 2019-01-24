@@ -485,9 +485,15 @@ fn handle_message_async(
                     switchboard.create_stream(id.to_owned(), received.session.clone());
 
                     let config = STATE.config.get().expect("Empty config?!");
-                    let recorder =
-                        Recorder::new(&config.recordings, &id, VideoCodec::H264, AudioCodec::OPUS);
-                    switchboard.attach_recorder(received.session.clone(), recorder);
+                    if config.recordings.enabled {
+                        let recorder = Recorder::new(
+                            &config.recordings,
+                            &id,
+                            VideoCodec::H264,
+                            AudioCodec::OPUS,
+                        );
+                        switchboard.attach_recorder(received.session.clone(), recorder);
+                    }
 
                     StreamResponse::Create {}
                 }

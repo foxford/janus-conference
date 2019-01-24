@@ -16,10 +16,15 @@ use messages::StreamId;
 #[derive(Deserialize, Debug)]
 pub struct RecordingConfig {
     pub recordings_directory: String,
+    pub enabled: bool,
 }
 
 impl RecordingConfig {
     pub fn check(&mut self) -> Result<(), Error> {
+        if !self.enabled {
+            return Ok(());
+        }
+
         if !Path::new(&self.recordings_directory).exists() {
             return Err(format_err!(
                 "Recordings: recordings directory {} does not exist",

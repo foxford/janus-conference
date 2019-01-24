@@ -8,6 +8,7 @@ Configuration sample:
 ```toml
 [recordings]
 recordings_directory = "recordings/"
+enabled = true
 ```
 
 ## `recordings` section
