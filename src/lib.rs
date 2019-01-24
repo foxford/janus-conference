@@ -35,7 +35,7 @@ use std::thread;
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
     RawJanssonValue, RawPluginResult,
 };
 
@@ -48,11 +48,13 @@ mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
+mod codecs;
 mod uploader;
 
+use codecs::{AudioCodec, VideoCodec};
 use conf::Config;
 use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
-use recorder::{AudioCodec, Recorder, VideoCodec};
+use recorder::Recorder;
 use session::{Session, SessionState};
 use switchboard::Switchboard;
 use uploader::Uploader;
@@ -67,9 +69,8 @@ struct Message {
 
 unsafe impl Send for Message {}
 
-// TODO: merge this with codecs for recorder
-const AUDIO_CODEC: sdp::AudioCodec = sdp::AudioCodec::Opus;
-const VIDEO_CODEC: sdp::VideoCodec = sdp::VideoCodec::H264;
+const AUDIO_CODEC: AudioCodec = AudioCodec::OPUS;
+const VIDEO_CODEC: VideoCodec = VideoCodec::H264;
 
 #[derive(Debug)]
 struct State {
@@ -458,7 +459,7 @@ fn handle_message_async(
             let jsep = match operation {
                 StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
                     let offer = maybe_jsep?;
-                    let answer = offer.negotatiate(VIDEO_CODEC, AUDIO_CODEC);
+                    let answer = offer.negotatiate(VIDEO_CODEC.into(), AUDIO_CODEC.into());
 
                     received.session.set_offer(offer).map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))

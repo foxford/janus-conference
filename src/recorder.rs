@@ -11,6 +11,7 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
 
+use codecs::{AudioCodec, VideoCodec};
 use messages::StreamId;
 
 #[derive(Deserialize, Debug)]
@@ -33,56 +34,6 @@ impl RecordingConfig {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum VideoCodec {
-    H264,
-}
-
-impl VideoCodec {
-    pub fn name(&self) -> &str {
-        match self {
-            VideoCodec::H264 => "H264",
-        }
-    }
-
-    pub fn new_parse_elem(self) -> gst::Element {
-        match self {
-            VideoCodec::H264 => GstElement::H264Parse.make(),
-        }
-    }
-
-    pub fn new_depay_elem(self) -> gst::Element {
-        match self {
-            VideoCodec::H264 => GstElement::RTPH264Depay.make(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum AudioCodec {
-    OPUS,
-}
-
-impl AudioCodec {
-    pub fn name(&self) -> &str {
-        match self {
-            AudioCodec::OPUS => "OPUS",
-        }
-    }
-
-    pub fn new_parse_elem(self) -> gst::Element {
-        match self {
-            AudioCodec::OPUS => GstElement::OpusParse.make(),
-        }
-    }
-
-    pub fn new_depay_elem(self) -> gst::Element {
-        match self {
-            AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
-        }
     }
 }
 
@@ -625,6 +576,34 @@ impl GstElement {
         match gst::ElementFactory::make(self.name(), None) {
             Some(elem) => elem,
             None => panic!("Failed to create GStreamer element {}", self.name()),
+        }
+    }
+}
+
+impl VideoCodec {
+    pub fn new_parse_elem(self) -> gst::Element {
+        match self {
+            VideoCodec::H264 => GstElement::H264Parse.make(),
+        }
+    }
+
+    pub fn new_depay_elem(self) -> gst::Element {
+        match self {
+            VideoCodec::H264 => GstElement::RTPH264Depay.make(),
+        }
+    }
+}
+
+impl AudioCodec {
+    pub fn new_parse_elem(self) -> gst::Element {
+        match self {
+            AudioCodec::OPUS => GstElement::OpusParse.make(),
+        }
+    }
+
+    pub fn new_depay_elem(self) -> gst::Element {
+        match self {
+            AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
         }
     }
 }
