@@ -151,14 +151,6 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     let config = STATE.config.get().expect("Empty config?!");
     match Uploader::new(config.uploading.clone()) {
         Ok(uploader) => {
-            // let res = uploader.upload_file(
-            //     Path::new("/build/test_bd"),
-            //     "origin.webinar.beta.foxford.ru",
-            //     "test-test",
-            // );
-
-            // janus_info!("{:?}", res);
-
             STATE.uploader.set_if_none(Box::new(uploader));
         }
         Err(err) => {
