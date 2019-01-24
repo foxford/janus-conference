@@ -141,15 +141,15 @@ impl OperationErrorDescription {
         };
 
         Self {
-            ty: ty.to_string(),
-            title: title.to_string(),
+            ty: ty.to_owned(),
+            title: title.to_owned(),
         }
     }
 
     fn unknown(status: StatusCode) -> Self {
         Self {
-            ty: UNKNOWN_ERROR.to_string(),
-            title: status.canonical_reason().unwrap_or("").to_string(),
+            ty: UNKNOWN_ERROR.to_owned(),
+            title: status.canonical_reason().unwrap_or("").to_owned(),
         }
     }
 }

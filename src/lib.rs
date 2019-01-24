@@ -496,7 +496,7 @@ fn handle_message_async(
 
             let response = match &operation {
                 StreamOperation::Create { ref id } => {
-                    switchboard.create_stream(id.to_string(), received.session.clone());
+                    switchboard.create_stream(id.to_owned(), received.session.clone());
 
                     let config = STATE.config.get().expect("Empty config?!");
                     let recorder = Recorder::new(
