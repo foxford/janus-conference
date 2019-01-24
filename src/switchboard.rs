@@ -30,7 +30,7 @@ impl Switchboard {
         self.sessions.push(session);
     }
 
-    // We don't remove room/publisher and publisher/recorder relations
+    // We don't remove stream/publisher and publisher/recorder relations
     // since they can be useful even when this publisher is not active anymore.
     pub fn disconnect(&mut self, sess: &Session) {
         self.sessions.retain(|s| s.handle != sess.handle);

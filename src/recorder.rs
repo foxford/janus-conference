@@ -11,6 +11,8 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
 
+use messages::StreamId;
+
 #[derive(Debug, Clone, Copy)]
 pub enum VideoCodec {
     H264,
@@ -74,11 +76,11 @@ enum RecorderMsg {
     },
 }
 
-/// Records video from RTP stream identified by RoomId.
+/// Records video from RTP stream identified by StreamId.
 ///
-/// RoomId is used as a directory for parts of a record.
+/// StreamId is used as a directory for parts of a record.
 /// In case of Janus restart stream newly created recorder
-/// for old room resumes recording but writes to new file
+/// for old stream resumes recording but writes to new file
 /// in that directory. Filename for record part is generated
 /// by the following rule: `unix_timestamp.extension`.
 ///
@@ -96,7 +98,7 @@ enum RecorderMsg {
 #[derive(Debug)]
 pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
-    room_id: String,
+    stream_id: StreamId,
     save_root_dir: String,
     video_codec: VideoCodec,
     audio_codec: AudioCodec,
@@ -108,7 +110,7 @@ unsafe impl Sync for Recorder {}
 impl Recorder {
     pub fn new(
         save_root_dir: &str,
-        room_id: &str,
+        stream_id: &str,
         video_codec: VideoCodec,
         audio_codec: AudioCodec,
     ) -> Self {
@@ -116,7 +118,7 @@ impl Recorder {
 
         let mut rec = Self {
             sender,
-            room_id: String::from(room_id),
+            stream_id: String::from(stream_id),
             save_root_dir: String::from(save_root_dir),
             video_codec,
             audio_codec,
@@ -320,7 +322,7 @@ impl Recorder {
             v. ! mux.video_0
             a. ! mux.audio_0
 
-            matroskamux name=mux ! filesink location=${ROOM_ID}/${CURRENT_UNIX_TIMESTAMP}.mkv
+            matroskamux name=mux ! filesink location=${STREAM_ID}/${CURRENT_UNIX_TIMESTAMP}.mkv
         */
         let pipeline = gst::Pipeline::new(None);
         let mux = GstElement::MatroskaMux.make();
@@ -432,7 +434,7 @@ impl Recorder {
     fn get_records_dir(&self) -> PathBuf {
         let mut path = PathBuf::new();
         path.push(&self.save_root_dir);
-        path.push(&self.room_id);
+        path.push(&self.stream_id);
 
         path
     }
