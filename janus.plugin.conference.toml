@@ -1,2 +1,2 @@
-[recording]
-root_save_directory = "/build/records"
+[recordings]
+recordings_directory = "/build/records"

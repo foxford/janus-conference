@@ -492,7 +492,7 @@ fn handle_message_async(
 
                     let config = STATE.config.get().expect("Empty config?!");
                     let recorder = Recorder::new(
-                        &config.recording.root_save_directory,
+                        &config.recordings.recordings_directory,
                         &id,
                         VideoCodec::H264,
                         AudioCodec::OPUS,

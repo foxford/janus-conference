@@ -8,7 +8,7 @@ use toml;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub recording: Recording,
+    pub recordings: Recordings,
     #[serde(skip)]
     pub uploading: Uploading,
 }
@@ -21,7 +21,7 @@ impl Config {
 
         let mut config: Self = toml::from_str(&config_str).map_err(|err| Error::from(err))?;
 
-        config.recording.check()?;
+        config.recordings.check()?;
         config.uploading.check()?;
 
         Ok(config)
@@ -29,16 +29,16 @@ impl Config {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Recording {
-    pub root_save_directory: String,
+pub struct Recordings {
+    pub recordings_directory: String,
 }
 
-impl Recording {
+impl Recordings {
     pub fn check(&mut self) -> Result<(), Error> {
-        if !Path::new(&self.root_save_directory).exists() {
+        if !Path::new(&self.recordings_directory).exists() {
             return Err(format_err!(
-                "Recording: root_save_directory {} does not exist",
-                self.root_save_directory
+                "Recordings: recordings directory {} does not exist",
+                self.recordings_directory
             ));
         }
 

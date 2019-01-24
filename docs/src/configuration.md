@@ -6,12 +6,12 @@ Plugin expects a TOML-file located at the following path -
 Configuration sample:
 
 ```toml
-[recording]
-root_save_directory = "records/"
+[recordings]
+recordings_directory = "recordings/"
 ```
 
-## `recording` section
+## `recordings` section
 
-Parameter           | Default value | Description
-------------------- | ------------- | -----------
-root_save_directory | *required*    | Root directory to which all the records are saved.
+Parameter            | Default value | Description
+-------------------- | ------------- | -----------
+recordings_directory | *required*    | Directory to which all the records are saved.
