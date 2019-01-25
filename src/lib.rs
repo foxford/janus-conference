@@ -480,12 +480,8 @@ fn handle_message_async(
 
                     let config = STATE.config.get().expect("Empty config?!");
                     if config.recordings.enabled {
-                        let recorder = Recorder::new(
-                            &config.recordings,
-                            &id,
-                            VideoCodec::H264,
-                            AudioCodec::OPUS,
-                        );
+                        let recorder =
+                            Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
                         switchboard.attach_recorder(received.session.clone(), recorder);
                     }
 
