@@ -13,6 +13,7 @@ read -r DOCKER_RUN_COMMAND <<-EOF
     cargo build \
     && (rm "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" || true) \
     && ln -s "${PROJECT_DIR}/target/debug/${PLUGIN}" "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" \
+    && cp janus.plugin.conference.toml ${JANUS_DIR}/etc/janus \
     && ${JANUS_DIR}/bin/janus --event-handlers --debug-level=5
 EOF
 
@@ -30,5 +31,6 @@ docker run ${DOCKER_RUN_OPTIONS} \
     -p 7088:7088 \
     -p 30000-30020:30000-30020 \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
+    --env-file .env \
     ${DOCKER_CONTAINER_NAME} \
     /bin/bash -c "set -x && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"

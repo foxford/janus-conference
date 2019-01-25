@@ -17,6 +17,8 @@ Session.vim
 
 # Project
 /docs/book/
+records/
+.env
 
 # Other
 core

@@ -1,0 +1,3 @@
+[recordings]
+directory = "/build/records"
+enabled = true

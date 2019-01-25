@@ -40,6 +40,12 @@ pub enum StreamOperation {
     Create { id: StreamId },
     #[serde(rename = "stream.read")]
     Read { id: StreamId },
+    #[serde(rename = "stream.upload")]
+    Upload {
+        id: StreamId,
+        bucket: String,
+        object: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -47,6 +53,7 @@ pub enum StreamOperation {
 pub enum StreamResponse {
     Create {},
     Read {},
+    Upload {},
 }
 
 pub type ErrorStatus = StatusCode;
@@ -122,24 +129,27 @@ const CREATE_ERROR: &str = "stream_create_error";
 const CREATE_ERROR_TITLE: &str = "Error creating a stream";
 const READ_ERROR: &str = "stream_read_error";
 const READ_ERROR_TITLE: &str = "Error reading a stream";
+const UPLOAD_ERROR: &str = "stream_upload_error";
+const UPLOAD_ERROR_TITLE: &str = "Error uploading a recording of stream";
 
 impl OperationErrorDescription {
     fn new(operation: &StreamOperation) -> Self {
         let (ty, title) = match operation {
             StreamOperation::Create { .. } => (CREATE_ERROR, CREATE_ERROR_TITLE),
             StreamOperation::Read { .. } => (READ_ERROR, READ_ERROR_TITLE),
+            StreamOperation::Upload { .. } => (UPLOAD_ERROR, UPLOAD_ERROR_TITLE),
         };
 
         Self {
-            ty: ty.to_string(),
-            title: title.to_string(),
+            ty: ty.to_owned(),
+            title: title.to_owned(),
         }
     }
 
     fn unknown(status: StatusCode) -> Self {
         Self {
-            ty: UNKNOWN_ERROR.to_string(),
-            title: status.canonical_reason().unwrap_or("").to_string(),
+            ty: UNKNOWN_ERROR.to_owned(),
+            title: status.canonical_reason().unwrap_or("").to_owned(),
         }
     }
 }

@@ -5,6 +5,7 @@ use failure::Error;
 
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::StreamId;
+use recorder::Recorder;
 use session::Session;
 
 #[derive(Debug)]
@@ -12,6 +13,7 @@ pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<StreamId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
+    recorders: HashMap<Arc<Session>, Recorder>,
 }
 
 impl Switchboard {
@@ -20,6 +22,7 @@ impl Switchboard {
             sessions: Vec::new(),
             publishers: HashMap::new(),
             publishers_subscribers: BidirectionalMultimap::new(),
+            recorders: HashMap::new(),
         }
     }
 
@@ -27,6 +30,8 @@ impl Switchboard {
         self.sessions.push(session);
     }
 
+    // We don't remove stream/publisher and publisher/recorder relations
+    // since they can be useful even when this publisher is not active anymore.
     pub fn disconnect(&mut self, sess: &Session) {
         self.sessions.retain(|s| s.handle != sess.handle);
         self.publishers_subscribers.remove_key(sess);
@@ -39,6 +44,18 @@ impl Switchboard {
 
     pub fn publisher_to(&self, subscriber: &Session) -> Option<&Arc<Session>> {
         self.publishers_subscribers.get_key(subscriber)
+    }
+
+    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
+        self.recorders.insert(publisher, recorder);
+    }
+
+    pub fn recorder_for(&self, publisher: &Session) -> Option<&Recorder> {
+        self.recorders.get(publisher)
+    }
+
+    pub fn recorder_for_mut(&mut self, publisher: &Session) -> Option<&mut Recorder> {
+        self.recorders.get_mut(publisher)
     }
 
     pub fn publisher_by_stream(&self, id: &StreamId) -> Option<&Arc<Session>> {

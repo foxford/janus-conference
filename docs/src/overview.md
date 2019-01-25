@@ -10,6 +10,8 @@ video and audio tracks coming from separate sources - e.g.
 there is a stream for webcamera and there is a stream for
 screen capture software. 
 
+Plugin configuration is descibed [here](./configuration.md).
+
 ## Auth
 
 Plugin itself doesn't do any authentication/authorization so

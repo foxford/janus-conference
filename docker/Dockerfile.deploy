@@ -26,6 +26,14 @@ RUN set -xe \
         m4 \
         automake \
         make \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav \
+        libgstrtspserver-1.0-dev \
     && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
         && cd "${PAHO_MQTT_BUILD_DIR}" \
         && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
@@ -68,7 +76,10 @@ COPY . .
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
-        libjansson-dev \
+        libjansson-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav libgstrtspserver-1.0-dev \
     && cargo build --release
 
 ## -----------------------------------------------------------------------------

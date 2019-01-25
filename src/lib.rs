@@ -5,6 +5,7 @@ extern crate serde;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate config;
 extern crate http;
 
 #[macro_use]
@@ -12,11 +13,21 @@ extern crate lazy_static;
 extern crate atom;
 extern crate multimap;
 
+extern crate glib;
+extern crate gstreamer;
+extern crate gstreamer_app;
+extern crate gstreamer_base;
+
+extern crate rusoto_core;
+extern crate rusoto_s3;
+extern crate s4;
+
 #[macro_use]
 extern crate failure;
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
+use std::path::Path;
 use std::slice;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
@@ -24,21 +35,29 @@ use std::thread;
 use atom::AtomSetOnce;
 use failure::Error;
 use janus::{
-    sdp, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
+    JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
     RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
+mod conf;
 mod janus_callbacks;
 mod messages;
+mod recorder;
 mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
+mod codecs;
+mod uploader;
 
+use codecs::{AudioCodec, VideoCodec};
+use conf::Config;
 use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
+use recorder::Recorder;
 use session::{Session, SessionState};
 use switchboard::Switchboard;
+use uploader::Uploader;
 
 #[derive(Debug)]
 struct Message {
@@ -50,31 +69,30 @@ struct Message {
 
 unsafe impl Send for Message {}
 
-const AUDIO_CODEC: sdp::AudioCodec = sdp::AudioCodec::Opus;
-const VIDEO_CODEC: sdp::VideoCodec = sdp::VideoCodec::H264;
+const AUDIO_CODEC: AudioCodec = AudioCodec::OPUS;
+const VIDEO_CODEC: VideoCodec = VideoCodec::H264;
 
 #[derive(Debug)]
 struct State {
     pub message_channel: AtomSetOnce<Box<mpsc::SyncSender<Message>>>,
     pub switchboard: RwLock<Switchboard>,
+    pub config: AtomSetOnce<Box<Config>>,
+    pub uploader: AtomSetOnce<Box<Uploader>>,
 }
 
 lazy_static! {
     static ref STATE: State = State {
         message_channel: AtomSetOnce::empty(),
         switchboard: RwLock::new(Switchboard::new()),
+        config: AtomSetOnce::empty(),
+        uploader: AtomSetOnce::empty(),
     };
 }
 
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut pli = janus::rtcp::gen_pli();
-        janus_callbacks::relay_rtcp(
-            publisher.as_ref().as_ptr(),
-            1,
-            pli.as_mut_ptr(),
-            pli.len() as i32,
-        );
+        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut pli);
     }
 }
 
@@ -82,12 +100,7 @@ fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
         let mut seq = publisher.as_ref().incr_fir_seq() as i32;
         let mut fir = janus::rtcp::gen_fir(&mut seq);
-        janus_callbacks::relay_rtcp(
-            publisher.as_ref().as_ptr(),
-            1,
-            fir.as_mut_ptr(),
-            fir.len() as i32,
-        );
+        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut fir);
     }
 }
 
@@ -100,7 +113,37 @@ fn report_error(res: Result<(), Error>) {
     }
 }
 
-extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char) -> c_int {
+fn init_config(config_path: *const c_char) -> Result<Config, Error> {
+    let config_path = unsafe { CStr::from_ptr(config_path) };
+    let config_path = config_path.to_str()?;
+    let config_path = Path::new(config_path);
+
+    Ok(Config::from_path(config_path)?)
+}
+
+extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
+    match init_config(config_path) {
+        Ok(config) => {
+            janus_info!("{:?}", config);
+            STATE.config.set_if_none(Box::new(config));
+        }
+        Err(err) => {
+            janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
+            return -1;
+        }
+    }
+
+    let config = STATE.config.get().expect("Empty config?!");
+    match Uploader::new(config.uploading.clone()) {
+        Ok(uploader) => {
+            STATE.uploader.set_if_none(Box::new(uploader));
+        }
+        Err(err) => {
+            janus_fatal!("[CONFERENCE] Failed to init uploader: {:?}", err);
+            return -1;
+        }
+    }
+
     janus_callbacks::init(callbacks);
 
     let (messages_tx, messages_rx) = mpsc::sync_channel(10);
@@ -112,7 +155,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
         for msg in messages_rx.iter() {
             let push_result = match handle_message_async(&msg) {
                 Ok((response, jsep)) => {
-                    janus_callbacks::push_event(msg.session.handle, msg.transaction, response, jsep)
+                    janus_callbacks::push_event(&msg.session, msg.transaction, response, jsep)
                         .map_err(Error::from)
                 }
                 Err(err) => {
@@ -125,7 +168,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
                         .and_then(|response| {
                             utils::serde_to_jansson(&response).and_then(|response| {
                                 janus_callbacks::push_event(
-                                    msg.session.handle,
+                                    &msg.session,
                                     msg.transaction,
                                     Some(response),
                                     None,
@@ -141,6 +184,12 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, _config_path: *const c_char)
             }
         }
     });
+
+    let res = gstreamer::init();
+    if let Err(err) = res {
+        janus_fatal!("[CONFERENCE] Failed to init GStreamer: {}", err);
+        return -1;
+    }
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
 
@@ -193,6 +242,9 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
             match switchboard {
                 Ok(mut switchboard) => {
                     switchboard.disconnect(&sess);
+                    if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
+                        report_error(recorder.finish_record());
+                    }
                 }
                 Err(err) => {
                     janus_err!("[CONFERENCE] {}", err);
@@ -282,8 +334,21 @@ fn incoming_rtp_impl(
         .read()
         .map_err(|err| format_err!("{}", err))?;
 
+    let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+
     for subscriber in switchboard.subscribers_to(&sess) {
-        janus_callbacks::relay_rtp(subscriber.as_ptr(), video, buf, len);
+        janus_callbacks::relay_rtp(subscriber, video, buf_slice);
+    }
+
+    if let Some(recorder) = switchboard.recorder_for(&sess) {
+        let is_video = match video {
+            0 => false,
+            _ => true,
+        };
+
+        let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
+
+        recorder.record_packet(buf, is_video)?;
     }
 
     Ok(())
@@ -306,7 +371,7 @@ fn incoming_rtcp_impl(
         .read()
         .map_err(|err| format_err!("{}", err))?;
 
-    let packet = unsafe { slice::from_raw_parts(buf, len as usize) };
+    let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
 
     match video {
         1 if janus::rtcp::has_pli(packet) => {
@@ -317,7 +382,7 @@ fn incoming_rtcp_impl(
         }
         _ => {
             for subscriber in switchboard.subscribers_to(&sess) {
-                janus_callbacks::relay_rtcp(subscriber.as_ptr(), video, buf, len);
+                janus_callbacks::relay_rtcp(subscriber, video, packet);
             }
         }
     }
@@ -387,7 +452,7 @@ fn handle_message_async(
             let jsep = match operation {
                 StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
                     let offer = maybe_jsep?;
-                    let answer = offer.negotatiate(VIDEO_CODEC, AUDIO_CODEC);
+                    let answer = offer.negotatiate(VIDEO_CODEC.into(), AUDIO_CODEC.into());
 
                     received.session.set_offer(offer).map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
@@ -406,11 +471,19 @@ fn handle_message_async(
 
                     Some(jsep)
                 }
+                StreamOperation::Upload { .. } => None,
             };
 
-            let response = match operation {
+            let response = match &operation {
                 StreamOperation::Create { ref id } => {
-                    switchboard.create_stream(id.to_string(), received.session.clone());
+                    switchboard.create_stream(id.to_owned(), received.session.clone());
+
+                    let config = STATE.config.get().expect("Empty config?!");
+                    if config.recordings.enabled {
+                        let recorder =
+                            Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
+                        switchboard.attach_recorder(received.session.clone(), recorder);
+                    }
 
                     StreamResponse::Create {}
                 }
@@ -422,6 +495,39 @@ fn handle_message_async(
                         })?;
 
                     StreamResponse::Read {}
+                }
+                StreamOperation::Upload { id, bucket, object } => {
+                    if let Some(publisher) = switchboard.publisher_by_stream(&id) {
+                        if let Some(recorder) = switchboard.recorder_for(publisher) {
+                            let path = recorder.get_full_record_path();
+                            STATE
+                                .uploader
+                                .get()
+                                .expect("Empty uploader?!")
+                                .upload_file(&path, &bucket, &object)
+                                .map_err(|err| {
+                                    APIError::new(
+                                        ErrorStatus::INTERNAL_SERVER_ERROR,
+                                        err,
+                                        Some(&operation),
+                                    )
+                                })?;
+
+                            StreamResponse::Upload {}
+                        } else {
+                            return Err(APIError::new(
+                                ErrorStatus::NOT_FOUND,
+                                format_err!("There's no recording for Stream with Id = {}", id),
+                                Some(&operation),
+                            ));
+                        }
+                    } else {
+                        return Err(APIError::new(
+                            ErrorStatus::NOT_FOUND,
+                            format_err!("Stream with Id = {} is not found", id),
+                            Some(&operation),
+                        ));
+                    }
                 }
             };
 
