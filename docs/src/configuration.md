@@ -7,12 +7,12 @@ Configuration sample:
 
 ```toml
 [recordings]
-recordings_directory = "recordings/"
+directory = "recordings/"
 enabled = true
 ```
 
 ## `recordings` section
 
-Parameter            | Default value | Description
--------------------- | ------------- | -----------
-recordings_directory | *required*    | Directory to which all the records are saved.
+Parameter | Default value | Description
+--------- | ------------- | -----------
+directory | *required*    | Directory to which all the records are saved.

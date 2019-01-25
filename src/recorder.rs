@@ -15,21 +15,21 @@ use codecs::{AudioCodec, VideoCodec};
 use messages::StreamId;
 
 #[derive(Deserialize, Debug)]
-pub struct RecordingConfig {
-    pub recordings_directory: String,
+pub struct Config {
+    pub directory: String,
     pub enabled: bool,
 }
 
-impl RecordingConfig {
+impl Config {
     pub fn check(&mut self) -> Result<(), Error> {
         if !self.enabled {
             return Ok(());
         }
 
-        if !Path::new(&self.recordings_directory).exists() {
+        if !Path::new(&self.directory).exists() {
             return Err(format_err!(
                 "Recordings: recordings directory {} does not exist",
-                self.recordings_directory
+                self.directory
             ));
         }
 
@@ -83,7 +83,7 @@ unsafe impl Sync for Recorder {}
 
 impl Recorder {
     pub fn new(
-        recording_config: &RecordingConfig,
+        config: &Config,
         stream_id: &str,
         video_codec: VideoCodec,
         audio_codec: AudioCodec,
@@ -93,7 +93,7 @@ impl Recorder {
         let mut rec = Self {
             sender,
             stream_id: stream_id.to_owned(),
-            save_root_dir: recording_config.recordings_directory.clone(),
+            save_root_dir: config.directory.clone(),
             video_codec,
             audio_codec,
             recorder_thread_handle: None,

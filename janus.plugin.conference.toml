@@ -1,3 +1,3 @@
 [recordings]
-recordings_directory = "/build/records"
+directory = "/build/records"
 enabled = true

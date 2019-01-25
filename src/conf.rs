@@ -3,15 +3,15 @@ use std::path::Path;
 use config;
 use failure::Error;
 
-use recorder::RecordingConfig;
-use uploader::UploadingConfig;
+use recorder;
+use uploader;
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
-    pub recordings: RecordingConfig,
-    pub uploading: UploadingConfig,
+    pub recordings: recorder::Config,
+    pub uploading: uploader::Config,
 }
 
 impl Config {

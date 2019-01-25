@@ -7,7 +7,7 @@ use rusoto_s3::{PutObjectRequest, S3Client};
 use s4::{self, S4};
 
 #[derive(Deserialize, Debug, Default, Clone)]
-pub struct UploadingConfig {
+pub struct Config {
     pub bucket: String,
     pub region: String,
     pub endpoint: String,
@@ -30,7 +30,7 @@ impl fmt::Debug for Uploader {
 const PART_SIZE: usize = 1024 * 1024 * 100;
 
 impl Uploader {
-    pub fn new(config: UploadingConfig) -> Result<Self, Error> {
+    pub fn new(config: Config) -> Result<Self, Error> {
         let region = Region::Custom {
             name: config.region,
             endpoint: config.endpoint,
