@@ -19,7 +19,7 @@ bash docker/dev.run.sh
 
 ```bash
 # Open example page in browser
-open examples/conference/index.html
+open examples/index.html
 ```
 
 Click `Start translation` button (page should ask for permission
