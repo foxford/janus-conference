@@ -243,7 +243,7 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
                 Ok(mut switchboard) => {
                     switchboard.disconnect(&sess);
                     if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
-                        report_error(recorder.finish_record());
+                        report_error(recorder.stop_recording());
                     }
                 }
                 Err(err) => {
@@ -480,8 +480,11 @@ fn handle_message_async(
 
                     let config = STATE.config.get().expect("Empty config?!");
                     if config.recordings.enabled {
-                        let recorder =
+                        let mut recorder =
                             Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
+                        recorder.start_recording().map_err(|err| {
+                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                        })?;
                         switchboard.attach_recorder(received.session.clone(), recorder);
                     }
 
@@ -497,37 +500,38 @@ fn handle_message_async(
                     StreamResponse::Read {}
                 }
                 StreamOperation::Upload { id, bucket, object } => {
+                    // Stopping active recording if any.
                     if let Some(publisher) = switchboard.publisher_by_stream(&id) {
                         if let Some(recorder) = switchboard.recorder_for(publisher) {
-                            let path = recorder.get_full_record_path();
-                            STATE
-                                .uploader
-                                .get()
-                                .expect("Empty uploader?!")
-                                .upload_file(&path, &bucket, &object)
-                                .map_err(|err| {
-                                    APIError::new(
-                                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                                        err,
-                                        Some(&operation),
-                                    )
-                                })?;
-
-                            StreamResponse::Upload {}
-                        } else {
-                            return Err(APIError::new(
-                                ErrorStatus::NOT_FOUND,
-                                format_err!("There's no recording for Stream with Id = {}", id),
-                                Some(&operation),
-                            ));
+                            recorder.stop_recording().map_err(|err| {
+                                APIError::new(
+                                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                                    err,
+                                    Some(&operation),
+                                )
+                            })?;
                         }
-                    } else {
-                        return Err(APIError::new(
-                            ErrorStatus::NOT_FOUND,
-                            format_err!("Stream with Id = {} is not found", id),
-                            Some(&operation),
-                        ));
                     }
+
+                    let config = STATE.config.get().expect("Empty config?!");
+                    let mut recorder =
+                        Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
+
+                    recorder.finish_record().map_err(|err| {
+                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                    })?;
+
+                    let path = recorder.get_full_record_path();
+                    STATE
+                        .uploader
+                        .get()
+                        .expect("Empty uploader?!")
+                        .upload_file(&path, &bucket, &object)
+                        .map_err(|err| {
+                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
+                        })?;
+
+                    StreamResponse::Upload {}
                 }
             };
 

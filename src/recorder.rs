@@ -72,11 +72,12 @@ enum RecorderMsg {
 #[derive(Debug)]
 pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
+    receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
+    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
     stream_id: StreamId,
     save_root_dir: String,
     video_codec: VideoCodec,
     audio_codec: AudioCodec,
-    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
 }
 
 unsafe impl Sync for Recorder {}
@@ -90,19 +91,15 @@ impl Recorder {
     ) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
-        let mut rec = Self {
+        Self {
             sender,
+            receiver_for_recorder_thread: Some(recv),
+            recorder_thread_handle: None,
             stream_id: stream_id.to_owned(),
             save_root_dir: config.directory.clone(),
             video_codec,
             audio_codec,
-            recorder_thread_handle: None,
-        };
-
-        let handle = rec.setup_recording(recv);
-        rec.recorder_thread_handle = Some(handle);
-
-        rec
+        }
     }
 
     pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
@@ -128,7 +125,12 @@ impl Recorder {
             mux. ! filesink location=full.mp4
         */
 
-        self.sender.send(RecorderMsg::Stop)?;
+        match self.stop_recording() {
+            Ok(()) => {}
+            Err(err) => {
+                janus_err!("[CONFERENCE] Error during recording stop: {}", err);
+            }
+        }
 
         let _res = self
             .recorder_thread_handle
@@ -283,10 +285,7 @@ impl Recorder {
         Ok(gbuf)
     }
 
-    fn setup_recording(
-        &self,
-        recv: mpsc::Receiver<RecorderMsg>,
-    ) -> thread::JoinHandle<Result<(), Error>> {
+    pub fn start_recording(&mut self) -> Result<(), Error> {
         /*
         GStreamer pipeline we create here:
 
@@ -311,9 +310,7 @@ impl Recorder {
             .set_property("location", &path.to_value())
             .expect("failed to set location prop on filesink?!");
 
-        pipeline
-            .add_many(&[&mux, &filesink])
-            .expect("Failed to add elems to pipeline");
+        pipeline.add_many(&[&mux, &filesink])?;
 
         let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(self.video_codec);
         let video_queue = GstElement::Queue.make();
@@ -338,10 +335,8 @@ impl Recorder {
             ];
 
             for elems in streams.iter() {
-                pipeline
-                    .add_many(elems)
-                    .expect("Failed to add elems to pipeline");
-                gst::Element::link_many(elems).expect("Failed to link elements in pipeline");
+                pipeline.add_many(elems)?;
+                gst::Element::link_many(elems)?;
             }
         }
 
@@ -359,7 +354,12 @@ impl Recorder {
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
 
-        thread::spawn(move || {
+        let recv = self
+            .receiver_for_recorder_thread
+            .take()
+            .expect("Empty receiver in recorder?!");
+
+        let handle = thread::spawn(move || {
             for msg in recv.iter() {
                 match msg {
                     RecorderMsg::Packet { is_video, buf } => {
@@ -402,7 +402,16 @@ impl Recorder {
             janus_info!("[CONFERENCE] End of record");
 
             Ok(())
-        })
+        });
+
+        self.recorder_thread_handle = Some(handle);
+
+        Ok(())
+    }
+
+    pub fn stop_recording(&self) -> Result<(), Error> {
+        self.sender.send(RecorderMsg::Stop)?;
+        Ok(())
     }
 
     fn get_records_dir(&self) -> PathBuf {
