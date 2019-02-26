@@ -287,6 +287,7 @@ impl Recorder {
 
         janus_info!("[CONFERENCE] End of full record");
 
+        start_stop_timestamps.sort();
         Ok(start_stop_timestamps)
     }
 
