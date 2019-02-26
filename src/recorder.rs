@@ -41,6 +41,8 @@ const MKV: &str = "mkv";
 const MP4: &str = "mp4";
 const FULL_RECORD_FILENAME: &str = "full";
 
+const TIMESTAMP_EXTENSION: &str = "timestamp";
+
 #[derive(Debug)]
 enum RecorderMsg {
     Stop,
@@ -75,6 +77,7 @@ pub struct Recorder {
     receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
     recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
     stream_id: StreamId,
+    filename: Option<String>,
     save_root_dir: String,
     video_codec: VideoCodec,
     audio_codec: AudioCodec,
@@ -97,6 +100,7 @@ impl Recorder {
             recorder_thread_handle: None,
             stream_id: stream_id.to_owned(),
             save_root_dir: config.directory.clone(),
+            filename: None,
             video_codec,
             audio_codec,
         }
@@ -109,7 +113,7 @@ impl Recorder {
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<(), Error> {
+    pub fn finish_record(&mut self) -> Result<Vec<Vec<u64>>, Error> {
         /*
         GStreamer pipeline we create here:
 
@@ -187,6 +191,8 @@ impl Recorder {
 
         parts.sort_by_key(|f| f.path());
 
+        let mut start_stop_timestamps: Vec<Vec<u64>> = Vec::new();
+
         for file in parts {
             let metadata = file.metadata()?;
 
@@ -203,6 +209,23 @@ impl Recorder {
                         continue;
                     }
                 }
+            }
+
+            match file.path().as_path().extension() {
+                None => {
+                    continue;
+                }
+                Some(extension) if extension == TIMESTAMP_EXTENSION => {
+                    use std::io::BufReader;
+
+                    let file = fs::OpenOptions::new().read(true).open(file.path())?;
+                    let mut timestamps: Vec<u64> = serde_json::from_reader(BufReader::new(&file))?;
+
+                    start_stop_timestamps.push(timestamps);
+
+                    continue;
+                }
+                _ => {}
             }
 
             let filesrc = GstElement::Filesrc.make();
@@ -264,7 +287,7 @@ impl Recorder {
 
         janus_info!("[CONFERENCE] End of full record");
 
-        Ok(())
+        Ok(start_stop_timestamps)
     }
 
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
@@ -301,8 +324,17 @@ impl Recorder {
         let mux = GstElement::MatroskaMux.make();
 
         let filesink = GstElement::Filesink.make();
-        let path = self.generate_record_path(None, MKV);
+
+        let now = Self::now();
+        let filename = now.to_string();
+
+        let path = self.generate_record_path(&filename, TIMESTAMP_EXTENSION);
+        Self::save_timestamp(&path, now)?;
+
+        let path = self.generate_record_path(&filename, MKV);
         let path = path.to_string_lossy();
+
+        self.filename = Some(filename);
 
         janus_info!("[CONFERENCE] Saving video to {}", path);
 
@@ -411,6 +443,12 @@ impl Recorder {
 
     pub fn stop_recording(&self) -> Result<(), Error> {
         self.sender.send(RecorderMsg::Stop)?;
+
+        if let Some(ref filename) = self.filename {
+            let path = self.generate_record_path(filename, TIMESTAMP_EXTENSION);
+            Self::save_timestamp(&path, Self::now())?;
+        }
+
         Ok(())
     }
 
@@ -422,7 +460,7 @@ impl Recorder {
         path
     }
 
-    fn generate_record_path(&self, filename: Option<String>, extension: &str) -> PathBuf {
+    fn generate_record_path(&self, filename: &str, extension: &str) -> PathBuf {
         let mut path = self.get_records_dir();
 
         if let Err(err) = fs::create_dir(&path) {
@@ -434,15 +472,6 @@ impl Recorder {
             }
         }
 
-        let filename = match filename {
-            Some(filename) => filename,
-            None => SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                .to_string(),
-        };
-
         path.push(filename);
         path.set_extension(extension);
 
@@ -450,7 +479,7 @@ impl Recorder {
     }
 
     pub fn get_full_record_path(&self) -> PathBuf {
-        self.generate_record_path(Some(FULL_RECORD_FILENAME.to_owned()), MP4)
+        self.generate_record_path(FULL_RECORD_FILENAME, MP4)
     }
 
     fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {
@@ -545,6 +574,31 @@ impl Recorder {
             gst::PadLinkReturn::Ok => Ok(sink_pad),
             other_res => Err(format_err!("Failed to link pads: {:?}", other_res)),
         }
+    }
+
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn save_timestamp(path: &Path, timestamp: u64) -> Result<(), Error> {
+        use std::io::{BufReader, BufWriter};
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)?;
+
+        let mut timestamps: Vec<u64> = serde_json::from_reader(BufReader::new(&file))?;
+
+        timestamps.push(timestamp);
+
+        serde_json::to_writer(BufWriter::new(&file), &timestamps)?;
+
+        Ok(())
     }
 }
 
