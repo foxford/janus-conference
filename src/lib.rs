@@ -517,7 +517,7 @@ fn handle_message_async(
                     let mut recorder =
                         Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
 
-                    recorder.finish_record().map_err(|err| {
+                    let start_stop_timestamps = recorder.finish_record().map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                     })?;
 
@@ -531,7 +531,9 @@ fn handle_message_async(
                             APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                         })?;
 
-                    StreamResponse::Upload {}
+                    StreamResponse::Upload {
+                        time: start_stop_timestamps,
+                    }
                 }
             };
 
