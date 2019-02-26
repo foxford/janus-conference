@@ -113,7 +113,7 @@ impl Recorder {
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<Vec<Vec<u64>>, Error> {
+    pub fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error> {
         /*
         GStreamer pipeline we create here:
 
@@ -191,7 +191,7 @@ impl Recorder {
 
         parts.sort_by_key(|f| f.path());
 
-        let mut start_stop_timestamps: Vec<Vec<u64>> = Vec::new();
+        let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::new();
 
         for file in parts {
             let metadata = file.metadata()?;
@@ -219,7 +219,7 @@ impl Recorder {
                     use std::io::BufReader;
 
                     let file = fs::OpenOptions::new().read(true).open(file.path())?;
-                    let mut timestamps: Vec<u64> = serde_json::from_reader(BufReader::new(&file))?;
+                    let mut timestamps: (u64, u64) = serde_json::from_reader(BufReader::new(&file))?;
 
                     start_stop_timestamps.push(timestamps);
 

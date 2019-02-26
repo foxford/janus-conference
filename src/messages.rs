@@ -53,7 +53,7 @@ pub enum StreamOperation {
 pub enum StreamResponse {
     Create {},
     Read {},
-    Upload { time: Vec<Vec<u64>> },
+    Upload { time: Vec<(u64, u64)> },
 }
 
 pub type ErrorStatus = StatusCode;
