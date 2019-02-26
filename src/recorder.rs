@@ -219,7 +219,8 @@ impl Recorder {
                     use std::io::BufReader;
 
                     let file = fs::OpenOptions::new().read(true).open(file.path())?;
-                    let mut timestamps: (u64, u64) = serde_json::from_reader(BufReader::new(&file))?;
+                    let mut timestamps: (u64, u64) =
+                        serde_json::from_reader(BufReader::new(&file))?;
 
                     start_stop_timestamps.push(timestamps);
 
@@ -578,9 +579,7 @@ impl Recorder {
     }
 
     fn now() -> u64 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
         now.as_secs() * 1000 + now.subsec_millis() as u64
     }
