@@ -577,10 +577,11 @@ impl Recorder {
     }
 
     fn now() -> u64 {
-        SystemTime::now()
+        let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+            .unwrap();
+
+        now.as_secs() * 1000 + now.subsec_millis() as u64
     }
 
     fn save_timestamp(path: &Path, timestamp: u64) -> Result<(), Error> {
