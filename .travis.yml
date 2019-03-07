@@ -45,6 +45,6 @@ jobs:
 stages:
   - name: check
   - name: deploy
-    if: branch = master AND type = push
+    if: branch = semaphore-setup AND type = push
 notifications:
   email: false
