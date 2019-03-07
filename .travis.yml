@@ -19,6 +19,8 @@ cache:
     - ${TRAVIS_HOME}/.cargo
 before_cache:
   - rm -rf ${TRAVIS_HOME}/.cargo/registry
+before_install:
+  - echo -e "machine github.com\n  login $GITHUB_TOKEN" > ~/.netrc
 services: docker
 git:
   depth: 1

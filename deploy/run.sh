@@ -19,10 +19,10 @@ else
     if [[ ! ${KUBE_TOKEN} ]]; then echo "KUBE_TOKEN isn't specified" 1>&2; exit 1; fi
 
     DOCKER_IMAGE_TAG="$(git rev-parse --short HEAD)"
-    docker build -t netologygroup/janus-gateway:${DOCKER_IMAGE_TAG} -f docker/Dockerfile.deploy .
-    echo ${DOCKER_PASSWORD} \
-        | docker login -u ${DOCKER_USERNAME} --password-stdin
-    docker push netologygroup/janus-gateway:${DOCKER_IMAGE_TAG}
+    #docker build -t netologygroup/janus-gateway:${DOCKER_IMAGE_TAG} -f docker/Dockerfile.deploy .
+    #echo ${DOCKER_PASSWORD} \
+    #    | docker login -u ${DOCKER_USERNAME} --password-stdin
+    #docker push netologygroup/janus-gateway:${DOCKER_IMAGE_TAG}
 
     ## Clone environment repo for deploy
     git clone git@github.com:netology-group/environment.git
