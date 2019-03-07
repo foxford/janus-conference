@@ -26,7 +26,7 @@ else
 
     ## Clone environment repo for deploy
     git clone https://github.com/netology-group/environment.git
-    cd environment/ansible && \
+    cd environment/ansible; \
        ansible-playbook -i hosts -u vknyazev --become --vault-password-file "" -l janus deploy.yaml -e docker_image=netologygroup/janus-gateway:${DOCKER_IMAGE_TAG} --diff
 fi
 
