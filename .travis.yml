@@ -43,7 +43,7 @@ jobs:
       name: Kubernetes
       script: bash deploy/run.sh
 stages:
-  - name: check
+  #- name: check
   - name: deploy
     if: branch = semaphore-setup AND type = push
 notifications:
