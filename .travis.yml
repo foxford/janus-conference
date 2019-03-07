@@ -5,6 +5,7 @@ rust:
 addons:
   apt:
     packages:
+      - ansible-2.7.5
       - libjansson-dev
       - lftp
       - libgstreamer1.0-dev
