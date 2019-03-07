@@ -13,5 +13,6 @@ blocks:
       jobs:
       - name: Docker build
         commands:
-          - export DOCKER_IMAGE_TAG="$(git rev-parse --short HEAD)"
-          - docker build -t netologygroup/janus-gatewayi:${DOCKER_IMAGE_TAG} -f docker/Dockerfile.deploy .
+          - ls -la
+          #- export DOCKER_IMAGE_TAG="$(git rev-parse --short HEAD)"
+          #- docker build -t netologygroup/janus-gatewayi:${DOCKER_IMAGE_TAG} -f docker/Dockerfile.deploy .
