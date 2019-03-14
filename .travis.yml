@@ -44,7 +44,7 @@ jobs:
       script: bash deploy/run.sh
 stages:
   - name: check
-  - name: deploy
-    if: branch = master AND type = push
+#  - name: deploy
+#    if: branch = master AND type = push
 notifications:
   email: false
