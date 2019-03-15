@@ -44,7 +44,7 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='662f1c8937df2a33306c521cab01c3acc9b3e571'
+ARG JANUS_GATEWAY_COMMIT='2ac24be3826fbca9f17eeb92b6aac9da27bb4060'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
