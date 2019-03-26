@@ -21,7 +21,7 @@ listenerStartButton.onclick = joinTranslation;
 hangupButton.onclick = hangup;
 
 var websocket, sessionId, pluginHandleId, sessionTransaction, handleTransaction;
-var janusHost = "ws://localhost:8188";
+var janusHost = "ws://192.168.99.100:8188";
 var streamId = "demo-conference-stream";
 
 function startTranslation() {
