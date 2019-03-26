@@ -183,6 +183,8 @@ function listenerGotLocalDescription(desc) {
     console.log("got local SDP");
     console.log(desc);
 
+    desc.sdp = desc.sdp.replace("a=rtpmap:96 VP8/90000", "a=rtpmap:96 H264/90000");
+    desc.sdp = desc.sdp.replace("a=rtpmap:98 VP9/90000", "a=rtpmap:98 H264/90000");
     peerConnection.setLocalDescription(desc);
 
     var payload = {
