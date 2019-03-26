@@ -1,5 +1,5 @@
-**/*
+*
 !src/
 !Cargo.lock
 !Cargo.toml
-!README.md
+!janus.plugin.conference.toml
