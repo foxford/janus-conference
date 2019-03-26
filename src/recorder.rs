@@ -13,6 +13,7 @@ use gstreamer_base::BaseSrcExt;
 
 use codecs::{AudioCodec, VideoCodec};
 use messages::StreamId;
+use std::io::BufRead;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
@@ -37,8 +38,8 @@ impl Config {
     }
 }
 
-const MKV: &str = "mkv";
-const MP4: &str = "mp4";
+const MKV_EXTENSION: &str = "mkv";
+const MP4_EXTENSION: &str = "mp4";
 const FULL_RECORD_FILENAME: &str = "full";
 
 const TIMESTAMP_EXTENSION: &str = "timestamp";
@@ -216,17 +217,28 @@ impl Recorder {
                     continue;
                 }
                 Some(extension) if extension == TIMESTAMP_EXTENSION => {
-                    use std::io::BufReader;
+                    use std::fs::File;
+                    use std::io::{BufRead, BufReader};
 
-                    let file = fs::OpenOptions::new().read(true).open(file.path())?;
-                    let mut timestamps: (u64, u64) =
-                        serde_json::from_reader(BufReader::new(&file))?;
+                    let read_line =
+                        |reader: &mut BufReader<fs::File>, name: &str| -> Result<u64, Error> {
+                            let mut line = String::new();
+                            let _len = reader.read_line(&mut line);
+                            line.trim()
+                                .parse::<u64>()
+                                .map_err(|_| format_err!("an invalid {} value = {}", name, line))
+                        };
 
-                    start_stop_timestamps.push(timestamps);
+                    let input = fs::OpenOptions::new().read(true).open(file.path())?;
+                    let mut reader = BufReader::new(input);
+                    let start = read_line(&mut reader, "start timestamp")?;
+                    let stop = read_line(&mut reader, "stop timestamp")?;
+
+                    start_stop_timestamps.push((start, stop));
 
                     continue;
                 }
-                _ => {}
+                Some(_) => {}
             }
 
             let filesrc = GstElement::Filesrc.make();
@@ -322,23 +334,38 @@ impl Recorder {
 
             matroskamux name=mux ! filesink location=${STREAM_ID}/${CURRENT_UNIX_TIMESTAMP}.mkv
         */
+
+        janus_info!("[CONFERENCE] Initialize recording pipeline");
+
         let pipeline = gst::Pipeline::new(None);
         let mux = GstElement::MatroskaMux.make();
-
         let filesink = GstElement::Filesink.make();
 
-        let now = Self::now();
-        let filename = now.to_string();
+        let start = unix_time_ms();
+        let basename = start.to_string();
 
-        let path = self.generate_record_path(&filename, TIMESTAMP_EXTENSION);
-        Self::save_timestamp(&path, now)?;
+        {
+            use std::io::Write;
 
-        let path = self.generate_record_path(&filename, MKV);
+            let path = self.generate_record_path(&basename, TIMESTAMP_EXTENSION);
+            let mut output = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&path)?;
+            write!(output, "{}\n", start)?;
+
+            janus_info!(
+                "[CONFERENCE] Timestamp is written to {}",
+                path.to_string_lossy(),
+            );
+        }
+
+        let path = self.generate_record_path(&basename, MKV_EXTENSION);
         let path = path.to_string_lossy();
 
-        self.filename = Some(filename);
+        self.filename = Some(basename);
 
-        janus_info!("[CONFERENCE] Saving video to {}", path);
+        janus_info!("[CONFERENCE] Start recording to {}", path);
 
         filesink
             .set_property("location", &path.to_value())
@@ -433,7 +460,7 @@ impl Recorder {
             mux.release_request_pad(&audio_sink_pad);
             mux.release_request_pad(&video_sink_pad);
 
-            janus_info!("[CONFERENCE] End of record");
+            janus_info!("[CONFERENCE] Stop recording");
 
             Ok(())
         });
@@ -447,8 +474,11 @@ impl Recorder {
         self.sender.send(RecorderMsg::Stop)?;
 
         if let Some(ref filename) = self.filename {
+            use std::io::Write;
+
             let path = self.generate_record_path(filename, TIMESTAMP_EXTENSION);
-            Self::save_timestamp(&path, Self::now())?;
+            let mut output = fs::OpenOptions::new().append(true).open(&path)?;
+            write!(output, "{}\n", unix_time_ms())?;
         }
 
         Ok(())
@@ -481,7 +511,7 @@ impl Recorder {
     }
 
     pub fn get_full_record_path(&self) -> PathBuf {
-        self.generate_record_path(FULL_RECORD_FILENAME, MP4)
+        self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
     }
 
     fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {
@@ -577,30 +607,6 @@ impl Recorder {
             other_res => Err(format_err!("Failed to link pads: {:?}", other_res)),
         }
     }
-
-    fn now() -> u64 {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-
-        now.as_secs() * 1000 + now.subsec_millis() as u64
-    }
-
-    fn save_timestamp(path: &Path, timestamp: u64) -> Result<(), Error> {
-        use std::io::{BufReader, BufWriter};
-
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)?;
-
-        let mut timestamps: Vec<u64> = serde_json::from_reader(BufReader::new(&file))?;
-
-        timestamps.push(timestamp);
-
-        serde_json::to_writer(BufWriter::new(&file), &timestamps)?;
-
-        Ok(())
-    }
 }
 
 enum GstElement {
@@ -670,4 +676,10 @@ impl AudioCodec {
             AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
         }
     }
+}
+
+fn unix_time_ms() -> u64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+    now.as_secs() * 1000 + now.subsec_millis() as u64
 }
