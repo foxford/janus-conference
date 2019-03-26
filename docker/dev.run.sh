@@ -21,11 +21,13 @@ set -ex
 
 BUILD_CACHE_VOLUME=janus-conference-cargo
 
+mkdir -p recordings
 docker volume create ${BUILD_CACHE_VOLUME}
 docker build -t ${DOCKER_CONTAINER_NAME} -f docker/Dockerfile.dev .
 # Setting up `DOCKER_RUN_COMMAND` to be able to run initial command again.
 docker run ${DOCKER_RUN_OPTIONS} \
     -v $(pwd):${PROJECT_DIR} \
+    -v $(pwd)/recordings:/recordings \
     -v ${BUILD_CACHE_VOLUME}:/usr/local/cargo \
     -p ${DOCKER_WS_PORT}:8188 \
     -p 7088:7088 \
