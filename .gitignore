@@ -18,6 +18,8 @@ Session.vim
 .vscode
 .env
 recordings
+janus.plugin.conference.environment
+janus.plugin.conference.toml
 
 # Other
 core
