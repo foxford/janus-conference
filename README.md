@@ -16,7 +16,7 @@ cp janus.plugin.conference.toml.sample janus.plugin.conference.toml
 cp janus.plugin.conference.environment.sample janus.plugin.conference.environment
 
 # Build and run Janus instance with plugin
-bash docker/dev.run.sh
+bash docker/develop.run.sh
 ```
 
 ### How to run conference example
