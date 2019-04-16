@@ -42,6 +42,8 @@ const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
 const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
+const FULL_RECORD_CAPS: &str =
+    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -118,12 +120,13 @@ impl Recorder {
         GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! queue ! h264parse ! v.
+            demux0.video_0 ! queue ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! v.
             demux0.audio_0 ! queue ! opusparse ! a.
 
             ...
 
-            concat name=v ! queue ! mp4mux name=mux
+            mp4mux name=mux
+            concat name=v ! queue ! mux.video_0
             concat name=a ! queue ! mux.audio_0
 
             mux. ! filesink location=full.mp4
@@ -158,6 +161,15 @@ impl Recorder {
 
         let concat_video = GstElement::Concat.make();
         let queue_video = GstElement::Queue.make();
+        let decode_video = self.video_codec.new_decode_elem();
+        let scale_video = GstElement::VideoScale.make();
+        let rate_video = GstElement::VideoRate.make();
+
+        let capsfilter_video = GstElement::CapsFilter.make();
+        capsfilter_video.set_property_from_str("caps", FULL_RECORD_CAPS);
+
+        let encode_video = self.video_codec.new_encode_elem();
+        encode_video.set_property_from_str("tune", "zerolatency");
 
         let concat_audio = GstElement::Concat.make();
         let queue_audio = GstElement::Queue.make();
@@ -169,21 +181,32 @@ impl Recorder {
             &filesink,
             &concat_video,
             &queue_video,
+            &decode_video,
+            &scale_video,
+            &rate_video,
+            &capsfilter_video,
+            &encode_video,
             &concat_audio,
             &queue_audio,
         ])?;
 
         mux.link(&filesink)?;
         concat_video.link(&queue_video)?;
+        queue_video.link(&decode_video)?;
+        decode_video.link(&scale_video)?;
+        scale_video.link(&rate_video)?;
+        rate_video.link(&capsfilter_video)?;
+        capsfilter_video.link(&encode_video)?;
         concat_audio.link(&queue_audio)?;
 
         let video_sink_pad =
-            Self::link_static_and_request_pads((&queue_video, "src"), (&mux, "video_%u"))?;
+            Self::link_static_and_request_pads((&encode_video, "src"), (&mux, "video_%u"))?;
 
         let audio_sink_pad =
             Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
 
         let records_dir = self.get_records_dir();
+
         let mut parts: Vec<fs::DirEntry> =
             fs::read_dir(&records_dir)?.filter_map(|r| r.ok()).collect();
 
@@ -589,6 +612,11 @@ enum GstElement {
     RTPOpusDepay,
     H264Parse,
     RTPH264Depay,
+    AVDecH264,
+    VideoScale,
+    VideoRate,
+    CapsFilter,
+    X264Enc,
 }
 
 impl GstElement {
@@ -606,6 +634,11 @@ impl GstElement {
             GstElement::RTPOpusDepay => "rtpopusdepay",
             GstElement::H264Parse => "h264parse",
             GstElement::RTPH264Depay => "rtph264depay",
+            GstElement::AVDecH264 => "avdec_h264",
+            GstElement::VideoScale => "videoscale",
+            GstElement::VideoRate => "videorate",
+            GstElement::CapsFilter => "capsfilter",
+            GstElement::X264Enc => "x264enc",
         }
     }
 
@@ -627,6 +660,18 @@ impl VideoCodec {
     pub fn new_depay_elem(self) -> gst::Element {
         match self {
             VideoCodec::H264 => GstElement::RTPH264Depay.make(),
+        }
+    }
+
+    pub fn new_decode_elem(self) -> gst::Element {
+        match self {
+            VideoCodec::H264 => GstElement::AVDecH264.make(),
+        }
+    }
+
+    pub fn new_encode_elem(self) -> gst::Element {
+        match self {
+            VideoCodec::H264 => GstElement::X264Enc.make(),
         }
     }
 }
