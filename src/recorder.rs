@@ -10,10 +10,10 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
+use gstreamer_pbutils::prelude::*;
 
 use codecs::{AudioCodec, VideoCodec};
 use messages::StreamId;
-use std::io::BufRead;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
@@ -40,9 +40,8 @@ impl Config {
 
 const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
+const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
-
-const TIMESTAMP_EXTENSION: &str = "timestamp";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -137,17 +136,15 @@ impl Recorder {
             }
         }
 
-        let _res = self
-            .recorder_thread_handle
-            .take()
-            .ok_or_else(|| err_msg("Missing thread handle?!"))?
-            .join()
-            .map_err(|err| {
-                format_err!(
+        if let Some(handle) = self.recorder_thread_handle.take() {
+            match handle.join() {
+                Ok(_) => {}
+                Err(err) => janus_err!(
                     "Error during finalization of current record part: {:?}",
                     err
-                )
-            })?;
+                ),
+            }
+        }
 
         let mux = GstElement::MP4Mux.make();
 
@@ -193,6 +190,8 @@ impl Recorder {
         parts.sort_by_key(|f| f.path());
 
         let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::new();
+        let timeout: gst::ClockTime = gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT);
+        let discoverer = gstreamer_pbutils::Discoverer::new(timeout)?;
 
         for file in parts {
             let metadata = file.metadata()?;
@@ -212,37 +211,29 @@ impl Recorder {
                 }
             }
 
-            match file.path().as_path().extension() {
-                None => {
-                    continue;
-                }
-                Some(extension) if extension == TIMESTAMP_EXTENSION => {
-                    use std::fs::File;
-                    use std::io::{BufRead, BufReader};
+            let path = file.path();
+            let filename = path.to_string_lossy();
 
-                    let read_line =
-                        |reader: &mut BufReader<fs::File>, name: &str| -> Result<u64, Error> {
-                            let mut line = String::new();
-                            let _len = reader.read_line(&mut line);
-                            line.trim()
-                                .parse::<u64>()
-                                .map_err(|_| format_err!("an invalid {} value = {}", name, line))
-                        };
+            let start = file
+                .path()
+                .as_path()
+                .file_stem()
+                .ok_or_else(|| format_err!("Bad filename {}.", filename))?
+                .to_string_lossy()
+                .parse::<u64>()
+                .map_err(|_| format_err!("Bad filename {}. Expected timestamp.", filename))?;
 
-                    let input = fs::OpenOptions::new().read(true).open(file.path())?;
-                    let mut reader = BufReader::new(input);
-                    let start = read_line(&mut reader, "start timestamp")?;
-                    let stop = read_line(&mut reader, "stop timestamp")?;
+            let duration = discoverer
+                .discover_uri(&format!("file://{}", filename))?
+                .get_duration()
+                .mseconds()
+                .ok_or_else(|| err_msg("Fail to get duration"))?;
 
-                    start_stop_timestamps.push((start, stop));
-
-                    continue;
-                }
-                Some(_) => {}
-            }
+            let stop = start + duration;
+            start_stop_timestamps.push((start, stop));
 
             let filesrc = GstElement::Filesrc.make();
-            filesrc.set_property("location", &file.path().to_string_lossy().to_value())?;
+            filesrc.set_property("location", &filename.to_value())?;
 
             let demux = GstElement::MatroskaDemux.make();
 
@@ -290,6 +281,7 @@ impl Recorder {
                 None
             })?;
         }
+
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
 
@@ -343,22 +335,6 @@ impl Recorder {
 
         let start = unix_time_ms();
         let basename = start.to_string();
-
-        {
-            use std::io::Write;
-
-            let path = self.generate_record_path(&basename, TIMESTAMP_EXTENSION);
-            let mut output = fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&path)?;
-            write!(output, "{}\n", start)?;
-
-            janus_info!(
-                "[CONFERENCE] Timestamp is written to {}",
-                path.to_string_lossy(),
-            );
-        }
 
         let path = self.generate_record_path(&basename, MKV_EXTENSION);
         let path = path.to_string_lossy();
@@ -472,15 +448,6 @@ impl Recorder {
 
     pub fn stop_recording(&self) -> Result<(), Error> {
         self.sender.send(RecorderMsg::Stop)?;
-
-        if let Some(ref filename) = self.filename {
-            use std::io::Write;
-
-            let path = self.generate_record_path(filename, TIMESTAMP_EXTENSION);
-            let mut output = fs::OpenOptions::new().append(true).open(&path)?;
-            write!(output, "{}\n", unix_time_ms())?;
-        }
-
         Ok(())
     }
 

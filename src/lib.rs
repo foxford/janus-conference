@@ -17,6 +17,7 @@ extern crate glib;
 extern crate gstreamer;
 extern crate gstreamer_app;
 extern crate gstreamer_base;
+extern crate gstreamer_pbutils;
 
 extern crate rusoto_core;
 extern crate rusoto_s3;
