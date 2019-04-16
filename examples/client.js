@@ -19,13 +19,22 @@ hangupButton.disabled = true;
 publisherStartButton.onclick = startTranslation;
 listenerStartButton.onclick = joinTranslation;
 hangupButton.onclick = hangup;
+uploadButton.onclick = upload;
 
 var websocket, sessionId, pluginHandleId, sessionTransaction, handleTransaction;
 var janusHost = "ws://192.168.99.100:8188";
 var streamId = "demo-conference-stream";
 
 function startTranslation() {
-    navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+    var constraints = {
+        audio: true,
+        video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+        }
+    };
+
+    navigator.mediaDevices.getUserMedia(constraints)
         .then(stream => {
             localStream = stream;
             localVideo.srcObject = stream;
@@ -127,6 +136,54 @@ function hangup() {
     publisherStartButton.disabled = false;
     listenerStartButton.disabled = false;
     hangupButton.disabled = true;
+}
+
+function upload() {
+    websocket = new WebSocket(janusHost, 'janus-protocol');
+
+    websocket.onopen = function () {
+        websocket.send(JSON.stringify({
+            "janus": "create",
+            "transaction": getTransactionId()
+        }));
+
+        websocket.onmessage = function (event) {
+            sessionId = JSON.parse(event.data).data.id;
+
+            websocket.send(JSON.stringify({
+                "janus": "attach",
+                "session_id": sessionId,
+                "plugin": "janus.plugin.conference",
+                "transaction": getTransactionId()
+            }));
+
+            websocket.onmessage = function (event) {
+                handleId = JSON.parse(event.data).data.id;
+
+                websocket.send(JSON.stringify({
+                    "janus": "message",
+                    "session_id": sessionId,
+                    "handle_id": handleId,
+                    "transaction": getTransactionId(),
+                    "body": {
+                        "method": "stream.upload",
+                        "id": streamId,
+                        "bucket": "origin.webinar.beta.netology.ru",
+                        "object": streamId + ".mp4"
+                    }
+                }));
+
+
+                websocket.onmessage = function (event) {
+                    console.log(JSON.parse(event.data));
+
+                    websocket.onmessage = function () {
+                        websocket.close();
+                    }
+                }
+            }
+        }
+    }
 }
 
 function gotLocalIceCandidate(event) {
