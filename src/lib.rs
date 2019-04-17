@@ -50,6 +50,7 @@ mod switchboard;
 #[macro_use]
 mod utils;
 mod codecs;
+mod gst_elements;
 mod uploader;
 
 use codecs::{AudioCodec, VideoCodec};
@@ -70,8 +71,7 @@ struct Message {
 
 unsafe impl Send for Message {}
 
-const AUDIO_CODEC: AudioCodec = AudioCodec::OPUS;
-const VIDEO_CODEC: VideoCodec = VideoCodec::H264;
+pub type ConcreteRecorder = recorder::RecorderImpl<codecs::H264, codecs::OPUS>;
 
 #[derive(Debug)]
 struct State {
@@ -453,7 +453,9 @@ fn handle_message_async(
             let jsep = match operation {
                 StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
                     let offer = maybe_jsep?;
-                    let answer = offer.negotatiate(VIDEO_CODEC.into(), AUDIO_CODEC.into());
+                    let video_codec = <ConcreteRecorder as Recorder>::VideoCodec::SDP_VIDEO_CODEC;
+                    let audio_codec = <ConcreteRecorder as Recorder>::AudioCodec::SDP_AUDIO_CODEC;
+                    let answer = offer.negotatiate(video_codec, audio_codec);
 
                     received.session.set_offer(offer).map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
@@ -480,12 +482,14 @@ fn handle_message_async(
                     switchboard.create_stream(id.to_owned(), received.session.clone());
 
                     let config = STATE.config.get().expect("Empty config?!");
+
                     if config.recordings.enabled {
-                        let mut recorder =
-                            Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
+                        let mut recorder = ConcreteRecorder::new(&config.recordings, &id);
+
                         recorder.start_recording().map_err(|err| {
                             APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
                         })?;
+
                         switchboard.attach_recorder(received.session.clone(), recorder);
                     }
 
@@ -515,8 +519,7 @@ fn handle_message_async(
                     }
 
                     let config = STATE.config.get().expect("Empty config?!");
-                    let mut recorder =
-                        Recorder::new(&config.recordings, &id, VIDEO_CODEC, AUDIO_CODEC);
+                    let mut recorder = ConcreteRecorder::new(&config.recordings, &id);
 
                     let start_stop_timestamps = recorder.finish_record().map_err(|err| {
                         APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
