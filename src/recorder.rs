@@ -91,10 +91,10 @@ pub trait Recorder {
     type AudioCodec;
 
     fn new(config: &Config, stream_id: &str) -> Self;
-    fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error>;
-    fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error>;
     fn start_recording(&mut self) -> Result<(), Error>;
+    fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error>;
     fn stop_recording(&self) -> Result<(), Error>;
+    fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error>;
     fn get_full_record_path(&self) -> PathBuf;
 }
 
@@ -129,7 +129,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! queue ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! v.
+            demux0.video_0 ! queue ! h264parse ! v.
             demux0.audio_0 ! queue ! opusparse ! a.
 
             ...
@@ -170,15 +170,6 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         let concat_video = GstElement::Concat.make();
         let queue_video = GstElement::Queue.make();
-        let decode_video = Self::VideoCodec::new_decode_elem();
-        let scale_video = GstElement::VideoScale.make();
-        let rate_video = GstElement::VideoRate.make();
-
-        let capsfilter_video = GstElement::CapsFilter.make();
-        capsfilter_video.set_property_from_str("caps", FULL_RECORD_CAPS);
-
-        let encode_video = Self::VideoCodec::new_encode_elem();
-        encode_video.set_property_from_str("tune", "zerolatency");
 
         let concat_audio = GstElement::Concat.make();
         let queue_audio = GstElement::Queue.make();
@@ -190,26 +181,16 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             &filesink,
             &concat_video,
             &queue_video,
-            &decode_video,
-            &scale_video,
-            &rate_video,
-            &capsfilter_video,
-            &encode_video,
             &concat_audio,
             &queue_audio,
         ])?;
 
         mux.link(&filesink)?;
         concat_video.link(&queue_video)?;
-        queue_video.link(&decode_video)?;
-        decode_video.link(&scale_video)?;
-        scale_video.link(&rate_video)?;
-        rate_video.link(&capsfilter_video)?;
-        capsfilter_video.link(&encode_video)?;
         concat_audio.link(&queue_audio)?;
 
         let video_sink_pad =
-            Self::link_static_and_request_pads((&encode_video, "src"), (&mux, "video_%u"))?;
+            Self::link_static_and_request_pads((&queue_video, "src"), (&mux, "video_%u"))?;
 
         let audio_sink_pad =
             Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
@@ -332,7 +313,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         /*
         GStreamer pipeline we create here:
 
-            appsrc ! rtph264depay ! h264parse ! queue name=v
+            appsrc ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! queue name=v
             appsrc ! rtpopusdepay ! opusparse ! queue name=a
 
             v. ! mux.video_0
@@ -366,29 +347,44 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         let (video_src, video_rtpdepay, video_parse) = Self::setup_video_elements();
         let video_queue = GstElement::Queue.make();
 
+        let decode_video = Self::VideoCodec::new_decode_elem();
+        let scale_video = GstElement::VideoScale.make();
+        let rate_video = GstElement::VideoRate.make();
+
+        let capsfilter_video = GstElement::CapsFilter.make();
+        capsfilter_video.set_property_from_str("caps", FULL_RECORD_CAPS);
+
+        let encode_video = Self::VideoCodec::new_encode_elem();
+        encode_video.set_property_from_str("tune", "zerolatency");
+
         let (audio_src, audio_rtpdepay, audio_parse) = Self::setup_audio_elements();
         let audio_queue = GstElement::Queue.make();
 
         {
-            let streams = [
-                [
-                    &video_src.upcast_ref(),
-                    &video_rtpdepay,
-                    &video_parse,
-                    &video_queue,
-                ],
-                [
-                    &audio_src.upcast_ref(),
-                    &audio_rtpdepay,
-                    &audio_parse,
-                    &audio_queue,
-                ],
+            let video_elems = [
+                &video_src.upcast_ref(),
+                &video_rtpdepay,
+                &video_parse,
+                &decode_video,
+                &scale_video,
+                &rate_video,
+                &capsfilter_video,
+                &encode_video,
+                &video_queue,
             ];
 
-            for elems in streams.iter() {
-                pipeline.add_many(elems)?;
-                gst::Element::link_many(elems)?;
-            }
+            pipeline.add_many(&video_elems)?;
+            gst::Element::link_many(&video_elems)?;
+
+            let audio_elems = [
+                &audio_src.upcast_ref(),
+                &audio_rtpdepay,
+                &audio_parse,
+                &audio_queue,
+            ];
+
+            pipeline.add_many(&audio_elems)?;
+            gst::Element::link_many(&audio_elems)?;
         }
 
         mux.link(&filesink)
