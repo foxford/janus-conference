@@ -1,4 +1,5 @@
 use std::fs;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
@@ -10,10 +11,10 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base::BaseSrcExt;
+use gstreamer_pbutils::prelude::*;
 
-use codecs::{AudioCodec, VideoCodec};
+use gst_elements::GstElement;
 use messages::StreamId;
-use std::io::BufRead;
 
 #[derive(Deserialize, Debug)]
 pub struct Config {
@@ -40,9 +41,10 @@ impl Config {
 
 const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
+const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
-
-const TIMESTAMP_EXTENSION: &str = "timestamp";
+const FULL_RECORD_CAPS: &str =
+    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -53,6 +55,18 @@ enum RecorderMsg {
     },
 }
 
+#[derive(Debug)]
+pub struct RecorderImpl<V, A> {
+    sender: mpsc::Sender<RecorderMsg>,
+    receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
+    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
+    stream_id: StreamId,
+    filename: Option<String>,
+    save_root_dir: String,
+    video_codec: PhantomData<V>,
+    audio_codec: PhantomData<A>,
+}
+
 /// Records video from RTP stream identified by StreamId.
 ///
 /// StreamId is used as a directory for parts of a record.
@@ -61,7 +75,7 @@ enum RecorderMsg {
 /// in that directory. Filename for record part is generated
 /// by the following rule: `unix_timestamp.extension`.
 ///
-/// Look at `VideoCodec` and `AudioCodec` enums to find out
+/// Look at `codecs` module to find out
 /// which codecs are supported. It's up to you to determine
 /// exact codecs during signaling.
 ///
@@ -72,27 +86,23 @@ enum RecorderMsg {
 /// (e.g. stream is over and you need to pass full record
 /// to some external service). Use method `finish_record`
 /// for that.
-#[derive(Debug)]
-pub struct Recorder {
-    sender: mpsc::Sender<RecorderMsg>,
-    receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
-    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
-    stream_id: StreamId,
-    filename: Option<String>,
-    save_root_dir: String,
-    video_codec: VideoCodec,
-    audio_codec: AudioCodec,
+pub trait Recorder {
+    type VideoCodec;
+    type AudioCodec;
+
+    fn new(config: &Config, stream_id: &str) -> Self;
+    fn start_recording(&mut self) -> Result<(), Error>;
+    fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error>;
+    fn stop_recording(&self) -> Result<(), Error>;
+    fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error>;
+    fn get_full_record_path(&self) -> PathBuf;
 }
 
-unsafe impl Sync for Recorder {}
+impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for RecorderImpl<V, A> {
+    type VideoCodec = V;
+    type AudioCodec = A;
 
-impl Recorder {
-    pub fn new(
-        config: &Config,
-        stream_id: &str,
-        video_codec: VideoCodec,
-        audio_codec: AudioCodec,
-    ) -> Self {
+    fn new(config: &Config, stream_id: &str) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
         Self {
@@ -102,19 +112,19 @@ impl Recorder {
             stream_id: stream_id.to_owned(),
             save_root_dir: config.directory.clone(),
             filename: None,
-            video_codec,
-            audio_codec,
+            video_codec: PhantomData,
+            audio_codec: PhantomData,
         }
     }
 
-    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
+    fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
         let buf = Self::wrap_buf(buf)?;
         let msg = RecorderMsg::Packet { buf, is_video };
 
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error> {
+    fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error> {
         /*
         GStreamer pipeline we create here:
 
@@ -124,7 +134,8 @@ impl Recorder {
 
             ...
 
-            concat name=v ! queue ! mp4mux name=mux
+            mp4mux name=mux
+            concat name=v ! queue ! mux.video_0
             concat name=a ! queue ! mux.audio_0
 
             mux. ! filesink location=full.mp4
@@ -137,17 +148,15 @@ impl Recorder {
             }
         }
 
-        let _res = self
-            .recorder_thread_handle
-            .take()
-            .ok_or_else(|| err_msg("Missing thread handle?!"))?
-            .join()
-            .map_err(|err| {
-                format_err!(
+        if let Some(handle) = self.recorder_thread_handle.take() {
+            match handle.join() {
+                Ok(_) => {}
+                Err(err) => janus_err!(
                     "Error during finalization of current record part: {:?}",
                     err
-                )
-            })?;
+                ),
+            }
+        }
 
         let mux = GstElement::MP4Mux.make();
 
@@ -187,12 +196,15 @@ impl Recorder {
             Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
 
         let records_dir = self.get_records_dir();
+
         let mut parts: Vec<fs::DirEntry> =
             fs::read_dir(&records_dir)?.filter_map(|r| r.ok()).collect();
 
         parts.sort_by_key(|f| f.path());
 
         let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::new();
+        let timeout: gst::ClockTime = gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT);
+        let discoverer = gstreamer_pbutils::Discoverer::new(timeout)?;
 
         for file in parts {
             let metadata = file.metadata()?;
@@ -212,44 +224,36 @@ impl Recorder {
                 }
             }
 
-            match file.path().as_path().extension() {
-                None => {
-                    continue;
-                }
-                Some(extension) if extension == TIMESTAMP_EXTENSION => {
-                    use std::fs::File;
-                    use std::io::{BufRead, BufReader};
+            let path = file.path();
+            let filename = path.to_string_lossy();
 
-                    let read_line =
-                        |reader: &mut BufReader<fs::File>, name: &str| -> Result<u64, Error> {
-                            let mut line = String::new();
-                            let _len = reader.read_line(&mut line);
-                            line.trim()
-                                .parse::<u64>()
-                                .map_err(|_| format_err!("an invalid {} value = {}", name, line))
-                        };
+            let start = file
+                .path()
+                .as_path()
+                .file_stem()
+                .ok_or_else(|| format_err!("Bad filename {}.", filename))?
+                .to_string_lossy()
+                .parse::<u64>()
+                .map_err(|_| format_err!("Bad filename {}. Expected timestamp.", filename))?;
 
-                    let input = fs::OpenOptions::new().read(true).open(file.path())?;
-                    let mut reader = BufReader::new(input);
-                    let start = read_line(&mut reader, "start timestamp")?;
-                    let stop = read_line(&mut reader, "stop timestamp")?;
+            let duration = discoverer
+                .discover_uri(&format!("file://{}", filename))?
+                .get_duration()
+                .mseconds()
+                .ok_or_else(|| err_msg("Fail to get duration"))?;
 
-                    start_stop_timestamps.push((start, stop));
-
-                    continue;
-                }
-                Some(_) => {}
-            }
+            let stop = start + duration;
+            start_stop_timestamps.push((start, stop));
 
             let filesrc = GstElement::Filesrc.make();
-            filesrc.set_property("location", &file.path().to_string_lossy().to_value())?;
+            filesrc.set_property("location", &filename.to_value())?;
 
             let demux = GstElement::MatroskaDemux.make();
 
-            let video_parse = self.video_codec.new_parse_elem();
+            let video_parse = Self::VideoCodec::new_parse_elem();
             let video_queue = GstElement::Queue.make();
 
-            let audio_parse = self.audio_codec.new_parse_elem();
+            let audio_parse = Self::AudioCodec::new_parse_elem();
             let audio_queue = GstElement::Queue.make();
 
             pipeline.add_many(&[
@@ -290,6 +294,7 @@ impl Recorder {
                 None
             })?;
         }
+
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
 
@@ -304,29 +309,11 @@ impl Recorder {
         Ok(start_stop_timestamps)
     }
 
-    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
-        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
-            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
-
-        {
-            let gbuf = gbuf.get_mut().unwrap();
-            gbuf.copy_from_slice(0, buf).map_err(|copied| {
-                format_err!(
-                    "Failed to copy buf into GBuffer: copied {} out of {} bytes",
-                    copied,
-                    buf.len()
-                )
-            })?;
-        }
-
-        Ok(gbuf)
-    }
-
-    pub fn start_recording(&mut self) -> Result<(), Error> {
+    fn start_recording(&mut self) -> Result<(), Error> {
         /*
         GStreamer pipeline we create here:
 
-            appsrc ! rtph264depay ! h264parse ! queue name=v
+            appsrc ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! queue name=v
             appsrc ! rtpopusdepay ! opusparse ! queue name=a
 
             v. ! mux.video_0
@@ -344,22 +331,6 @@ impl Recorder {
         let start = unix_time_ms();
         let basename = start.to_string();
 
-        {
-            use std::io::Write;
-
-            let path = self.generate_record_path(&basename, TIMESTAMP_EXTENSION);
-            let mut output = fs::OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&path)?;
-            write!(output, "{}\n", start)?;
-
-            janus_info!(
-                "[CONFERENCE] Timestamp is written to {}",
-                path.to_string_lossy(),
-            );
-        }
-
         let path = self.generate_record_path(&basename, MKV_EXTENSION);
         let path = path.to_string_lossy();
 
@@ -373,32 +344,47 @@ impl Recorder {
 
         pipeline.add_many(&[&mux, &filesink])?;
 
-        let (video_src, video_rtpdepay, video_codec) = Self::setup_video_elements(self.video_codec);
+        let (video_src, video_rtpdepay, video_parse) = Self::setup_video_elements();
         let video_queue = GstElement::Queue.make();
 
-        let (audio_src, audio_rtpdepay, audio_codec) = Self::setup_audio_elements(self.audio_codec);
+        let decode_video = Self::VideoCodec::new_decode_elem();
+        let scale_video = GstElement::VideoScale.make();
+        let rate_video = GstElement::VideoRate.make();
+
+        let capsfilter_video = GstElement::CapsFilter.make();
+        capsfilter_video.set_property_from_str("caps", FULL_RECORD_CAPS);
+
+        let encode_video = Self::VideoCodec::new_encode_elem();
+        encode_video.set_property_from_str("tune", "zerolatency");
+
+        let (audio_src, audio_rtpdepay, audio_parse) = Self::setup_audio_elements();
         let audio_queue = GstElement::Queue.make();
 
         {
-            let streams = [
-                [
-                    &video_src.upcast_ref(),
-                    &video_rtpdepay,
-                    &video_codec,
-                    &video_queue,
-                ],
-                [
-                    &audio_src.upcast_ref(),
-                    &audio_rtpdepay,
-                    &audio_codec,
-                    &audio_queue,
-                ],
+            let video_elems = [
+                &video_src.upcast_ref(),
+                &video_rtpdepay,
+                &video_parse,
+                &decode_video,
+                &scale_video,
+                &rate_video,
+                &capsfilter_video,
+                &encode_video,
+                &video_queue,
             ];
 
-            for elems in streams.iter() {
-                pipeline.add_many(elems)?;
-                gst::Element::link_many(elems)?;
-            }
+            pipeline.add_many(&video_elems)?;
+            gst::Element::link_many(&video_elems)?;
+
+            let audio_elems = [
+                &audio_src.upcast_ref(),
+                &audio_rtpdepay,
+                &audio_parse,
+                &audio_queue,
+            ];
+
+            pipeline.add_many(&audio_elems)?;
+            gst::Element::link_many(&audio_elems)?;
         }
 
         mux.link(&filesink)
@@ -470,18 +456,103 @@ impl Recorder {
         Ok(())
     }
 
-    pub fn stop_recording(&self) -> Result<(), Error> {
+    fn stop_recording(&self) -> Result<(), Error> {
         self.sender.send(RecorderMsg::Stop)?;
+        Ok(())
+    }
 
-        if let Some(ref filename) = self.filename {
-            use std::io::Write;
+    fn get_full_record_path(&self) -> PathBuf {
+        self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
+    }
+}
 
-            let path = self.generate_record_path(filename, TIMESTAMP_EXTENSION);
-            let mut output = fs::OpenOptions::new().append(true).open(&path)?;
-            write!(output, "{}\n", unix_time_ms())?;
+// Associated types are not yet supported in inherent impls (see #8995)
+// so we define private methods through this particular trait.
+trait RecorderPrivate {
+    type VideoCodec;
+    type AudioCodec;
+
+    fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc;
+    fn setup_video_elements() -> (gst_app::AppSrc, gst::Element, gst::Element);
+    fn setup_audio_elements() -> (gst_app::AppSrc, gst::Element, gst::Element);
+    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error>;
+    fn get_records_dir(&self) -> PathBuf;
+    fn generate_record_path(&self, filename: &str, extension: &str) -> PathBuf;
+    fn run_pipeline_to_completion(pipeline: &gst::Pipeline);
+
+    fn link_static_and_request_pads(
+        static_elem_and_pad: (&gst::Element, &str),
+        request_elem_and_pad: (&gst::Element, &str),
+    ) -> Result<gst::Pad, Error>;
+}
+
+impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> RecorderPrivate
+    for RecorderImpl<V, A>
+{
+    type VideoCodec = V;
+    type AudioCodec = A;
+
+    fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {
+        let src = GstElement::AppSrc
+            .make()
+            .downcast::<gst_app::AppSrc>()
+            .expect("Failed downcast: Element -> AppSrc");
+
+        src.set_caps(Some(&caps));
+        src.set_stream_type(gst_app::AppStreamType::Stream);
+        src.set_format(gst::Format::Time);
+        src.set_live(true);
+        src.set_do_timestamp(true);
+
+        src
+    }
+
+    fn setup_video_elements() -> (gst_app::AppSrc, gst::Element, gst::Element) {
+        let caps = gst::Caps::new_simple(
+            "application/x-rtp",
+            &[
+                ("media", &"video"),
+                ("encoding-name", &Self::VideoCodec::NAME),
+                ("payload", &96),
+                ("clock-rate", &90000),
+            ],
+        );
+
+        let src = Self::init_app_src(caps);
+        (src, V::new_depay_elem(), V::new_parse_elem())
+    }
+
+    fn setup_audio_elements() -> (gst_app::AppSrc, gst::Element, gst::Element) {
+        let caps = gst::Caps::new_simple(
+            "application/x-rtp",
+            &[
+                ("media", &"audio"),
+                ("encoding-name", &Self::AudioCodec::NAME),
+                ("payload", &111),
+                ("clock-rate", &48000),
+            ],
+        );
+
+        let src = Self::init_app_src(caps);
+        (src, A::new_depay_elem(), A::new_parse_elem())
+    }
+
+    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
+        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
+            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
+
+        {
+            let gbuf = gbuf.get_mut().unwrap();
+            gbuf.copy_from_slice(0, buf).map_err(|copied| {
+                format_err!(
+                    "Failed to copy buf into GBuffer: copied {} out of {} bytes",
+                    copied,
+                    buf.len()
+                )
+            })?;
         }
 
-        Ok(())
+        Ok(gbuf)
     }
 
     fn get_records_dir(&self) -> PathBuf {
@@ -508,57 +579,6 @@ impl Recorder {
         path.set_extension(extension);
 
         path
-    }
-
-    pub fn get_full_record_path(&self) -> PathBuf {
-        self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
-    }
-
-    fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc {
-        let src = GstElement::AppSrc
-            .make()
-            .downcast::<gst_app::AppSrc>()
-            .expect("Failed downcast: Element -> AppSrc");
-
-        src.set_caps(Some(&caps));
-        src.set_stream_type(gst_app::AppStreamType::Stream);
-        src.set_format(gst::Format::Time);
-        src.set_live(true);
-        src.set_do_timestamp(true);
-
-        src
-    }
-
-    fn setup_video_elements(codec: VideoCodec) -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let caps = gst::Caps::new_simple(
-            "application/x-rtp",
-            &[
-                ("media", &"video"),
-                ("encoding-name", &codec.name()),
-                ("payload", &96),
-                ("clock-rate", &90000),
-            ],
-        );
-
-        let src = Self::init_app_src(caps);
-
-        (src, codec.new_depay_elem(), codec.new_parse_elem())
-    }
-
-    fn setup_audio_elements(codec: AudioCodec) -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let caps = gst::Caps::new_simple(
-            "application/x-rtp",
-            &[
-                ("media", &"audio"),
-                ("encoding-name", &codec.name()),
-                ("payload", &111),
-                ("clock-rate", &48000),
-            ],
-        );
-
-        let src = Self::init_app_src(caps);
-
-        (src, codec.new_depay_elem(), codec.new_parse_elem())
     }
 
     fn run_pipeline_to_completion(pipeline: &gst::Pipeline) {
@@ -609,74 +629,7 @@ impl Recorder {
     }
 }
 
-enum GstElement {
-    Queue,
-    Filesrc,
-    Filesink,
-    AppSrc,
-    Concat,
-    MatroskaMux,
-    MatroskaDemux,
-    MP4Mux,
-    OpusParse,
-    RTPOpusDepay,
-    H264Parse,
-    RTPH264Depay,
-}
-
-impl GstElement {
-    pub fn name(&self) -> &str {
-        match self {
-            GstElement::Queue => "queue",
-            GstElement::Filesrc => "filesrc",
-            GstElement::Filesink => "filesink",
-            GstElement::AppSrc => "appsrc",
-            GstElement::Concat => "concat",
-            GstElement::MatroskaMux => "matroskamux",
-            GstElement::MatroskaDemux => "matroskademux",
-            GstElement::MP4Mux => "mp4mux",
-            GstElement::OpusParse => "opusparse",
-            GstElement::RTPOpusDepay => "rtpopusdepay",
-            GstElement::H264Parse => "h264parse",
-            GstElement::RTPH264Depay => "rtph264depay",
-        }
-    }
-
-    pub fn make(&self) -> gst::Element {
-        match gst::ElementFactory::make(self.name(), None) {
-            Some(elem) => elem,
-            None => panic!("Failed to create GStreamer element {}", self.name()),
-        }
-    }
-}
-
-impl VideoCodec {
-    pub fn new_parse_elem(self) -> gst::Element {
-        match self {
-            VideoCodec::H264 => GstElement::H264Parse.make(),
-        }
-    }
-
-    pub fn new_depay_elem(self) -> gst::Element {
-        match self {
-            VideoCodec::H264 => GstElement::RTPH264Depay.make(),
-        }
-    }
-}
-
-impl AudioCodec {
-    pub fn new_parse_elem(self) -> gst::Element {
-        match self {
-            AudioCodec::OPUS => GstElement::OpusParse.make(),
-        }
-    }
-
-    pub fn new_depay_elem(self) -> gst::Element {
-        match self {
-            AudioCodec::OPUS => GstElement::RTPOpusDepay.make(),
-        }
-    }
-}
+unsafe impl<V, A> Sync for RecorderImpl<V, A> {}
 
 fn unix_time_ms() -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();

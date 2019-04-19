@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use failure::Error;
 
+use crate::ConcreteRecorder as Recorder;
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::StreamId;
-use recorder::Recorder;
 use session::Session;
 
 #[derive(Debug)]
