@@ -8,7 +8,7 @@ use uploader;
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub recordings: recorder::Config,
     pub uploading: uploader::Config,

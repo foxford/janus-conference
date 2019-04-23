@@ -25,24 +25,26 @@ extern crate s4;
 
 #[macro_use]
 extern crate failure;
+extern crate rayon;
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use atom::AtomSetOnce;
-use failure::Error;
+use failure::{err_msg, Error};
 use janus::{
-    JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult, PluginSession,
-    RawJanssonValue, RawPluginResult,
+    JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult,
+    PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
+mod message_handler;
 mod messages;
 mod recorder;
 mod session;
@@ -53,41 +55,35 @@ mod codecs;
 mod gst_elements;
 mod uploader;
 
-use codecs::{AudioCodec, VideoCodec};
 use conf::Config;
-use messages::{APIError, ErrorStatus, JsepKind, Response, StreamOperation, StreamResponse};
+use message_handler::MessageHandler;
+use messages::{APIError, ErrorStatus, StreamOperation};
 use recorder::Recorder;
 use session::{Session, SessionState};
-use switchboard::Switchboard;
-use uploader::Uploader;
 
-#[derive(Debug)]
-struct Message {
+#[derive(Clone, Debug)]
+pub struct Message {
     session: Arc<Session>,
-    transaction: *mut c_char,
-    message: Option<JanssonValue>,
-    jsep: Option<JanssonValue>,
+    transaction: String,
+    operation: Option<StreamOperation>,
+    jsep: Option<String>,
 }
 
 unsafe impl Send for Message {}
 
-pub type ConcreteRecorder = recorder::RecorderImpl<codecs::H264, codecs::OPUS>;
-
-#[derive(Debug)]
-struct State {
-    pub message_channel: AtomSetOnce<Box<mpsc::SyncSender<Message>>>,
-    pub switchboard: RwLock<Switchboard>,
-    pub config: AtomSetOnce<Box<Config>>,
-    pub uploader: AtomSetOnce<Box<Uploader>>,
+pub enum Event {
+    Request(Message),
+    Response {
+        msg: Message,
+        response: Option<JanssonValue>,
+        jsep: Option<JanssonValue>,
+    },
 }
 
+pub type ConcreteRecorder = recorder::RecorderImpl<codecs::H264, codecs::OPUS>;
+
 lazy_static! {
-    static ref STATE: State = State {
-        message_channel: AtomSetOnce::empty(),
-        switchboard: RwLock::new(Switchboard::new()),
-        config: AtomSetOnce::empty(),
-        uploader: AtomSetOnce::empty(),
-    };
+    static ref MESSAGE_HANDLER: AtomSetOnce<Box<MessageHandler>> = AtomSetOnce::empty();
 }
 
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
@@ -123,65 +119,63 @@ fn init_config(config_path: *const c_char) -> Result<Config, Error> {
 }
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
-    match init_config(config_path) {
+    let config = match init_config(config_path) {
         Ok(config) => {
             janus_info!("{:?}", config);
-            STATE.config.set_if_none(Box::new(config));
+            config
         }
         Err(err) => {
             janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
             return -1;
         }
-    }
+    };
 
-    let config = STATE.config.get().expect("Empty config?!");
-    match Uploader::new(config.uploading.clone()) {
-        Ok(uploader) => {
-            STATE.uploader.set_if_none(Box::new(uploader));
+    let (tx, rx) = mpsc::sync_channel(10);
+
+    match MessageHandler::new(config, tx) {
+        Ok(message_handler) => {
+            MESSAGE_HANDLER.set_if_none(Box::new(message_handler));
         }
         Err(err) => {
-            janus_fatal!("[CONFERENCE] Failed to init uploader: {:?}", err);
+            janus_fatal!("[CONFERENCE] Message handler init failed: {}", err);
             return -1;
         }
-    }
+    };
 
     janus_callbacks::init(callbacks);
 
-    let (messages_tx, messages_rx) = mpsc::sync_channel(10);
-
-    STATE.message_channel.set_if_none(Box::new(messages_tx));
-
     thread::spawn(move || {
         janus_info!("[CONFERENCE] Message processing thread is alive.");
-        for msg in messages_rx.iter() {
-            let push_result = match handle_message_async(&msg) {
-                Ok((response, jsep)) => {
-                    janus_callbacks::push_event(&msg.session, msg.transaction, response, jsep)
-                        .map_err(Error::from)
+
+        let message_handler = match MESSAGE_HANDLER.get() {
+            Some(message_handler) => message_handler,
+            None => {
+                janus_fatal!("[CONFERENCE] Message handler not initialized");
+                return;
+            }
+        };
+
+        for item in rx.iter() {
+            match item {
+                Event::Request(msg) => message_handler.handle(&msg),
+                Event::Response {
+                    msg,
+                    response,
+                    jsep,
+                } => {
+                    let push_result = CString::new(msg.transaction.clone()).map(|transaction| {
+                        janus_callbacks::push_event(
+                            &msg.session,
+                            transaction.into_raw(),
+                            response,
+                            jsep,
+                        )
+                    });
+
+                    if let Err(err) = push_result {
+                        janus_err!("Error pushing event: {}", err);
+                    }
                 }
-                Err(err) => {
-                    janus_err!("Error processing message: {}", err);
-
-                    let response = Response::new(None, Some(err));
-
-                    serde_json::to_value(response)
-                        .map_err(Error::from)
-                        .and_then(|response| {
-                            utils::serde_to_jansson(&response).and_then(|response| {
-                                janus_callbacks::push_event(
-                                    &msg.session,
-                                    msg.transaction,
-                                    Some(response),
-                                    None,
-                                )
-                                .map_err(Error::from)
-                            })
-                        })
-                }
-            };
-
-            if let Err(err) = push_result {
-                janus_err!("Error pushing event: {}", err);
             }
         }
     });
@@ -204,10 +198,18 @@ extern "C" fn destroy() {
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     let initial_state = SessionState::new();
 
+    let message_handler = match MESSAGE_HANDLER.get() {
+        Some(message_handler) => message_handler,
+        None => {
+            janus_err!("[CONFERENCE] Message handler is not initialized");
+            return;
+        }
+    };
+
     match unsafe { Session::associate(handle, initial_state) } {
         Ok(sess) => {
             janus_info!("[CONFERENCE] Initializing session {:p}...", sess.handle);
-            let mut switchboard = STATE.switchboard.write();
+            let mut switchboard = message_handler.switchboard.write();
 
             match switchboard {
                 Ok(mut switchboard) => {
@@ -231,6 +233,14 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
+    let message_handler = match MESSAGE_HANDLER.get() {
+        Some(message_handler) => message_handler,
+        None => {
+            janus_err!("[CONFERENCE] Message handler is not initialized");
+            return;
+        }
+    };
+
     match unsafe { Session::from_ptr(handle) } {
         Ok(sess) => {
             janus_info!(
@@ -238,7 +248,7 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
                 sess.handle
             );
 
-            let mut switchboard = STATE.switchboard.write();
+            let mut switchboard = message_handler.switchboard.write();
 
             match switchboard {
                 Ok(mut switchboard) => {
@@ -277,33 +287,83 @@ extern "C" fn handle_message(
 ) -> *mut RawPluginResult {
     janus_info!("[CONFERENCE] Queueing message on {:p}.", handle);
 
-    match unsafe { Session::from_ptr(handle) } {
-        Ok(sess) => {
-            let msg = Message {
-                session: sess,
-                transaction,
-                message: unsafe { JanssonValue::from_raw(message) },
-                jsep: unsafe { JanssonValue::from_raw(jsep) },
-            };
-
-            STATE.message_channel.get().and_then(|ch| ch.send(msg).ok());
-
-            PluginResult::ok_wait(None).into_raw()
+    let message_handler = match MESSAGE_HANDLER.get() {
+        Some(message_handler) => message_handler,
+        None => {
+            janus_err!("[CONFERENCE] Message handler not initialized");
+            return PluginResult::error(c_str!("Message handler not initialized")).into_raw();
         }
-        Err(e) => {
-            janus_err!("[CONFERENCE] Failed to restore session state: {}", e);
+    };
 
-            PluginResult::error(c_str!("Failed to restore session state")).into_raw()
+    let session = match unsafe { Session::from_ptr(handle) } {
+        Ok(session) => session,
+        Err(err) => {
+            janus_err!("[CONFERENCE] Failed to restore session state: {}", err);
+            return PluginResult::error(c_str!("Failed to restore session state")).into_raw();
         }
-    }
+    };
+
+    let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
+        Ok(transaction) => String::from(transaction),
+        Err(err) => {
+            janus_err!("[CONFERENCE] Failed to serialize transaction: {}", err);
+            return PluginResult::error(c_str!("Failed serialize transaction")).into_raw();
+        }
+    };
+
+    // TODO: Suboptimal serialization to String for making Message thread safe.
+    let jsep = match unsafe { JanssonValue::from_raw(jsep) } {
+        None => None,
+        Some(jsep) => match jsep.to_libcstring(JanssonEncodingFlags::empty()).to_str() {
+            Ok(jsep) => Some(String::from(jsep)),
+            Err(err) => {
+                janus_err!("[CONFERENCE] Failed to serialize JSEP: {}", err);
+                return PluginResult::error(c_str!("Failed serialize JSEP")).into_raw();
+            }
+        },
+    };
+
+    unsafe { JanssonValue::from_raw(message) }.map(|message| {
+        match utils::jansson_to_serde(&message) {
+            Ok(operation) => {
+                let msg = Message {
+                    session,
+                    transaction,
+                    operation: Some(operation),
+                    jsep,
+                };
+
+                message_handler.tx.send(Event::Request(msg)).ok();
+            }
+            Err(err) => {
+                let msg = Message {
+                    session,
+                    transaction,
+                    operation: None,
+                    jsep: None,
+                };
+
+                let err = APIError::new(ErrorStatus::BAD_REQUEST, err, &None);
+                message_handler.respond(&msg, Err(err), None);
+            }
+        };
+    });
+
+    PluginResult::ok_wait(None).into_raw()
 }
 
 fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     let sess = unsafe { Session::from_ptr(handle)? };
-    let switchboard = STATE
-        .switchboard
-        .read()
-        .map_err(|err| format_err!("{}", err))?;
+
+    let switchboard = MESSAGE_HANDLER
+        .get()
+        .ok_or_else(|| err_msg("Message handler not initialized"))
+        .and_then(|message_handler| {
+            message_handler
+                .switchboard
+                .read()
+                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
+        })?;
 
     send_fir(switchboard.publisher_to(&sess));
 
@@ -330,10 +390,16 @@ fn incoming_rtp_impl(
     len: c_int,
 ) -> Result<(), Error> {
     let sess = unsafe { Session::from_ptr(handle)? };
-    let switchboard = STATE
-        .switchboard
-        .read()
-        .map_err(|err| format_err!("{}", err))?;
+
+    let switchboard = MESSAGE_HANDLER
+        .get()
+        .ok_or_else(|| err_msg("Message handler not initialized"))
+        .and_then(|message_handler| {
+            message_handler
+                .switchboard
+                .read()
+                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
+        })?;
 
     let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
 
@@ -367,10 +433,15 @@ fn incoming_rtcp_impl(
 ) -> Result<(), Error> {
     let sess = unsafe { Session::from_ptr(handle)? };
 
-    let switchboard = STATE
-        .switchboard
-        .read()
-        .map_err(|err| format_err!("{}", err))?;
+    let switchboard = MESSAGE_HANDLER
+        .get()
+        .ok_or_else(|| err_msg("Message handler not initialized"))
+        .and_then(|message_handler| {
+            message_handler
+                .switchboard
+                .read()
+                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
+        })?;
 
     let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
 
@@ -433,139 +504,3 @@ const PLUGIN: Plugin = build_plugin!(
 );
 
 export_plugin!(&PLUGIN);
-
-fn handle_message_async(
-    received: &Message,
-) -> Result<(Option<JanssonValue>, Option<JanssonValue>), APIError> {
-    match received.message {
-        Some(ref message) => {
-            let operation: StreamOperation = utils::jansson_to_serde(&message)
-                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, None))?;
-
-            let mut switchboard = STATE.switchboard.write().map_err(|err| {
-                let err = format_err!("{}", err);
-                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-            })?;
-
-            let maybe_jsep = parse_jsep(&received.jsep)
-                .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, Some(&operation)));
-
-            let jsep = match operation {
-                StreamOperation::Create { .. } | StreamOperation::Read { .. } => {
-                    let offer = maybe_jsep?;
-                    let video_codec = <ConcreteRecorder as Recorder>::VideoCodec::SDP_VIDEO_CODEC;
-                    let audio_codec = <ConcreteRecorder as Recorder>::AudioCodec::SDP_AUDIO_CODEC;
-                    let answer = offer.negotatiate(video_codec, audio_codec);
-
-                    received.session.set_offer(offer).map_err(|err| {
-                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                    })?;
-
-                    let jsep = serde_json::to_value(answer).map_err(|err| {
-                        APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            Error::from(err),
-                            Some(&operation),
-                        )
-                    })?;
-                    let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
-                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                    })?;
-
-                    Some(jsep)
-                }
-                StreamOperation::Upload { .. } => None,
-            };
-
-            let response = match &operation {
-                StreamOperation::Create { ref id } => {
-                    switchboard.create_stream(id.to_owned(), received.session.clone());
-
-                    let config = STATE.config.get().expect("Empty config?!");
-
-                    if config.recordings.enabled {
-                        let mut recorder = ConcreteRecorder::new(&config.recordings, &id);
-
-                        recorder.start_recording().map_err(|err| {
-                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                        })?;
-
-                        switchboard.attach_recorder(received.session.clone(), recorder);
-                    }
-
-                    StreamResponse::Create {}
-                }
-                StreamOperation::Read { ref id } => {
-                    switchboard
-                        .join_stream(&id, received.session.clone())
-                        .map_err(|err| {
-                            APIError::new(ErrorStatus::NOT_FOUND, err, Some(&operation))
-                        })?;
-
-                    StreamResponse::Read {}
-                }
-                StreamOperation::Upload { id, bucket, object } => {
-                    // Stopping active recording if any.
-                    if let Some(publisher) = switchboard.publisher_by_stream(&id) {
-                        if let Some(recorder) = switchboard.recorder_for(publisher) {
-                            recorder.stop_recording().map_err(|err| {
-                                APIError::new(
-                                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                                    err,
-                                    Some(&operation),
-                                )
-                            })?;
-                        }
-                    }
-
-                    let config = STATE.config.get().expect("Empty config?!");
-                    let mut recorder = ConcreteRecorder::new(&config.recordings, &id);
-
-                    let start_stop_timestamps = recorder.finish_record().map_err(|err| {
-                        APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                    })?;
-
-                    let path = recorder.get_full_record_path();
-                    STATE
-                        .uploader
-                        .get()
-                        .expect("Empty uploader?!")
-                        .upload_file(&path, &bucket, &object)
-                        .map_err(|err| {
-                            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-                        })?;
-
-                    StreamResponse::Upload {
-                        time: start_stop_timestamps,
-                    }
-                }
-            };
-
-            let response = Response::new(Some(response), None);
-
-            let response = serde_json::to_value(response).map_err(|err| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    Error::from(err),
-                    Some(&operation),
-                )
-            })?;
-            let response = utils::serde_to_jansson(&response).map_err(|err| {
-                APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, Some(&operation))
-            })?;
-
-            Ok((Some(response), jsep))
-        }
-        None => Ok((None, None)),
-    }
-}
-
-fn parse_jsep(jsep: &Option<JanssonValue>) -> Result<JsepKind, Error> {
-    match jsep {
-        Some(jsep) => {
-            let jsep_json: JsepKind = utils::jansson_to_serde(jsep)?;
-            Ok(jsep_json)
-        }
-        None => Err(failure::err_msg("JSEP is empty")),
-    }
-}
