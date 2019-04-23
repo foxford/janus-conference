@@ -31,17 +31,18 @@ jobs:
         - echo $GITHUB_TOKEN
         - echo $KUBE_SERVER
         - echo $KUBE_TOKEN
-    - stage: check
-      name: Tests
-      script: cargo test
-    - stage: check
-      name: Rustfmt
-      install: rustup component add rustfmt-preview
-      script: cargo fmt -- --check
-    - stage: check
-      name: Clippy
-      install: rustup component add clippy-preview
-      script: cargo clippy
+#    - stage: check
+#      name: Tests
+#      script: cargo test
+#    - stage: check
+#      name: Rustfmt
+#      install: rustup component add rustfmt-preview
+#      script: cargo fmt -- --check
+#    - stage: check
+#      name: Clippy
+#      install: rustup component add clippy-preview
+#      script: cargo clippy
+
 #    - stage: deploy
 #      name: Docs
 #      install: cargo install mdbook --vers 0.2 --force
@@ -49,9 +50,11 @@ jobs:
 #    - stage: deploy
 #      name: Kubernetes
 #      script: bash deploy/run.sh
-stages:
-  - name: check
+
+#stages:
+#  - name: check
 #  - name: deploy
+
 #    if: branch = master AND type = push
 notifications:
   email: false
