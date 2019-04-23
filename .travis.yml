@@ -24,6 +24,13 @@ git:
   depth: 1
 jobs:
   include:
+    - stage: show env
+      script:
+        - echo $DOCKER_PASSWORD
+        - echo $DOCKER_USERNAME
+        - echo $GITHUB_TOKEN
+        - echo $KUBE_SERVER
+        - echo $KUBE_TOKEN
     - stage: check
       name: Tests
       script: cargo test
