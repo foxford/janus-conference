@@ -16,7 +16,7 @@ use gstreamer_pbutils::prelude::*;
 use gst_elements::GstElement;
 use messages::StreamId;
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub directory: String,
     pub enabled: bool,

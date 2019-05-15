@@ -33,7 +33,7 @@ impl JsepKind {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum StreamOperation {
     #[serde(rename = "stream.create")]
@@ -51,9 +51,38 @@ pub enum StreamOperation {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum StreamResponse {
-    Create {},
-    Read {},
-    Upload { time: Vec<(u64, u64)> },
+    CreateStreamResponse(Create),
+    ReadStreamResponse(Read),
+    UploadStreamResponse(Upload),
+}
+
+#[derive(Serialize)]
+pub struct Create {}
+
+impl Create {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[derive(Serialize)]
+pub struct Read {}
+
+impl Read {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[derive(Serialize)]
+pub struct Upload {
+    time: Vec<(u64, u64)>,
+}
+
+impl Upload {
+    pub fn new(time: Vec<(u64, u64)>) -> Self {
+        Self { time }
+    }
 }
 
 pub type ErrorStatus = StatusCode;
@@ -73,6 +102,8 @@ pub struct Response {
 }
 
 impl Response {
+    // TODO: Move to StreamResponse.into_raw_response() and
+    //               StreamResponse.into_error(err: APIError).
     pub fn new(response: Option<StreamResponse>, error: Option<APIError>) -> Self {
         let status = match &error {
             None => StatusCode::OK,
@@ -102,11 +133,11 @@ impl APIError {
     pub fn new(
         status: StatusCode,
         detail: failure::Error,
-        operation: Option<&StreamOperation>,
+        operation: &Option<StreamOperation>,
     ) -> Self {
         let operation = match operation {
             None => OperationErrorDescription::unknown(status),
-            Some(op) => OperationErrorDescription::new(op),
+            Some(op) => OperationErrorDescription::new(&op),
         };
 
         Self {

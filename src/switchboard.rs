@@ -58,10 +58,12 @@ impl Switchboard {
         self.recorders.get_mut(publisher)
     }
 
+    // TODO: &StreamId -> &str
     pub fn publisher_by_stream(&self, id: &StreamId) -> Option<&Arc<Session>> {
         self.publishers.get(id)
     }
 
+    // TODO: StreamId -> &str
     pub fn create_stream(&mut self, id: StreamId, publisher: Arc<Session>) {
         let old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher.clone());
@@ -81,6 +83,7 @@ impl Switchboard {
         }
     }
 
+    // TODO: &StreamId -> &str
     pub fn join_stream(&mut self, id: &StreamId, subscriber: Arc<Session>) -> Result<(), Error> {
         match self.publishers.get(id) {
             Some(publisher) => self
