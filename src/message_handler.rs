@@ -99,13 +99,14 @@ impl MessageHandler {
         response: StreamResponse,
         operation: Option<StreamOperation>,
     ) -> Result<JanssonValue, APIError> {
-        let response = serde_json::to_value(response).map_err(|err| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                Error::from(err),
-                &operation,
-            )
-        })?;
+        let response =
+            serde_json::to_value(Response::new(Some(response), None)).map_err(|err| {
+                APIError::new(
+                    ErrorStatus::INTERNAL_SERVER_ERROR,
+                    Error::from(err),
+                    &operation,
+                )
+            })?;
 
         let response = utils::serde_to_jansson(&response)
             .map_err(|err| APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &operation))?;
