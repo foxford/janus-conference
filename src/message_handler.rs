@@ -1,8 +1,9 @@
 use std::sync::{mpsc, RwLock};
 
 use failure::{err_msg, Error};
+use futures::lazy;
 use janus::{JanssonDecodingFlags, JanssonValue};
-use rayon::{ThreadPool, ThreadPoolBuilder};
+use tokio_threadpool::ThreadPool;
 
 use crate::codecs::{AudioCodec, VideoCodec};
 use crate::conf::Config;
@@ -13,7 +14,7 @@ use crate::messages::{
 use crate::recorder::Recorder;
 use crate::switchboard::Switchboard;
 use crate::uploader::Uploader;
-use crate::{utils, ConcreteRecorder, Event, Message};
+use crate::{utils, ConcreteRecorder, Event, Message, MESSAGE_HANDLER};
 
 #[derive(Debug)]
 pub struct MessageHandler {
@@ -26,21 +27,15 @@ pub struct MessageHandler {
 
 impl MessageHandler {
     pub fn new(config: Config, tx: mpsc::SyncSender<Event>) -> Result<Self, Error> {
-        let switchboard = RwLock::new(Switchboard::new());
-
         let uploader = Uploader::new(config.uploading.clone())
             .map_err(|err| format_err!("Failed to init uploader: {}", err))?;
 
-        let thread_pool = ThreadPoolBuilder::new()
-            .build()
-            .map_err(|err| format_err!("Failed to initialize thread pool: {}", err))?;
-
         Ok(Self {
             tx,
-            switchboard,
+            switchboard: RwLock::new(Switchboard::new()),
             config,
             uploader,
-            thread_pool,
+            thread_pool: ThreadPool::new(),
         })
     }
 
@@ -220,65 +215,69 @@ impl MessageHandler {
         }
 
         let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
+        let msg = msg.to_owned();
+        let bucket = bucket.to_owned();
+        let object = object.to_owned();
 
-        self.thread_pool
-            .install(move || {
-                janus_info!("[CONFERENCE] Upload task started. Finishing record");
+        self.thread_pool.spawn(lazy(move || {
+            janus_info!("[CONFERENCE] Upload task started. Finishing record");
 
-                let start_stop_timestamps = match recorder.finish_record() {
-                    Ok(start_stop_timestamps) => start_stop_timestamps,
-                    Err(err) => {
-                        self.respond(
-                            msg,
-                            Err(APIError::new(
-                                ErrorStatus::INTERNAL_SERVER_ERROR,
-                                Error::from(err),
-                                &msg.operation,
-                            )),
-                            None,
-                        );
+            // We can't use just `self` because the compiler requires static lifetime for it.
+            let message_handler = match MESSAGE_HANDLER.get() {
+                Some(message_handler) => message_handler,
+                None => {
+                    janus_err!("[CONFERENCE] Message handler is not initialized");
+                    return Err(());
+                }
+            };
 
-                        return Err(());
-                    }
-                };
+            let start_stop_timestamps = match recorder.finish_record() {
+                Ok(start_stop_timestamps) => start_stop_timestamps,
+                Err(err) => {
+                    message_handler.respond(
+                        &msg,
+                        Err(APIError::new(
+                            ErrorStatus::INTERNAL_SERVER_ERROR,
+                            Error::from(err),
+                            &msg.operation,
+                        )),
+                        None,
+                    );
 
-                let path = recorder.get_full_record_path();
+                    return Err(());
+                }
+            };
 
-                janus_info!("[CONFERENCE] Uploading record");
+            janus_info!("[CONFERENCE] Uploading record");
+            let uploader = &message_handler.uploader;
+            let path = recorder.get_full_record_path();
 
-                match self.uploader.upload_file(&path, &bucket, &object) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        self.respond(
-                            msg,
-                            Err(APIError::new(
-                                ErrorStatus::INTERNAL_SERVER_ERROR,
-                                Error::from(err),
-                                &msg.operation,
-                            )),
-                            None,
-                        );
+            match uploader.upload_file(&path, &bucket, &object) {
+                Ok(_) => {}
+                Err(err) => {
+                    message_handler.respond(
+                        &msg,
+                        Err(APIError::new(
+                            ErrorStatus::INTERNAL_SERVER_ERROR,
+                            Error::from(err),
+                            &msg.operation,
+                        )),
+                        None,
+                    );
 
-                        return Err(());
-                    }
-                };
+                    return Err(());
+                }
+            };
 
-                janus_info!("[CONFERENCE] Uploading finished");
+            janus_info!("[CONFERENCE] Uploading finished");
 
-                let upload = Upload::new(start_stop_timestamps);
-                let response = StreamResponse::UploadStreamResponse(upload);
-                self.respond(msg, Ok(response), None);
+            let upload = Upload::new(start_stop_timestamps);
+            let response = StreamResponse::UploadStreamResponse(upload);
+            message_handler.respond(&msg, Ok(response), None);
 
-                janus_info!("[CONFERENCE] Upload task finished");
-                Ok(())
-            })
-            .map_err(|()| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    err_msg("Error queueing upload job"),
-                    &msg.operation,
-                )
-            })?;
+            janus_info!("[CONFERENCE] Upload task finished");
+            Ok(())
+        }));
 
         Ok(())
     }

@@ -25,7 +25,8 @@ extern crate s4;
 
 #[macro_use]
 extern crate failure;
-extern crate rayon;
+extern crate futures;
+extern crate tokio_threadpool;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -160,7 +161,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
                 Event::Request(msg) => {
                     janus_info!("[CONFERENCE] Handling request ({})", msg.transaction);
                     message_handler.handle(&msg)
-                },
+                }
                 Event::Response {
                     msg,
                     response,
