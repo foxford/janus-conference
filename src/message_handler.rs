@@ -91,6 +91,7 @@ impl MessageHandler {
             jsep,
         };
 
+        janus_info!("[CONFERENCE] Scheduling response ({})", msg.transaction);
         self.tx.send(response).ok();
     }
 
@@ -134,6 +135,7 @@ impl MessageHandler {
     }
 
     fn handle_create(&self, msg: &Message, id: &str) -> Result<(), APIError> {
+        janus_info!("[CONFERENCE] Handling create message with id {}", id);
         let jsep = Self::build_jsep(&msg)?;
 
         let mut switchboard = self.switchboard.write().map_err(|_| {
@@ -166,8 +168,8 @@ impl MessageHandler {
     }
 
     fn handle_read(&self, msg: &Message, id: &str) -> Result<(), APIError> {
+        janus_info!("[CONFERENCE] Handling read message with id {}", id);
         let jsep = Self::build_jsep(&msg)?;
-
         let mut switchboard = self.switchboard.write().map_err(|_| {
             APIError::new(
                 ErrorStatus::INTERNAL_SERVER_ERROR,
@@ -194,6 +196,8 @@ impl MessageHandler {
         bucket: &str,
         object: &str,
     ) -> Result<(), APIError> {
+        janus_info!("[CONFERENCE] Handling upload message with id {}", id);
+
         let switchboard = self.switchboard.read().map_err(|_| {
             APIError::new(
                 ErrorStatus::INTERNAL_SERVER_ERROR,
@@ -219,6 +223,8 @@ impl MessageHandler {
 
         self.thread_pool
             .install(move || {
+                janus_info!("[CONFERENCE] Upload task started. Finishing record");
+
                 let start_stop_timestamps = match recorder.finish_record() {
                     Ok(start_stop_timestamps) => start_stop_timestamps,
                     Err(err) => {
@@ -238,6 +244,8 @@ impl MessageHandler {
 
                 let path = recorder.get_full_record_path();
 
+                janus_info!("[CONFERENCE] Uploading record");
+
                 match self.uploader.upload_file(&path, &bucket, &object) {
                     Ok(_) => {}
                     Err(err) => {
@@ -255,9 +263,13 @@ impl MessageHandler {
                     }
                 };
 
+                janus_info!("[CONFERENCE] Uploading finished");
+
                 let upload = Upload::new(start_stop_timestamps);
                 let response = StreamResponse::UploadStreamResponse(upload);
                 self.respond(msg, Ok(response), None);
+
+                janus_info!("[CONFERENCE] Upload task finished");
                 Ok(())
             })
             .map_err(|()| {
