@@ -31,4 +31,4 @@ rayon = "1.0"
 default = ["s4/native-tls"]
 
 [patch.crates-io]
-janus-plugin = { git = "https://github.com/0nkery/janus-plugin-rs" }
+janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs" }
