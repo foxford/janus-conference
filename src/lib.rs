@@ -25,7 +25,8 @@ extern crate s4;
 
 #[macro_use]
 extern crate failure;
-extern crate rayon;
+extern crate futures;
+extern crate tokio_threadpool;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -157,12 +158,17 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
 
         for item in rx.iter() {
             match item {
-                Event::Request(msg) => message_handler.handle(&msg),
+                Event::Request(msg) => {
+                    janus_info!("[CONFERENCE] Handling request ({})", msg.transaction);
+                    message_handler.handle(&msg)
+                }
                 Event::Response {
                     msg,
                     response,
                     jsep,
                 } => {
+                    janus_info!("[CONFERENCE] Sending response ({})", msg.transaction);
+
                     let push_result = CString::new(msg.transaction.clone()).map(|transaction| {
                         janus_callbacks::push_event(
                             &msg.session,
@@ -173,7 +179,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
                     });
 
                     if let Err(err) = push_result {
-                        janus_err!("Error pushing event: {}", err);
+                        janus_err!("[CONFERENCE] Error pushing event: {}", err);
                     }
                 }
             }

@@ -25,7 +25,8 @@ rusoto_core = "0.36"
 rusoto_s3 = "0.36"
 s4 = { version = "0.0.*", default_features = false }
 http = "0.1"
-rayon = "1.0"
+tokio-threadpool = "0.1"
+futures = "0.1"
 
 [features]
 default = ["s4/native-tls"]
