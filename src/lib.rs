@@ -477,7 +477,12 @@ extern "C" fn incoming_rtcp(
     report_error(incoming_rtcp_impl(handle, video, buf, len));
 }
 
-extern "C" fn incoming_data(_handle: *mut PluginSession, _buf: *mut c_char, _len: c_int) {
+extern "C" fn incoming_data(
+    _handle: *mut PluginSession,
+    _label: *mut c_char,
+    _buf: *mut c_char,
+    _len: c_int,
+) {
     // Dropping incoming data.
 }
 
@@ -487,7 +492,7 @@ extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_i
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
-        api_version: 10,
+        api_version: 12,
         version: 1,
         name: c_str!("Janus Conference plugin"),
         package: c_str!("janus.plugin.conference"),
