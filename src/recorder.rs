@@ -197,53 +197,27 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         let records_dir = self.get_records_dir();
 
-        let mut parts: Vec<fs::DirEntry> =
-            fs::read_dir(&records_dir)?.filter_map(|r| r.ok()).collect();
+        let mut parts: Vec<RecordPart> = fs::read_dir(&records_dir)?
+            .filter_map(|maybe_dir_entry| {
+                maybe_dir_entry
+                    .ok()
+                    .and_then(|dir_entry| RecordPart::from_path(dir_entry.path()))
+            })
+            .collect();
 
-        parts.sort_by_key(|f| f.path());
+        if parts.is_empty() {
+            return Err(err_msg("Recordings not found"));
+        }
+
+        parts.sort_by_key(|part| part.start);
 
         let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::new();
-        let timeout: gst::ClockTime = gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT);
-        let discoverer = gstreamer_pbutils::Discoverer::new(timeout)?;
 
-        for file in parts {
-            let metadata = file.metadata()?;
+        for part in parts {
+            let filename = part.path.as_path().to_string_lossy();
 
-            if metadata.is_dir() {
-                continue;
-            }
-
-            match file.path().as_path().file_stem() {
-                None => {
-                    continue;
-                }
-                Some(stem) => {
-                    if stem.to_string_lossy().starts_with(".") || stem == FULL_RECORD_FILENAME {
-                        continue;
-                    }
-                }
-            }
-
-            let path = file.path();
-            let filename = path.to_string_lossy();
-
-            let start = file
-                .path()
-                .as_path()
-                .file_stem()
-                .ok_or_else(|| format_err!("Bad filename {}.", filename))?
-                .to_string_lossy()
-                .parse::<u64>()
-                .map_err(|_| format_err!("Bad filename {}. Expected timestamp.", filename))?;
-
-            let duration = discoverer
-                .discover_uri(&format!("file://{}", filename))?
-                .get_duration()
-                .mseconds()
-                .ok_or_else(|| err_msg("Fail to get duration"))?;
-
-            let stop = start + duration;
-            start_stop_timestamps.push((start, stop));
+            let stop = part.start + part.duration;
+            start_stop_timestamps.push((part.start, stop));
 
             let filesrc = GstElement::Filesrc.make();
             filesrc.set_property("location", &filename.to_value())?;
@@ -635,4 +609,90 @@ fn unix_time_ms() -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
     now.as_secs() * 1000 + now.subsec_millis() as u64
+}
+
+struct RecordPart {
+    path: PathBuf,
+    start: u64,
+    duration: u64,
+}
+
+impl RecordPart {
+    pub fn new(path: PathBuf, start: u64, duration: u64) -> Self {
+        Self {
+            path,
+            start,
+            duration,
+        }
+    }
+
+    pub fn from_path(path: PathBuf) -> Option<Self> {
+        if !Self::is_valid_file(&path) {
+            return None;
+        }
+
+        Self::parse_start_timestamp(&path).and_then(|start| match Self::discover_duration(&path) {
+            Ok(duration) => Some(Self::new(path, start, duration)),
+            Err(err) => {
+                janus_err!(
+                    "[CONFERENCE] Failed to get duration for {}: {}. Skipping part.",
+                    path.as_path().to_string_lossy(),
+                    err
+                );
+
+                None
+            }
+        })
+    }
+
+    fn is_valid_file(path: &PathBuf) -> bool {
+        let extension = match path.extension() {
+            Some(extension) => extension,
+            None => return false,
+        };
+
+        if extension != MKV_EXTENSION {
+            return false;
+        }
+
+        let stem = match path.as_path().file_stem() {
+            Some(stem) => stem,
+            None => return false,
+        };
+
+        if stem.to_string_lossy().starts_with(".") {
+            return false;
+        }
+
+        if stem == FULL_RECORD_FILENAME {
+            return false;
+        }
+
+        match path.metadata() {
+            Ok(metadata) => metadata.is_file() && metadata.len() > 0,
+            Err(err) => {
+                janus_err!(
+                    "[CONFERENCE] Failed to get metadata for {}: {}",
+                    path.as_path().to_string_lossy(),
+                    err
+                );
+
+                false
+            }
+        }
+    }
+
+    fn parse_start_timestamp(path: &PathBuf) -> Option<u64> {
+        path.as_path()
+            .file_stem()
+            .and_then(|stem| stem.to_string_lossy().parse::<u64>().ok())
+    }
+
+    fn discover_duration(path: &PathBuf) -> Result<u64, Error> {
+        gstreamer_pbutils::Discoverer::new(gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT))?
+            .discover_uri(&format!("file://{}", path.as_path().to_string_lossy()))?
+            .get_duration()
+            .mseconds()
+            .ok_or_else(|| err_msg("Empty duration"))
+    }
 }
