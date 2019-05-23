@@ -238,46 +238,8 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     }
 }
 
-extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
-    let message_handler = match MESSAGE_HANDLER.get() {
-        Some(message_handler) => message_handler,
-        None => {
-            janus_err!("[CONFERENCE] Message handler is not initialized");
-            return;
-        }
-    };
-
-    match unsafe { Session::from_ptr(handle) } {
-        Ok(sess) => {
-            janus_info!(
-                "[CONFERENCE] Destroying Conference session {:p}...",
-                sess.handle
-            );
-
-            let mut switchboard = message_handler.switchboard.write();
-
-            match switchboard {
-                Ok(mut switchboard) => {
-                    switchboard.disconnect(&sess);
-                    if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
-                        report_error(recorder.stop_recording());
-                    }
-                }
-                Err(err) => {
-                    janus_err!("[CONFERENCE] {}", err);
-                    unsafe {
-                        *error = -1;
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            janus_err!("{}", e);
-            unsafe {
-                *error = -1;
-            }
-        }
-    }
+extern "C" fn destroy_session(handle: *mut PluginSession, _error: *mut c_int) {
+    janus_info!("[CONFERENCE] Destroying Conference session {:p}...", handle);
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
@@ -387,6 +349,38 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
     janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
+
+    let message_handler = match MESSAGE_HANDLER.get() {
+        Some(message_handler) => message_handler,
+        None => {
+            janus_err!("[CONFERENCE] Message handler is not initialized");
+            return;
+        }
+    };
+
+    match unsafe { Session::from_ptr(handle) } {
+        Ok(sess) => {
+            let mut switchboard = message_handler.switchboard.write();
+
+            match switchboard {
+                Ok(mut switchboard) => {
+                    janus_info!("[CONFERENCE] Disconnecting session of handle {:p}.", handle);
+                    switchboard.disconnect(&sess);
+
+                    if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
+                        janus_info!("[CONFERENCE] Stopping recording of handle {:p}.", handle);
+                        report_error(recorder.stop_recording());
+                    }
+                }
+                Err(err) => {
+                    janus_err!("[CONFERENCE] {}", err);
+                }
+            }
+        }
+        Err(e) => {
+            janus_err!("{}", e);
+        }
+    }
 }
 
 fn incoming_rtp_impl(
