@@ -18,8 +18,7 @@ Session.vim
 .vscode
 .env
 recordings
-janus.plugin.conference.environment
-janus.plugin.conference.toml
+docker/janus.plugin.conference.environment
 
 # Other
 core

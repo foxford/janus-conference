@@ -13,8 +13,8 @@ read -r DOCKER_RUN_COMMAND <<-EOF
     cargo build \
     && (rm "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" || true) \
     && ln -s "${PROJECT_DIR}/target/debug/${PLUGIN}" "${JANUS_DIR}/lib/janus/plugins/${PLUGIN}" \
-    && cp janus.plugin.conference.toml ${JANUS_DIR}/etc/janus \
-    && ${JANUS_DIR}/bin/janus --debug-level=5
+    && cp ./docker/config/* ${JANUS_DIR}/etc/janus \
+    && ${JANUS_DIR}/bin/janus
 EOF
 
 set -ex
@@ -30,9 +30,10 @@ docker run ${DOCKER_RUN_OPTIONS} \
     -v $(pwd)/recordings:/recordings \
     -v ${BUILD_CACHE_VOLUME}:/usr/local/cargo \
     -p ${DOCKER_WS_PORT}:8188 \
+    -p 1883:1883 \
     -p 7088:7088 \
     -p 30000-30020:30000-30020 \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
-    --env-file janus.plugin.conference.environment \
+    --env-file $(pwd)/docker/janus.plugin.conference.environment \
     ${DOCKER_CONTAINER_NAME} \
-    /bin/bash -c "set -x && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"
+    /bin/bash -c "set -x && vernemq start && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"

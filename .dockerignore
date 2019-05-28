@@ -2,4 +2,3 @@
 !src/
 !Cargo.lock
 !Cargo.toml
-!janus.plugin.conference.toml
