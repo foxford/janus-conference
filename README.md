@@ -12,8 +12,7 @@ execute following shell commands:
 
 ```bash
 ## Create the application configuration and environment files from samples
-cp janus.plugin.conference.toml.sample janus.plugin.conference.toml
-cp janus.plugin.conference.environment.sample janus.plugin.conference.environment
+cp docker/janus.plugin.conference.environment.sample docker/janus.plugin.conference.environment
 
 # Build and run Janus instance with plugin
 bash docker/develop.run.sh
