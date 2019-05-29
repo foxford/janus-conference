@@ -47,6 +47,7 @@ impl Switchboard {
     }
 
     pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
+        janus_info!("[CONFERENCE] Attaching recorder for {}", **publisher);
         self.recorders.insert(publisher, recorder);
     }
 
@@ -65,35 +66,50 @@ impl Switchboard {
 
     // TODO: StreamId -> &str
     pub fn create_stream(&mut self, id: StreamId, publisher: Arc<Session>) {
-        let old_publisher = self.publishers.remove(&id);
+        janus_info!(
+            "[CONFERENCE] Creating stream {}. Publisher: {}",
+            id,
+            **publisher
+        );
+
+        let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher.clone());
 
-        match old_publisher {
-            Some(old_publisher) => {
-                let maybe_subscribers = self.publishers_subscribers.remove_key(&old_publisher);
-
-                if let Some(subscribers) = maybe_subscribers {
-                    for subscriber in subscribers {
-                        self.publishers_subscribers
-                            .associate(publisher.clone(), subscriber.clone());
-                    }
+        if let Some(old_publisher) = maybe_old_publisher {
+            if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
+                for subscriber in subscribers {
+                    self.publishers_subscribers
+                        .associate(publisher.clone(), subscriber.clone());
                 }
             }
-            None => {}
         }
     }
 
     // TODO: &StreamId -> &str
     pub fn join_stream(&mut self, id: &StreamId, subscriber: Arc<Session>) -> Result<(), Error> {
         match self.publishers.get(id) {
-            Some(publisher) => self
-                .publishers_subscribers
-                .associate(publisher.clone(), subscriber),
-            None => {
-                return Err(format_err!("Stream with Id = {} does not exist", id));
-            }
-        }
+            Some(publisher) => {
+                janus_info!(
+                    "[CONFERENCE] Joining to stream {}. Subscriber: {}",
+                    id,
+                    **subscriber
+                );
 
-        Ok(())
+                self.publishers_subscribers
+                    .associate(publisher.clone(), subscriber);
+
+                Ok(())
+            }
+            None => Err(format_err!("Stream with Id = {} does not exist", id)),
+        }
+    }
+
+    // TODO: StreamId -> &str
+    pub fn remove_stream(&mut self, id: StreamId) {
+        janus_info!("[CONFERENCE] Removing stream {}", id);
+
+        if let Some(publisher) = self.publishers.remove(&id) {
+            self.publishers_subscribers.remove_key(&publisher);
+        }
     }
 }

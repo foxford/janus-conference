@@ -32,4 +32,10 @@ impl SessionState {
     }
 }
 
+impl std::fmt::Display for SessionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.fir_seq.load(Ordering::SeqCst))
+    }
+}
+
 pub type Session = SessionWrapper<SessionState>;
