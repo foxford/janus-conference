@@ -129,7 +129,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! queue ! h264parse ! v.
+            demux0.video_0 ! queue ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! v.
             demux0.audio_0 ! queue ! opusparse ! a.
 
             ...
@@ -140,6 +140,9 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
             mux. ! filesink location=full.mp4
         */
+
+        // TODO: Make a single MKV file with multiple streams with original properties.
+        //       Move rescaling and glueing to tq.
 
         match self.stop_recording() {
             Ok(()) => {}
@@ -168,10 +171,10 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         filesink.set_property("location", &location.to_value())?;
 
-        let concat_video = GstElement::Concat.make();
+        let video_concat = GstElement::Concat.make();
         let queue_video = GstElement::Queue.make();
 
-        let concat_audio = GstElement::Concat.make();
+        let audio_concat = GstElement::Concat.make();
         let queue_audio = GstElement::Queue.make();
 
         let pipeline = gst::Pipeline::new(None);
@@ -179,15 +182,15 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         pipeline.add_many(&[
             &mux,
             &filesink,
-            &concat_video,
+            &video_concat,
             &queue_video,
-            &concat_audio,
+            &audio_concat,
             &queue_audio,
         ])?;
 
         mux.link(&filesink)?;
-        concat_video.link(&queue_video)?;
-        concat_audio.link(&queue_audio)?;
+        video_concat.link(&queue_video)?;
+        audio_concat.link(&queue_audio)?;
 
         let video_sink_pad =
             Self::link_static_and_request_pads((&queue_video, "src"), (&mux, "video_%u"))?;
@@ -226,6 +229,15 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
             let video_parse = Self::VideoCodec::new_parse_elem();
             let video_queue = GstElement::Queue.make();
+            let video_decode = Self::VideoCodec::new_decode_elem();
+            let video_scale = GstElement::VideoScale.make();
+            let video_rate = GstElement::VideoRate.make();
+
+            let video_capsfilter = GstElement::CapsFilter.make();
+            video_capsfilter.set_property_from_str("caps", FULL_RECORD_CAPS);
+
+            let video_encode = Self::VideoCodec::new_encode_elem();
+            video_encode.set_property_from_str("tune", "zerolatency");
 
             let audio_parse = Self::AudioCodec::new_parse_elem();
             let audio_queue = GstElement::Queue.make();
@@ -234,17 +246,28 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
                 &filesrc,
                 &demux,
                 &video_parse,
-                &audio_parse,
                 &video_queue,
+                &video_decode,
+                &video_scale,
+                &video_rate,
+                &video_capsfilter,
+                &video_encode,
+                &audio_parse,
                 &audio_queue,
             ])?;
 
             filesrc.link(&demux)?;
-            video_queue.link(&video_parse)?;
-            video_parse.link(&concat_video)?;
 
-            audio_queue.link(&audio_parse)?;
-            audio_parse.link(&concat_audio)?;
+            gst::Element::link_many(&[
+                &video_queue,
+                &video_parse,
+                &video_decode,
+                &video_scale,
+                &video_encode,
+                &video_concat,
+            ])?;
+
+            gst::Element::link_many(&[&audio_queue, &audio_parse, &audio_concat])?;
 
             demux.connect("pad-added", true, move |args| {
                 let pad = args[1]
@@ -287,7 +310,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         /*
         GStreamer pipeline we create here:
 
-            appsrc ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! queue name=v
+            appsrc ! rtph264depay ! h264parse ! queue name=v
             appsrc ! rtpopusdepay ! opusparse ! queue name=a
 
             v. ! mux.video_0
@@ -321,16 +344,6 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         let (video_src, video_rtpdepay, video_parse) = Self::setup_video_elements();
         let video_queue = GstElement::Queue.make();
 
-        let decode_video = Self::VideoCodec::new_decode_elem();
-        let scale_video = GstElement::VideoScale.make();
-        let rate_video = GstElement::VideoRate.make();
-
-        let capsfilter_video = GstElement::CapsFilter.make();
-        capsfilter_video.set_property_from_str("caps", FULL_RECORD_CAPS);
-
-        let encode_video = Self::VideoCodec::new_encode_elem();
-        encode_video.set_property_from_str("tune", "zerolatency");
-
         let (audio_src, audio_rtpdepay, audio_parse) = Self::setup_audio_elements();
         let audio_queue = GstElement::Queue.make();
 
@@ -339,11 +352,6 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
                 &video_src.upcast_ref(),
                 &video_rtpdepay,
                 &video_parse,
-                &decode_video,
-                &scale_video,
-                &rate_video,
-                &capsfilter_video,
-                &encode_video,
                 &video_queue,
             ];
 
