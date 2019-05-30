@@ -71,16 +71,18 @@ RUN set -xe \
 ## Build Janus Conference plugin for deploy
 ## -----------------------------------------------------------------------------
 FROM rust:latest as build-plugin-deploy
-WORKDIR /build
-COPY . .
+
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
         libjansson-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav libgstrtspserver-1.0-dev \
-    && cargo build --release
+        gstreamer1.0-libav libgstrtspserver-1.0-dev
+
+WORKDIR /build
+COPY . .
+RUN cargo build --release
 
 ## -----------------------------------------------------------------------------
 ## Build image ready to deploy

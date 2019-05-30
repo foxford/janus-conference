@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use failure::Error;
 
-use crate::ConcreteRecorder as Recorder;
+use crate::ConcreteRecorder;
 use bidirectional_multimap::BidirectionalMultimap;
 use messages::StreamId;
+use recorder::Recorder;
 use session::Session;
 
 #[derive(Debug)]
@@ -13,7 +14,7 @@ pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<StreamId, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
-    recorders: HashMap<Arc<Session>, Recorder>,
+    recorders: HashMap<Arc<Session>, ConcreteRecorder>,
 }
 
 impl Switchboard {
@@ -30,12 +31,19 @@ impl Switchboard {
         self.sessions.push(session);
     }
 
-    // We don't remove stream/publisher and publisher/recorder relations
-    // since they can be useful even when this publisher is not active anymore.
     pub fn disconnect(&mut self, sess: &Session) {
         self.sessions.retain(|s| s.handle != sess.handle);
+        self.publishers.retain(|_, s| s.handle != sess.handle);
         self.publishers_subscribers.remove_key(sess);
         self.publishers_subscribers.remove_value(sess);
+
+        if let Some(recorder) = self.recorders.get_mut(sess) {
+            recorder
+                .stop_recording()
+                .unwrap_or_else(|err| janus_err!("[CONFERENCE] Failed to stop recording: {}", err));
+        };
+
+        self.recorders.remove(sess);
     }
 
     pub fn subscribers_to(&self, publisher: &Session) -> &[Arc<Session>] {
@@ -46,16 +54,16 @@ impl Switchboard {
         self.publishers_subscribers.get_key(subscriber)
     }
 
-    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
+    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: ConcreteRecorder) {
         janus_info!("[CONFERENCE] Attaching recorder for {}", **publisher);
         self.recorders.insert(publisher, recorder);
     }
 
-    pub fn recorder_for(&self, publisher: &Session) -> Option<&Recorder> {
+    pub fn recorder_for(&self, publisher: &Session) -> Option<&ConcreteRecorder> {
         self.recorders.get(publisher)
     }
 
-    pub fn recorder_for_mut(&mut self, publisher: &Session) -> Option<&mut Recorder> {
+    pub fn recorder_for_mut(&mut self, publisher: &Session) -> Option<&mut ConcreteRecorder> {
         self.recorders.get_mut(publisher)
     }
 
