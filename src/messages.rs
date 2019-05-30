@@ -2,8 +2,6 @@ use failure;
 use http::StatusCode;
 use janus::sdp::{AudioCodec, OfferAnswerParameters, Sdp, VideoCodec};
 
-pub type StreamId = String;
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum JsepKind {
@@ -37,12 +35,12 @@ impl JsepKind {
 #[serde(tag = "method")]
 pub enum StreamOperation {
     #[serde(rename = "stream.create")]
-    Create { id: StreamId },
+    Create { id: String },
     #[serde(rename = "stream.read")]
-    Read { id: StreamId },
+    Read { id: String },
     #[serde(rename = "stream.upload")]
     Upload {
-        id: StreamId,
+        id: String,
         bucket: String,
         object: String,
     },

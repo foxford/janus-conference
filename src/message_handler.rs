@@ -141,7 +141,7 @@ impl MessageHandler {
             )
         })?;
 
-        switchboard.create_stream(id.to_owned(), msg.session.clone());
+        switchboard.create_stream(id, msg.session.clone());
 
         let start_recording_result = {
             if self.config.recordings.enabled {
@@ -169,7 +169,7 @@ impl MessageHandler {
             }
             Err(err) => {
                 switchboard
-                    .remove_stream(id.to_owned())
+                    .remove_stream(id)
                     .map_err(|remove_err| {
                         APIError::new(
                             ErrorStatus::INTERNAL_SERVER_ERROR,
@@ -228,7 +228,7 @@ impl MessageHandler {
         })?;
 
         // Stopping active recording if any.
-        switchboard.stop_recording(id.to_string()).map_err(|err| {
+        switchboard.stop_recording(id).map_err(|err| {
             APIError::new(
                 ErrorStatus::INTERNAL_SERVER_ERROR,
                 Error::from(err),

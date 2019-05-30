@@ -14,7 +14,6 @@ use gstreamer_base::BaseSrcExt;
 use gstreamer_pbutils::prelude::*;
 
 use gst_elements::GstElement;
-use messages::StreamId;
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
@@ -60,16 +59,16 @@ pub struct RecorderImpl<V, A> {
     sender: mpsc::Sender<RecorderMsg>,
     receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
     recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
-    stream_id: StreamId,
+    stream_id: String,
     filename: Option<String>,
     save_root_dir: String,
     video_codec: PhantomData<V>,
     audio_codec: PhantomData<A>,
 }
 
-/// Records video from RTP stream identified by StreamId.
+/// Records video from RTP stream identified by `stream_id`.
 ///
-/// StreamId is used as a directory for parts of a record.
+/// `stream_id` is used as a directory for parts of a record.
 /// In case of Janus restart stream newly created recorder
 /// for old stream resumes recording but writes to new file
 /// in that directory. Filename for record part is generated
