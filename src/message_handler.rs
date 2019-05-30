@@ -168,7 +168,21 @@ impl MessageHandler {
                 Ok(())
             }
             Err(err) => {
-                switchboard.remove_stream(id.to_owned());
+                switchboard
+                    .remove_stream(id.to_owned())
+                    .map_err(|remove_err| {
+                        APIError::new(
+                            ErrorStatus::INTERNAL_SERVER_ERROR,
+                            format_err!(
+                                "Failed to remove stream {}: {} while recovering from another error: {}",
+                                id,
+                                remove_err,
+                                err,
+                            ),
+                            &msg.operation,
+                        )
+                    })?;
+
                 Err(err)
             }
         }
@@ -205,26 +219,22 @@ impl MessageHandler {
     ) -> Result<(), APIError> {
         janus_info!("[CONFERENCE] Handling upload message with id {}", id);
 
-        let switchboard = self.switchboard.read().map_err(|_| {
+        let mut switchboard = self.switchboard.write().map_err(|_| {
             APIError::new(
                 ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard read lock"),
+                err_msg("Failed to acquire switchboard write lock"),
                 &msg.operation,
             )
         })?;
 
         // Stopping active recording if any.
-        if let Some(publisher) = switchboard.publisher_by_stream(&String::from(id)) {
-            if let Some(recorder) = switchboard.recorder_for(publisher) {
-                recorder.stop_recording().map_err(|err| {
-                    APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        Error::from(err),
-                        &msg.operation,
-                    )
-                })?;
-            }
-        }
+        switchboard.stop_recording(id.to_string()).map_err(|err| {
+            APIError::new(
+                ErrorStatus::INTERNAL_SERVER_ERROR,
+                Error::from(err),
+                &msg.operation,
+            )
+        })?;
 
         let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
         let msg = msg.to_owned();

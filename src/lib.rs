@@ -347,40 +347,24 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
     report_error(setup_media_impl(handle));
 }
 
-extern "C" fn hangup_media(handle: *mut PluginSession) {
+fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
 
-    let message_handler = match MESSAGE_HANDLER.get() {
-        Some(message_handler) => message_handler,
-        None => {
-            janus_err!("[CONFERENCE] Message handler is not initialized");
-            return;
-        }
-    };
+    let message_handler = MESSAGE_HANDLER
+        .get()
+        .ok_or_else(|| err_msg("Message handler is not initialized"))?;
 
-    match unsafe { Session::from_ptr(handle) } {
-        Ok(sess) => {
-            let mut switchboard = message_handler.switchboard.write();
+    let mut switchboard = message_handler
+        .switchboard
+        .write()
+        .map_err(|_| err_msg("Failed to acquire switchboard write lock"))?;
 
-            match switchboard {
-                Ok(mut switchboard) => {
-                    janus_info!("[CONFERENCE] Disconnecting session of handle {:p}.", handle);
-                    switchboard.disconnect(&sess);
+    let session = unsafe { Session::from_ptr(handle) }?;
+    switchboard.disconnect(&session)
+}
 
-                    if let Some(recorder) = switchboard.recorder_for_mut(&sess) {
-                        janus_info!("[CONFERENCE] Stopping recording of handle {:p}.", handle);
-                        report_error(recorder.stop_recording());
-                    }
-                }
-                Err(err) => {
-                    janus_err!("[CONFERENCE] {}", err);
-                }
-            }
-        }
-        Err(e) => {
-            janus_err!("{}", e);
-        }
-    }
+extern "C" fn hangup_media(handle: *mut PluginSession) {
+    report_error(hangup_media_impl(handle));
 }
 
 fn incoming_rtp_impl(

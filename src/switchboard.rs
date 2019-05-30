@@ -31,19 +31,23 @@ impl Switchboard {
         self.sessions.push(session);
     }
 
-    pub fn disconnect(&mut self, sess: &Session) {
-        self.sessions.retain(|s| s.handle != sess.handle);
-        self.publishers.retain(|_, s| s.handle != sess.handle);
-        self.publishers_subscribers.remove_key(sess);
-        self.publishers_subscribers.remove_value(sess);
+    pub fn disconnect(&mut self, session: &Session) -> Result<(), Error> {
+        janus_info!("[CONFERENCE] Disconnecting session {}.", **session);
 
-        if let Some(recorder) = self.recorders.get_mut(sess) {
-            recorder
-                .stop_recording()
-                .unwrap_or_else(|err| janus_err!("[CONFERENCE] Failed to stop recording: {}", err));
-        };
+        let ids: Vec<StreamId> = self
+            .publishers
+            .iter()
+            .filter(|(_, s)| s.handle == session.handle)
+            .map(|(id, _)| id.to_string())
+            .collect();
 
-        self.recorders.remove(sess);
+        for id in ids {
+            self.remove_stream(id)?;
+        }
+
+        self.sessions.retain(|s| s.handle != session.handle);
+        self.publishers_subscribers.remove_value(session);
+        Ok(())
     }
 
     pub fn subscribers_to(&self, publisher: &Session) -> &[Arc<Session>] {
@@ -61,15 +65,6 @@ impl Switchboard {
 
     pub fn recorder_for(&self, publisher: &Session) -> Option<&ConcreteRecorder> {
         self.recorders.get(publisher)
-    }
-
-    pub fn recorder_for_mut(&mut self, publisher: &Session) -> Option<&mut ConcreteRecorder> {
-        self.recorders.get_mut(publisher)
-    }
-
-    // TODO: &StreamId -> &str
-    pub fn publisher_by_stream(&self, id: &StreamId) -> Option<&Arc<Session>> {
-        self.publishers.get(id)
     }
 
     // TODO: StreamId -> &str
@@ -113,11 +108,33 @@ impl Switchboard {
     }
 
     // TODO: StreamId -> &str
-    pub fn remove_stream(&mut self, id: StreamId) {
+    pub fn remove_stream(&mut self, id: StreamId) -> Result<(), Error> {
         janus_info!("[CONFERENCE] Removing stream {}", id);
+        self.stop_recording(id.clone())?;
 
-        if let Some(publisher) = self.publishers.remove(&id) {
-            self.publishers_subscribers.remove_key(&publisher);
+        match self.publishers.get_mut(&id) {
+            Some(publisher) => self.publishers_subscribers.remove_key(publisher),
+            None => return Ok(()),
+        };
+
+        self.publishers.remove(&id);
+        Ok(())
+    }
+
+    // TODO: StreamId -> &str
+    pub fn stop_recording(&mut self, id: StreamId) -> Result<(), Error> {
+        if let Some(session) = self.publishers.get(&id) {
+            if let Some(recorder) = self.recorders.get_mut(session) {
+                janus_info!("[CONFERENCE] Stopping recording {}.", id);
+
+                recorder
+                    .stop_recording()
+                    .map_err(|err| format_err!("Failed to stop recording {}: {}", id, err))?;
+            }
+
+            self.recorders.remove(session);
         }
+
+        Ok(())
     }
 }
