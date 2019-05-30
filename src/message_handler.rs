@@ -143,23 +143,35 @@ impl MessageHandler {
 
         switchboard.create_stream(id.to_owned(), msg.session.clone());
 
-        if self.config.recordings.enabled {
-            let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
+        let start_recording_result = {
+            if self.config.recordings.enabled {
+                let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
 
-            recorder.start_recording().map_err(|err| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    Error::from(err),
-                    &msg.operation,
-                )
-            })?;
+                recorder.start_recording().map_err(|err| {
+                    APIError::new(
+                        ErrorStatus::INTERNAL_SERVER_ERROR,
+                        Error::from(err),
+                        &msg.operation,
+                    )
+                })?;
 
-            switchboard.attach_recorder(msg.session.clone(), recorder);
+                switchboard.attach_recorder(msg.session.clone(), recorder);
+            }
+
+            Ok(())
+        };
+
+        match start_recording_result {
+            Ok(()) => {
+                let response = StreamResponse::CreateStreamResponse(Create::new());
+                self.respond(msg, Ok(response), jsep);
+                Ok(())
+            }
+            Err(err) => {
+                switchboard.remove_stream(id.to_owned());
+                Err(err)
+            }
         }
-
-        let response = StreamResponse::CreateStreamResponse(Create::new());
-        self.respond(msg, Ok(response), jsep);
-        Ok(())
     }
 
     fn handle_read(&self, msg: &Message, id: &str) -> Result<(), APIError> {
