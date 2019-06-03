@@ -72,7 +72,7 @@ RUN rustup component add clippy-preview
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='034d8149d58908fef2d69aa77fde4242c820526f'
+ARG JANUS_GATEWAY_COMMIT='955069ae9441258bbc678b66bb58c7b326b1abd8'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
