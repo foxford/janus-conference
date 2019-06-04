@@ -4,7 +4,7 @@ FROM debian:stretch as build-janus
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
 ## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.1.0
+ARG PAHO_MQTT_VERSION=1.3.0
 
 RUN set -xe \
     && apt-get update \
