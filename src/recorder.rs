@@ -43,7 +43,7 @@ const MP4_EXTENSION: &str = "mp4";
 const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
 const FULL_RECORD_CAPS: &str =
-    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1";
+    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -128,77 +128,105 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         GStreamer pipeline we create here:
 
             filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! queue ! h264parse ! avdec_h264 ! videoscale ! videorate ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1 ! x264enc tune=zerolatency ! v.
-            demux0.audio_0 ! queue ! opusparse ! a.
+            demux0.video_0 ! queue ! v.
+            demux0.audio_0 ! queue ! a.
 
             ...
 
-            mp4mux name=mux
-            concat name=v ! queue ! mux.video_0
-            concat name=a ! queue ! mux.audio_0
-
-            mux. ! filesink location=full.mp4
+            concat name=v ! h264parse ! avdec_h264 ! videoscale ! videorate ! videoconvert ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420,profile=high ! x264enc key-int-max=60 tune=zerolatency speed-preset=ultrafast ! queue ! mux.video_0
+            concat name=a ! opusparse ! queue ! mux.audio_0
+            mp4mux name=mux ! filesink location=full.mp4
         */
 
         // TODO: Make a single MKV file with multiple streams with original properties.
         //       Move rescaling and glueing to tq.
 
-        match self.stop_recording() {
-            Ok(()) => {}
-            Err(err) => {
-                janus_err!("[CONFERENCE] Error during recording stop: {}", err);
-            }
+        // Stop active recording if any.
+        if let Err(err) = self.stop_recording() {
+            janus_err!("[CONFERENCE] Error during recording stop: {}", err);
         }
 
         if let Some(handle) = self.recorder_thread_handle.take() {
-            match handle.join() {
-                Ok(_) => {}
-                Err(err) => janus_err!(
-                    "Error during finalization of current record part: {:?}",
-                    err
-                ),
+            if let Err(err) = handle.join() {
+                janus_err!("Error during finalization of current record part: {:?}", err);
             }
         }
 
+        // Video elements
+        let video_concat = GstElement::Concat.make();
+        let video_parse = Self::VideoCodec::new_parse_elem();
+        let video_decode = Self::VideoCodec::new_decode_elem();
+        let video_scale = GstElement::VideoScale.make();
+        let video_rate = GstElement::VideoRate.make();
+        let video_convert = GstElement::VideoConvert.make();
+
+        let video_capsfilter = GstElement::CapsFilter.make();
+        video_capsfilter.set_property_from_str("caps", FULL_RECORD_CAPS);
+
+        let video_encode = Self::VideoCodec::new_encode_elem();
+        video_encode.set_property_from_str("key-int-max", "60");
+        video_encode.set_property_from_str("tune", "zerolatency");
+        video_encode.set_property_from_str("speed-preset", "ultrafast");
+
+        let video_queue = GstElement::Queue.make();
+
+        // Audio elements
+        let audio_parse = Self::AudioCodec::new_parse_elem();
+        let audio_concat = GstElement::Concat.make();
+        let audio_queue = GstElement::Queue.make();
+
+        // Final elements
         let mux = GstElement::MP4Mux.make();
 
         let filesink = GstElement::Filesink.make();
         let location = self.get_full_record_path();
         let location = location.to_string_lossy();
-
-        janus_info!("[CONFERENCE] Saving full record to {}", location);
-
         filesink.set_property("location", &location.to_value())?;
 
-        let video_concat = GstElement::Concat.make();
-        let queue_video = GstElement::Queue.make();
-
-        let audio_concat = GstElement::Concat.make();
-        let queue_audio = GstElement::Queue.make();
-
+        // Build the pipeline
         let pipeline = gst::Pipeline::new(None);
 
         pipeline.add_many(&[
+            &video_concat,
+            &video_parse,
+            &video_decode,
+            &video_scale,
+            &video_rate,
+            &video_convert,
+            &video_capsfilter,
+            &video_encode,
+            &video_queue,
+            &audio_concat,
+            &audio_parse,
+            &audio_queue,
             &mux,
             &filesink,
-            &video_concat,
-            &queue_video,
-            &audio_concat,
-            &queue_audio,
         ])?;
 
+        gst::Element::link_many(&[
+            &video_concat,
+            &video_parse,
+            &video_decode,
+            &video_scale,
+            &video_rate,
+            &video_convert,
+            &video_capsfilter,
+            &video_encode,
+            &video_queue,
+        ])?;
+
+        audio_concat.link(&audio_queue)?;
         mux.link(&filesink)?;
-        video_concat.link(&queue_video)?;
-        audio_concat.link(&queue_audio)?;
 
         let video_sink_pad =
-            Self::link_static_and_request_pads((&queue_video, "src"), (&mux, "video_%u"))?;
+            Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))?;
 
         let audio_sink_pad =
-            Self::link_static_and_request_pads((&queue_audio, "src"), (&mux, "audio_%u"))?;
+            Self::link_static_and_request_pads((&audio_queue, "src"), (&mux, "audio_%u"))?;
 
         let records_dir = self.get_records_dir();
 
+        // Add elements for each part file
         let mut parts: Vec<RecordPart> = fs::read_dir(&records_dir)?
             .filter_map(|maybe_dir_entry| {
                 maybe_dir_entry
@@ -225,48 +253,19 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             filesrc.set_property("location", &filename.to_value())?;
 
             let demux = GstElement::MatroskaDemux.make();
-
-            let video_parse = Self::VideoCodec::new_parse_elem();
-            let video_queue = GstElement::Queue.make();
-            let video_decode = Self::VideoCodec::new_decode_elem();
-            let video_scale = GstElement::VideoScale.make();
-            let video_rate = GstElement::VideoRate.make();
-
-            let video_capsfilter = GstElement::CapsFilter.make();
-            video_capsfilter.set_property_from_str("caps", FULL_RECORD_CAPS);
-
-            let video_encode = Self::VideoCodec::new_encode_elem();
-            video_encode.set_property_from_str("tune", "zerolatency");
-
-            let audio_parse = Self::AudioCodec::new_parse_elem();
-            let audio_queue = GstElement::Queue.make();
+            let video_queue_each = GstElement::Queue.make();
+            let audio_queue_each = GstElement::Queue.make();
 
             pipeline.add_many(&[
                 &filesrc,
                 &demux,
-                &video_parse,
-                &video_queue,
-                &video_decode,
-                &video_scale,
-                &video_rate,
-                &video_capsfilter,
-                &video_encode,
-                &audio_parse,
-                &audio_queue,
+                &video_queue_each,
+                &audio_queue_each,
             ])?;
 
             filesrc.link(&demux)?;
-
-            gst::Element::link_many(&[
-                &video_queue,
-                &video_parse,
-                &video_decode,
-                &video_scale,
-                &video_encode,
-                &video_concat,
-            ])?;
-
-            gst::Element::link_many(&[&audio_queue, &audio_parse, &audio_concat])?;
+            video_queue_each.link(&video_concat)?;
+            audio_queue_each.link(&audio_concat)?;
 
             demux.connect("pad-added", true, move |args| {
                 let pad = args[1]
@@ -274,8 +273,8 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
                     .expect("Second argument is not a Pad");
 
                 let sink = match pad.get_name().as_ref() {
-                    "video_0" => Some(&video_queue),
-                    "audio_0" => Some(&audio_queue),
+                    "video_0" => Some(&video_queue_each),
+                    "audio_0" => Some(&audio_queue_each),
                     _ => None,
                 };
 
@@ -291,6 +290,8 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             })?;
         }
 
+        // Run the pipeline
+        janus_info!("[CONFERENCE] Saving full record to {}", location);
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
 
@@ -301,6 +302,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         janus_info!("[CONFERENCE] End of full record");
 
+        // Return timestamps
         start_stop_timestamps.sort();
         Ok(start_stop_timestamps)
     }

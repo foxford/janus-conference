@@ -16,6 +16,7 @@ pub enum GstElement {
     AVDecH264,
     VideoScale,
     VideoRate,
+    VideoConvert,
     CapsFilter,
     X264Enc,
 }
@@ -38,6 +39,7 @@ impl GstElement {
             GstElement::AVDecH264 => "avdec_h264",
             GstElement::VideoScale => "videoscale",
             GstElement::VideoRate => "videorate",
+            GstElement::VideoConvert => "videoconvert",
             GstElement::CapsFilter => "capsfilter",
             GstElement::X264Enc => "x264enc",
         }
