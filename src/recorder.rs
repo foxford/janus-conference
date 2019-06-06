@@ -41,6 +41,7 @@ impl Config {
 const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
 const DISCOVERER_TIMEOUT: u64 = 15;
+const WATCHDOG_TIMEOUT: &str = "3000";
 const FULL_RECORD_FILENAME: &str = "full";
 const FULL_RECORD_CAPS: &str =
     "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420";
@@ -135,7 +136,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
             concat name=v ! h264parse ! avdec_h264 ! videoscale ! videorate ! videoconvert ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420,profile=high ! x264enc key-int-max=60 tune=zerolatency speed-preset=ultrafast ! queue ! mux.video_0
             concat name=a ! opusparse ! queue ! mux.audio_0
-            mp4mux name=mux ! filesink location=full.mp4
+            mp4mux name=mux ! watchdog timeout=3000 ! filesink location=full.mp4
         */
 
         // TODO: Make a single MKV file with multiple streams with original properties.
@@ -148,7 +149,10 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         if let Some(handle) = self.recorder_thread_handle.take() {
             if let Err(err) = handle.join() {
-                janus_err!("Error during finalization of current record part: {:?}", err);
+                janus_err!(
+                    "Error during finalization of current record part: {:?}",
+                    err
+                );
             }
         }
 
@@ -178,6 +182,9 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         // Final elements
         let mux = GstElement::MP4Mux.make();
 
+        let watchdog = GstElement::Watchdog.make();
+        watchdog.set_property_from_str("timeout", WATCHDOG_TIMEOUT);
+
         let filesink = GstElement::Filesink.make();
         let location = self.get_full_record_path();
         let location = location.to_string_lossy();
@@ -200,6 +207,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             &audio_parse,
             &audio_queue,
             &mux,
+            &watchdog,
             &filesink,
         ])?;
 
@@ -216,7 +224,8 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         ])?;
 
         audio_concat.link(&audio_queue)?;
-        mux.link(&filesink)?;
+
+        gst::Element::link_many(&[&mux, &watchdog, &filesink])?;
 
         let video_sink_pad =
             Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))?;
@@ -256,12 +265,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             let video_queue_each = GstElement::Queue.make();
             let audio_queue_each = GstElement::Queue.make();
 
-            pipeline.add_many(&[
-                &filesrc,
-                &demux,
-                &video_queue_each,
-                &audio_queue_each,
-            ])?;
+            pipeline.add_many(&[&filesrc, &demux, &video_queue_each, &audio_queue_each])?;
 
             filesrc.link(&demux)?;
             video_queue_each.link(&video_concat)?;
@@ -295,7 +299,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         let res = pipeline.set_state(gst::State::Playing);
         assert_ne!(res, gst::StateChangeReturn::Failure);
 
-        Self::run_pipeline_to_completion(&pipeline);
+        Self::run_pipeline_to_completion(&pipeline)?;
 
         mux.release_request_pad(&video_sink_pad);
         mux.release_request_pad(&audio_sink_pad);
@@ -424,7 +428,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             let eos_ev = gst::Event::new_eos().build();
             pipeline.send_event(eos_ev);
 
-            Self::run_pipeline_to_completion(&pipeline);
+            Self::run_pipeline_to_completion(&pipeline)?;
 
             mux.release_request_pad(&audio_sink_pad);
             mux.release_request_pad(&video_sink_pad);
@@ -461,7 +465,8 @@ trait RecorderPrivate {
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error>;
     fn get_records_dir(&self) -> PathBuf;
     fn generate_record_path(&self, filename: &str, extension: &str) -> PathBuf;
-    fn run_pipeline_to_completion(pipeline: &gst::Pipeline);
+    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) -> Result<(), Error>;
+    fn shutdown_pipeline(pipeline: &gst::Pipeline);
 
     fn link_static_and_request_pads(
         static_elem_and_pad: (&gst::Element, &str),
@@ -564,13 +569,29 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> RecorderPrivate
         path
     }
 
-    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) {
+    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) -> Result<(), Error> {
+        let (tx, rx) = mpsc::channel();
         let main_loop = glib::MainLoop::new(None, false);
-
-        let bus = pipeline.get_bus().unwrap();
         let main_loop_clone = main_loop.clone();
+
+        let bus = match pipeline.get_bus() {
+            Some(bus) => bus,
+            None => {
+                Self::shutdown_pipeline(pipeline);
+                return Err(err_msg("Failed to get pipeline bus"));
+            }
+        };
+
         bus.add_watch(move |_bus, msg| {
-            if let gst::MessageView::Eos(..) = msg.view() {
+            let maybe_result = match msg.view() {
+                gst::MessageView::Eos(..) => Some(Ok(())),
+                gst::MessageView::Error(err) => Some(Err(format_err!("{}", err.get_error()))),
+                _ => None,
+            };
+
+            if let Some(result) = maybe_result {
+                tx.send(result)
+                    .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
                 main_loop_clone.quit();
             }
 
@@ -578,11 +599,15 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> RecorderPrivate
         });
 
         main_loop.run();
-
-        let res = pipeline.set_state(gst::State::Null);
-        assert_ne!(res, gst::StateChangeReturn::Failure);
-
+        Self::shutdown_pipeline(pipeline);
         bus.remove_watch();
+        rx.recv().unwrap_or_else(|err| Err(format_err!("{}", err)))
+    }
+
+    fn shutdown_pipeline(pipeline: &gst::Pipeline) {
+        if pipeline.set_state(gst::State::Null) == gst::StateChangeReturn::Failure {
+            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL");
+        }
     }
 
     fn link_static_and_request_pads(

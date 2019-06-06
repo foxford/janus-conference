@@ -19,6 +19,7 @@ pub enum GstElement {
     VideoConvert,
     CapsFilter,
     X264Enc,
+    Watchdog,
 }
 
 impl GstElement {
@@ -42,6 +43,7 @@ impl GstElement {
             GstElement::VideoConvert => "videoconvert",
             GstElement::CapsFilter => "capsfilter",
             GstElement::X264Enc => "x264enc",
+            GstElement::Watchdog => "watchdog",
         }
     }
 
