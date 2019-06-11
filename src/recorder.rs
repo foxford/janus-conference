@@ -1,6 +1,8 @@
 use std::fs;
+use std::io::{BufWriter, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,10 +43,7 @@ impl Config {
 const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
 const DISCOVERER_TIMEOUT: u64 = 15;
-const WATCHDOG_TIMEOUT: &str = "3000";
 const FULL_RECORD_FILENAME: &str = "full";
-const FULL_RECORD_CAPS: &str =
-    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -125,24 +124,6 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
     }
 
     fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error> {
-        /*
-        GStreamer pipeline we create here:
-
-            filesrc location=1545122937.mkv ! matroskademux name=demux0
-            demux0.video_0 ! queue ! v.
-            demux0.audio_0 ! queue ! a.
-
-            ...
-
-            concat name=v ! h264parse ! avdec_h264 ! videoscale ! videorate ! videoconvert ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420,profile=high ! x264enc key-int-max=60 tune=zerolatency speed-preset=ultrafast ! queue ! mux.video_0
-            concat name=a ! opusparse ! queue ! mux.audio_0
-            mp4mux name=mux ! watchdog timeout=3000 ! filesink location=full.mp4
-        */
-
-        // TODO: Make a single MKV file with multiple streams with original properties.
-        //       Move rescaling and glueing to tq.
-
-        // Stop active recording if any.
         if let Err(err) = self.stop_recording() {
             janus_err!("[CONFERENCE] Error during recording stop: {}", err);
         }
@@ -156,86 +137,8 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             }
         }
 
-        // Video elements
-        let video_concat = GstElement::Concat.make();
-        let video_parse = Self::VideoCodec::new_parse_elem();
-        let video_decode = Self::VideoCodec::new_decode_elem();
-        let video_scale = GstElement::VideoScale.make();
-        let video_rate = GstElement::VideoRate.make();
-        let video_convert = GstElement::VideoConvert.make();
-
-        let video_capsfilter = GstElement::CapsFilter.make();
-        video_capsfilter.set_property_from_str("caps", FULL_RECORD_CAPS);
-
-        let video_encode = Self::VideoCodec::new_encode_elem();
-        video_encode.set_property_from_str("key-int-max", "60");
-        video_encode.set_property_from_str("tune", "zerolatency");
-        video_encode.set_property_from_str("speed-preset", "ultrafast");
-
-        let video_queue = GstElement::Queue.make();
-
-        // Audio elements
-        let audio_parse = Self::AudioCodec::new_parse_elem();
-        let audio_concat = GstElement::Concat.make();
-        let audio_queue = GstElement::Queue.make();
-
-        // Final elements
-        let mux = GstElement::MP4Mux.make();
-
-        let watchdog = GstElement::Watchdog.make();
-        watchdog.set_property_from_str("timeout", WATCHDOG_TIMEOUT);
-
-        let filesink = GstElement::Filesink.make();
-        let location = self.get_full_record_path();
-        let location = location.to_string_lossy();
-        filesink.set_property("location", &location.to_value())?;
-
-        // Build the pipeline
-        let pipeline = gst::Pipeline::new(None);
-
-        pipeline.add_many(&[
-            &video_concat,
-            &video_parse,
-            &video_decode,
-            &video_scale,
-            &video_rate,
-            &video_convert,
-            &video_capsfilter,
-            &video_encode,
-            &video_queue,
-            &audio_concat,
-            &audio_parse,
-            &audio_queue,
-            &mux,
-            &watchdog,
-            &filesink,
-        ])?;
-
-        gst::Element::link_many(&[
-            &video_concat,
-            &video_parse,
-            &video_decode,
-            &video_scale,
-            &video_rate,
-            &video_convert,
-            &video_capsfilter,
-            &video_encode,
-            &video_queue,
-        ])?;
-
-        audio_concat.link(&audio_queue)?;
-
-        gst::Element::link_many(&[&mux, &watchdog, &filesink])?;
-
-        let video_sink_pad =
-            Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))?;
-
-        let audio_sink_pad =
-            Self::link_static_and_request_pads((&audio_queue, "src"), (&mux, "audio_%u"))?;
-
         let records_dir = self.get_records_dir();
 
-        // Add elements for each part file
         let mut parts: Vec<RecordPart> = fs::read_dir(&records_dir)?
             .filter_map(|maybe_dir_entry| {
                 maybe_dir_entry
@@ -250,65 +153,67 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
 
         parts.sort_by_key(|part| part.start);
 
-        let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::new();
+        let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::with_capacity(parts.len());
+        let files_list_path = records_dir.join("parts.txt");
 
-        for part in parts {
-            let filename = part.path.as_path().to_string_lossy();
+        {
+            let files_list = fs::File::create(files_list_path.as_path())?;
+            let mut files_list_writer = BufWriter::new(&files_list);
 
-            let stop = part.start + part.duration;
-            start_stop_timestamps.push((part.start, stop));
+            for part in parts {
+                // file '/recordings/123/1234567890.mkv'
+                let filename = part.path.as_path().to_string_lossy().into_owned();
+                writeln!(&mut files_list_writer, "file '{}'", filename)?;
 
-            let filesrc = GstElement::Filesrc.make();
-            filesrc.set_property("location", &filename.to_value())?;
-
-            let demux = GstElement::MatroskaDemux.make();
-            let video_queue_each = GstElement::Queue.make();
-            let audio_queue_each = GstElement::Queue.make();
-
-            pipeline.add_many(&[&filesrc, &demux, &video_queue_each, &audio_queue_each])?;
-
-            filesrc.link(&demux)?;
-            video_queue_each.link(&video_concat)?;
-            audio_queue_each.link(&audio_concat)?;
-
-            demux.connect("pad-added", true, move |args| {
-                let pad = args[1]
-                    .get::<gst::Pad>()
-                    .expect("Second argument is not a Pad");
-
-                let sink = match pad.get_name().as_ref() {
-                    "video_0" => Some(&video_queue_each),
-                    "audio_0" => Some(&audio_queue_each),
-                    _ => None,
-                };
-
-                if let Some(sink) = sink {
-                    let sink_pad = sink
-                        .get_static_pad("sink")
-                        .expect("Failed to obtain pad sink");
-                    let res = pad.link(&sink_pad);
-                    assert!(res == gst::PadLinkReturn::Ok or res == gst::PadLinkReturn::WasLinked);
-                }
-
-                None
-            })?;
+                let stop = part.start + part.duration;
+                start_stop_timestamps.push((part.start, stop));
+            }
         }
 
-        // Run the pipeline
-        janus_info!("[CONFERENCE] Saving full record to {}", location);
-        let res = pipeline.set_state(gst::State::Playing);
-        assert_ne!(res, gst::StateChangeReturn::Failure);
+        let full_record_path = self.get_full_record_path().to_string_lossy().into_owned();
 
-        Self::run_pipeline_to_completion(&pipeline)?;
+        janus_info!(
+            "[CONFERENCE] Concatenating full record to {}",
+            full_record_path
+        );
 
-        mux.release_request_pad(&video_sink_pad);
-        mux.release_request_pad(&audio_sink_pad);
+        // Use ffmpeg for concatenation instead of gstreamer because it doesn't hang on corrupted videos.
+        // No transcoding is made here because it would create a peak load on the server.
+        //
+        // ffmpeg -f concat -safe 0 -i /recordings/123/parts.txt -c copy -y /recordings/123/full.mp4
+        let mut command = Command::new("ffmpeg");
 
-        janus_info!("[CONFERENCE] End of full record");
+        command.args(&[
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            &files_list_path.to_string_lossy().into_owned(),
+            "-c",
+            "copy",
+            "-y",
+            "-strict",
+            "-2",
+            &full_record_path,
+        ]);
 
-        // Return timestamps
-        start_stop_timestamps.sort();
-        Ok(start_stop_timestamps)
+        janus_info!("[CONFERENCE] {:?}", command);
+        let status = command.status()?;
+
+        if status.success() {
+            janus_info!(
+                "[CONFERENCE] Full record concatenated to {}",
+                full_record_path
+            );
+            Ok(start_stop_timestamps)
+        } else {
+            Err(format_err!(
+                "Failed to concatenate full record {} ({})",
+                full_record_path,
+                status
+            ))
+        }
     }
 
     fn start_recording(&mut self) -> Result<(), Error> {
@@ -449,6 +354,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
     }
 
     fn get_full_record_path(&self) -> PathBuf {
+        // Use MP4 container instead of MKV because the video editor doesn't support MKV.
         self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
     }
 }
