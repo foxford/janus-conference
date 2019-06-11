@@ -44,6 +44,8 @@ const MKV_EXTENSION: &str = "mkv";
 const MP4_EXTENSION: &str = "mp4";
 const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
+const FULL_RECORD_CAPS: &str =
+    "video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1";
 
 #[derive(Debug)]
 enum RecorderMsg {
@@ -220,7 +222,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         /*
         GStreamer pipeline we create here:
 
-            appsrc ! rtph264depay ! h264parse ! queue name=v
+            appsrc ! rtph264depay ! h264parse ! avdec_h264 ! videoscale ! videorate ! videoconvert ! capsfilter caps=video/x-raw,width=1280,height=720,pixel-aspect-ratio=1/1,framerate=30/1,format=I420,profile=high ! x264enc key-int-max=60 tune=zerolatency speed-preset=ultrafast ! queue name=v
             appsrc ! rtpopusdepay ! opusparse ! queue name=a
 
             v. ! mux.video_0
@@ -230,44 +232,72 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         */
 
         janus_info!("[CONFERENCE] Initialize recording pipeline");
-
         let pipeline = gst::Pipeline::new(None);
-        let mux = GstElement::MatroskaMux.make();
-        let filesink = GstElement::Filesink.make();
 
-        let start = unix_time_ms();
-        let basename = start.to_string();
+        // Video elements
+        let video_caps = gst::Caps::new_simple(
+            "application/x-rtp",
+            &[
+                ("media", &"video"),
+                ("encoding-name", &Self::VideoCodec::NAME),
+                ("payload", &96),
+                ("clock-rate", &90000),
+            ],
+        );
 
-        let path = self.generate_record_path(&basename, MKV_EXTENSION);
-        let path = path.to_string_lossy();
+        let video_src = Self::init_app_src(video_caps);
+        let video_rtpdepay = Self::VideoCodec::new_depay_elem();
+        let video_parse = Self::VideoCodec::new_parse_elem();
+        let video_decode = Self::VideoCodec::new_decode_elem();
+        let video_scale = GstElement::VideoScale.make();
+        let video_rate = GstElement::VideoRate.make();
+        let video_convert = GstElement::VideoConvert.make();
 
-        self.filename = Some(basename);
+        let video_capsfilter = GstElement::CapsFilter.make();
+        video_capsfilter.set_property_from_str("caps", FULL_RECORD_CAPS);
 
-        janus_info!("[CONFERENCE] Start recording to {}", path);
+        let video_encode = Self::VideoCodec::new_encode_elem();
+        video_encode.set_property_from_str("key-int-max", "60");
+        video_encode.set_property_from_str("tune", "zerolatency");
+        video_encode.set_property_from_str("speed-preset", "ultrafast");
 
-        filesink
-            .set_property("location", &path.to_value())
-            .expect("failed to set location prop on filesink?!");
-
-        pipeline.add_many(&[&mux, &filesink])?;
-
-        let (video_src, video_rtpdepay, video_parse) = Self::setup_video_elements();
         let video_queue = GstElement::Queue.make();
-
-        let (audio_src, audio_rtpdepay, audio_parse) = Self::setup_audio_elements();
-        let audio_queue = GstElement::Queue.make();
 
         {
             let video_elems = [
                 &video_src.upcast_ref(),
                 &video_rtpdepay,
                 &video_parse,
+                &video_decode,
+                &video_scale,
+                &video_rate,
+                &video_convert,
+                &video_capsfilter,
+                &video_encode,
                 &video_queue,
             ];
 
             pipeline.add_many(&video_elems)?;
             gst::Element::link_many(&video_elems)?;
+        }
 
+        // Audio elements
+        let audio_caps = gst::Caps::new_simple(
+            "application/x-rtp",
+            &[
+                ("media", &"audio"),
+                ("encoding-name", &Self::AudioCodec::NAME),
+                ("payload", &111),
+                ("clock-rate", &48000),
+            ],
+        );
+
+        let audio_src = Self::init_app_src(audio_caps);
+        let audio_rtpdepay = Self::AudioCodec::new_depay_elem();
+        let audio_parse = Self::AudioCodec::new_parse_elem();
+        let audio_queue = GstElement::Queue.make();
+
+        {
             let audio_elems = [
                 &audio_src.upcast_ref(),
                 &audio_rtpdepay,
@@ -279,26 +309,42 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             gst::Element::link_many(&audio_elems)?;
         }
 
-        mux.link(&filesink)
-            .expect("Failed to link matroskamux -> filesink");
+        // Build the pipeline
+        let mux = GstElement::MatroskaMux.make();
+
+        let start = unix_time_ms();
+        let basename = start.to_string();
+
+        let path = self.generate_record_path(&basename, MKV_EXTENSION);
+        let path = path.to_string_lossy().into_owned();
+
+        let filesink = GstElement::Filesink.make();
+        filesink.set_property("location", &path)?;        
+        
+        pipeline.add_many(&[&mux, &filesink])?;
+        mux.link(&filesink)?;
+
+        self.filename = Some(basename);
 
         let video_sink_pad =
-            Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))
-                .expect("Failed to link video -> mux");
+            Self::link_static_and_request_pads((&video_queue, "src"), (&mux, "video_%u"))?;
 
         let audio_sink_pad =
-            Self::link_static_and_request_pads((&audio_queue, "src"), (&mux, "audio_%u"))
-                .expect("Failed to link audio -> mux");
+            Self::link_static_and_request_pads((&audio_queue, "src"), (&mux, "audio_%u"))?;
 
-        let res = pipeline.set_state(gst::State::Playing);
-        assert_ne!(res, gst::StateChangeReturn::Failure);
+        if pipeline.set_state(gst::State::Playing) == gst::StateChangeReturn::Failure {
+            return Err(err_msg("Failed to put pipeline to the `playing` state"));
+        }
 
+        // Push RTP packets into the pipeline in a separate thread
         let recv = self
             .receiver_for_recorder_thread
             .take()
-            .expect("Empty receiver in recorder?!");
+            .ok_or_else(|| err_msg("Empty receiver in recorder"))?;
 
         let handle = thread::spawn(move || {
+            janus_info!("[CONFERENCE] Start recording to {}", path);
+
             for msg in recv.iter() {
                 match msg {
                     RecorderMsg::Packet { is_video, buf } => {
@@ -307,6 +353,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
                         } else {
                             audio_src.push_buffer(buf)
                         };
+
                         if res != gst::FlowReturn::Ok {
                             let err = format_err!("Error pushing buffer to AppSrc: {:?}", res);
                             return Err(err);
@@ -339,12 +386,10 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
             mux.release_request_pad(&video_sink_pad);
 
             janus_info!("[CONFERENCE] Stop recording");
-
             Ok(())
         });
 
         self.recorder_thread_handle = Some(handle);
-
         Ok(())
     }
 
@@ -354,7 +399,7 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
     }
 
     fn get_full_record_path(&self) -> PathBuf {
-        // Use MP4 container instead of MKV because the video editor doesn't support MKV.
+        // Use MP4 container instead of MKV because the video editor doesn't support MKV
         self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
     }
 }
@@ -366,8 +411,6 @@ trait RecorderPrivate {
     type AudioCodec;
 
     fn init_app_src(caps: gst::Caps) -> gst_app::AppSrc;
-    fn setup_video_elements() -> (gst_app::AppSrc, gst::Element, gst::Element);
-    fn setup_audio_elements() -> (gst_app::AppSrc, gst::Element, gst::Element);
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error>;
     fn get_records_dir(&self) -> PathBuf;
     fn generate_record_path(&self, filename: &str, extension: &str) -> PathBuf;
@@ -399,36 +442,6 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> RecorderPrivate
         src.set_do_timestamp(true);
 
         src
-    }
-
-    fn setup_video_elements() -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let caps = gst::Caps::new_simple(
-            "application/x-rtp",
-            &[
-                ("media", &"video"),
-                ("encoding-name", &Self::VideoCodec::NAME),
-                ("payload", &96),
-                ("clock-rate", &90000),
-            ],
-        );
-
-        let src = Self::init_app_src(caps);
-        (src, V::new_depay_elem(), V::new_parse_elem())
-    }
-
-    fn setup_audio_elements() -> (gst_app::AppSrc, gst::Element, gst::Element) {
-        let caps = gst::Caps::new_simple(
-            "application/x-rtp",
-            &[
-                ("media", &"audio"),
-                ("encoding-name", &Self::AudioCodec::NAME),
-                ("payload", &111),
-                ("clock-rate", &48000),
-            ],
-        );
-
-        let src = Self::init_app_src(caps);
-        (src, A::new_depay_elem(), A::new_parse_elem())
     }
 
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {

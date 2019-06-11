@@ -9,6 +9,8 @@ pub trait VideoCodec {
 
     fn new_parse_elem() -> gst::Element;
     fn new_depay_elem() -> gst::Element;
+    fn new_decode_elem() -> gst::Element;
+    fn new_encode_elem() -> gst::Element;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -24,6 +26,14 @@ impl VideoCodec for H264 {
 
     fn new_depay_elem() -> gst::Element {
         GstElement::RTPH264Depay.make()
+    }
+
+    fn new_decode_elem() -> gst::Element {
+        GstElement::AVDecH264.make()
+    }
+
+    fn new_encode_elem() -> gst::Element {
+        GstElement::X264Enc.make()
     }
 }
 

@@ -9,6 +9,12 @@ pub enum GstElement {
     RTPOpusDepay,
     H264Parse,
     RTPH264Depay,
+    AVDecH264,
+    VideoScale,
+    VideoRate,
+    VideoConvert,
+    CapsFilter,
+    X264Enc,
 }
 
 impl GstElement {
@@ -22,6 +28,12 @@ impl GstElement {
             GstElement::RTPOpusDepay => "rtpopusdepay",
             GstElement::H264Parse => "h264parse",
             GstElement::RTPH264Depay => "rtph264depay",
+            GstElement::AVDecH264 => "avdec_h264",
+            GstElement::VideoScale => "videoscale",
+            GstElement::VideoRate => "videorate",
+            GstElement::VideoConvert => "videoconvert",
+            GstElement::CapsFilter => "capsfilter",
+            GstElement::X264Enc => "x264enc",
         }
     }
 
