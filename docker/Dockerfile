@@ -44,12 +44,12 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='b9ca464418454778c4263b8d6dab41b5447185ce'
+ARG JANUS_GATEWAY_COMMIT='955069ae9441258bbc678b66bb58c7b326b1abd8'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
-    && git clone 'https://github.com/meetecho/janus-gateway' . \
+    && git clone 'https://github.com/netology-group/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus \

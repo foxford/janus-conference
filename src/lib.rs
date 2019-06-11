@@ -470,7 +470,7 @@ extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_i
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
-        api_version: 13,
+        api_version: 12,
         version: 1,
         name: c_str!("Janus Conference plugin"),
         package: c_str!("janus.plugin.conference"),
