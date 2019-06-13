@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.1 (June 13, 2019)
+
+### Changes
+
+- Vacuum inactive publishers to allow translation after refresh ([04804b4](https://github.com/netology-group/janus-conference/commit/04804b42e473538489f90b109f45ff8ab4b92993))
+
+- Rescale in recording pipeline to avoid peak load ([f662c27](https://github.com/netology-group/janus-conference/commit/f662c274b97327552a28f6c8dc3bd68d260f4cd2))
+
+- Concat recordings with ffmpeg to not to hang on corrupted videos ([39c1897](https://github.com/netology-group/janus-conference/commit/39c18979c2361ab0c1110b20fe6ea4c66a7d967c))
+
+- Add videoconvert element to the pipeline to align the framerate ([2fca86e](https://github.com/netology-group/janus-conference/commit/2fca86e58da377e5c4652f986326a41f41fb74c3))
+
+### Bugfixes
+
+- Fix bad Janus upgrade ([3d51732](https://github.com/netology-group/janus-conference/commit/3d5173298b5f145d8c2967de350b793e2ab246c7))
+
 ## v0.2.0 (June 7, 2019)
 
 ### Features
