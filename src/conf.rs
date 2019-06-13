@@ -10,6 +10,7 @@ const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
+    pub general: General,
     pub recordings: recorder::Config,
     pub uploading: uploader::Config,
 }
@@ -33,4 +34,9 @@ impl Config {
 
         Ok(config)
     }
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct General {
+    pub vacuum_interval: u64,
 }

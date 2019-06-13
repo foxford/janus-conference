@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use failure::Error;
 
+use crate::janus_callbacks;
 use crate::ConcreteRecorder;
 use bidirectional_multimap::BidirectionalMultimap;
 use recorder::Recorder;
@@ -131,5 +133,46 @@ impl Switchboard {
         }
 
         Ok(())
+    }
+
+    pub fn vacuum_publishers(&self, timeout: &Duration) {
+        for (stream_id, publisher) in self.publishers.iter() {
+            match Self::vacuum_publisher(&publisher, timeout) {
+                Ok(false) => (),
+                Ok(true) => {
+                    janus_info!(
+                        "[CONFERENCE] Publisher {:p} timed out on stream {}; PeerConnection closed",
+                        publisher.handle,
+                        stream_id
+                    );
+                }
+                Err(err) => {
+                    janus_err!(
+                        "[CONFERENCE] Failed to vacuum publisher {:p} on stream {}: {}",
+                        publisher.handle,
+                        stream_id,
+                        err
+                    );
+                }
+            }
+        }
+    }
+
+    fn vacuum_publisher(publisher: &Session, timeout: &Duration) -> Result<bool, Error> {
+        let last_rtp_packet_timestamp = match publisher.last_rtp_packet_timestamp()? {
+            Some(timestamp) => timestamp,
+            None => return Ok(false),
+        };
+
+        let duration = SystemTime::now()
+            .duration_since(last_rtp_packet_timestamp)
+            .map_err(|err| format_err!("{}", err))?;
+
+        if duration >= *timeout {
+            janus_callbacks::close_pc(&publisher);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }

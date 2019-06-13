@@ -48,3 +48,7 @@ fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue 
     val.and_then(|val| Some(val.into_raw()))
         .unwrap_or(std::ptr::null_mut())
 }
+
+pub fn close_pc(session: &Session) {
+    (acquire_callbacks().close_pc)(session.as_ptr());
+}

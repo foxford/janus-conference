@@ -34,6 +34,7 @@ use std::path::Path;
 use std::slice;
 use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::{Duration, SystemTime};
 
 use atom::AtomSetOnce;
 use failure::{err_msg, Error};
@@ -133,7 +134,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
 
     let (tx, rx) = mpsc::sync_channel(10);
 
-    match MessageHandler::new(config, tx) {
+    match MessageHandler::new(config.clone(), tx) {
         Ok(message_handler) => {
             MESSAGE_HANDLER.set_if_none(Box::new(message_handler));
         }
@@ -192,8 +193,26 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
         return -1;
     }
 
-    janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
+    let interval = Duration::new(config.general.vacuum_interval, 0);
 
+    thread::spawn(move || loop {
+        thread::sleep(interval);
+
+        report_error(
+            MESSAGE_HANDLER
+                .get()
+                .ok_or_else(|| err_msg("Message handler not initialized"))
+                .and_then(|message_handler| {
+                    message_handler
+                        .switchboard
+                        .read()
+                        .map_err(|_| err_msg("Failed to acquire switchboard read lock"))
+                })
+                .map(|switchboard| switchboard.vacuum_publishers(&interval)),
+        );
+    });
+
+    janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
     0
 }
 
@@ -336,7 +355,7 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
             message_handler
                 .switchboard
                 .read()
-                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
+                .map_err(|_| err_msg("Failed to acquire switchboard read lock"))
         })?;
 
     send_fir(switchboard.publisher_to(&sess));
@@ -366,6 +385,7 @@ fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
         .map_err(|_| err_msg("Failed to acquire switchboard write lock"))?;
 
     let session = unsafe { Session::from_ptr(handle) }?;
+    session.set_last_rtp_packet_timestamp(None)?;
     switchboard.disconnect(&session)
 }
 
@@ -380,6 +400,7 @@ fn incoming_rtp_impl(
     len: c_int,
 ) -> Result<(), Error> {
     let sess = unsafe { Session::from_ptr(handle)? };
+    sess.set_last_rtp_packet_timestamp(Some(SystemTime::now()))?;
 
     let switchboard = MESSAGE_HANDLER
         .get()
