@@ -1,3 +1,6 @@
+# We need ffmpeg 4 to use OPUS in MP4 but Debian stretch has only ffmpeg 4.
+FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
+
 # Using Debian here because official Rust image is based on Debian too.
 FROM debian:stretch as build-janus
 
@@ -40,6 +43,12 @@ RUN set -xe \
         && git checkout "v${PAHO_MQTT_VERSION}" \
         && make \
         && make install
+
+## -----------------------------------------------------------------------------
+## Installing FFmpeg
+## -----------------------------------------------------------------------------
+
+COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway

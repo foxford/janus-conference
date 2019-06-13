@@ -2,13 +2,9 @@ use gstreamer as gst;
 
 pub enum GstElement {
     Queue,
-    Filesrc,
     Filesink,
     AppSrc,
-    Concat,
     MatroskaMux,
-    MatroskaDemux,
-    MP4Mux,
     OpusParse,
     RTPOpusDepay,
     H264Parse,
@@ -16,6 +12,7 @@ pub enum GstElement {
     AVDecH264,
     VideoScale,
     VideoRate,
+    VideoConvert,
     CapsFilter,
     X264Enc,
 }
@@ -24,13 +21,9 @@ impl GstElement {
     pub fn name(&self) -> &str {
         match self {
             GstElement::Queue => "queue",
-            GstElement::Filesrc => "filesrc",
             GstElement::Filesink => "filesink",
             GstElement::AppSrc => "appsrc",
-            GstElement::Concat => "concat",
             GstElement::MatroskaMux => "matroskamux",
-            GstElement::MatroskaDemux => "matroskademux",
-            GstElement::MP4Mux => "mp4mux",
             GstElement::OpusParse => "opusparse",
             GstElement::RTPOpusDepay => "rtpopusdepay",
             GstElement::H264Parse => "h264parse",
@@ -38,6 +31,7 @@ impl GstElement {
             GstElement::AVDecH264 => "avdec_h264",
             GstElement::VideoScale => "videoscale",
             GstElement::VideoRate => "videorate",
+            GstElement::VideoConvert => "videoconvert",
             GstElement::CapsFilter => "capsfilter",
             GstElement::X264Enc => "x264enc",
         }

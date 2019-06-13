@@ -1,4 +1,5 @@
 FROM netologygroup/mqtt-gateway:v0.9.0 as mqtt-gateway-plugin
+FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
 FROM rust:latest as build-janus
 
 ## -----------------------------------------------------------------------------
@@ -36,6 +37,12 @@ RUN set -xe \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
         gstreamer1.0-libav libgstrtspserver-1.0-dev
+
+## -----------------------------------------------------------------------------
+## Installing FFmpeg
+## -----------------------------------------------------------------------------
+
+COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
 ## -----------------------------------------------------------------------------
 ## Installing VerneMQ
