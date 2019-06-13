@@ -38,8 +38,8 @@ use std::thread;
 use atom::AtomSetOnce;
 use failure::{err_msg, Error};
 use janus::{
-    JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult,
-    PluginSession, RawJanssonValue, RawPluginResult,
+    JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin,
+    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 mod bidirectional_multimap;
@@ -320,6 +320,12 @@ extern "C" fn handle_message(
     PluginResult::ok_wait(None).into_raw()
 }
 
+extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJanssonValue {
+    JanssonValue::from_str("{}", JanssonDecodingFlags::empty())
+        .expect("Failed to decode JSON")
+        .into_raw()
+}
+
 fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     let sess = unsafe { Session::from_ptr(handle)? };
 
@@ -470,7 +476,7 @@ extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_i
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
-        api_version: 12,
+        api_version: 13,
         version: 1,
         name: c_str!("Janus Conference plugin"),
         package: c_str!("janus.plugin.conference"),
@@ -482,6 +488,7 @@ const PLUGIN: Plugin = build_plugin!(
     destroy,
     create_session,
     handle_message,
+    handle_admin_message,
     setup_media,
     incoming_rtp,
     incoming_rtcp,
