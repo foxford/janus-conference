@@ -1,12 +1,10 @@
+FROM netologygroup/vernemq-buster:1.7.1 as vernemq
 FROM netologygroup/mqtt-gateway:v0.9.0 as mqtt-gateway-plugin
-FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
-FROM rust:latest as build-janus
+FROM buildpack-deps:buster as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Installing dependencies
 ## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.3.0
-
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
@@ -21,39 +19,77 @@ RUN set -xe \
         libwebsockets-dev \
         libsrtp2-dev \
         gengetopt \
-    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-        && cd "${PAHO_MQTT_BUILD_DIR}" \
-        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-        && git checkout "v${PAHO_MQTT_VERSION}" \
-        && make \
-        && make install
+        openssl \
+        libtinfo5 \
+        logrotate \
+        sudo \
+        ffmpeg \
+        wget
+
+## -----------------------------------------------------------------------------
+## Installing Rust
+## -----------------------------------------------------------------------------
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    RUST_VERSION=1.35.0
+
+RUN set -eux; \
+    dpkgArch="$(dpkg --print-architecture)"; \
+    case "${dpkgArch##*-}" in \
+        amd64) rustArch='x86_64-unknown-linux-gnu'; rustupSha256='a46fe67199b7bcbbde2dcbc23ae08db6f29883e260e23899a88b9073effc9076' ;; \
+        armhf) rustArch='armv7-unknown-linux-gnueabihf'; rustupSha256='6af5abbbae02e13a9acae29593ec58116ab0e3eb893fa0381991e8b0934caea1' ;; \
+        arm64) rustArch='aarch64-unknown-linux-gnu'; rustupSha256='51862e576f064d859546cca5f3d32297092a850861e567327422e65b60877a1b' ;; \
+        i386) rustArch='i686-unknown-linux-gnu'; rustupSha256='91456c3e6b2a3067914b3327f07bc182e2a27c44bff473263ba81174884182be' ;; \
+        *) echo >&2 "unsupported architecture: ${dpkgArch}"; exit 1 ;; \
+    esac; \
+    url="https://static.rust-lang.org/rustup/archive/1.18.3/${rustArch}/rustup-init"; \
+    wget "$url"; \
+    echo "${rustupSha256} *rustup-init" | sha256sum -c -; \
+    chmod +x rustup-init; \
+    ./rustup-init -y --no-modify-path --default-toolchain $RUST_VERSION; \
+    rm rustup-init; \
+    chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
+    rustup --version; \
+    cargo --version; \
+    rustc --version;
 
 ## -----------------------------------------------------------------------------
 ## Installing GStreamer
 ## -----------------------------------------------------------------------------
 RUN set -xe \
     && apt-get install -y \
-        gdb libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav libgstrtspserver-1.0-dev
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer-plugins-bad1.0-dev \
+        libgstrtspserver-1.0-dev \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav
 
 ## -----------------------------------------------------------------------------
-## Installing FFmpeg
+## Installing Paho MQTT client
 ## -----------------------------------------------------------------------------
+ARG PAHO_MQTT_VERSION=1.3.0
 
-COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
+RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+      && cd "${PAHO_MQTT_BUILD_DIR}" \
+      && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+      && git checkout "v${PAHO_MQTT_VERSION}" \
+      && make \
+      && make install
 
 ## -----------------------------------------------------------------------------
 ## Installing VerneMQ
 ## -----------------------------------------------------------------------------
-RUN set -xe \
-    && VERNEMQ_URI='https://github.com/vernemq/vernemq/releases/download/1.7.1/vernemq-1.7.1.stretch.x86_64.deb' \
-    && VERNEMQ_SHA='f705246a3390c506013921e67b2701f28b9acbd6585a318cfc537a84ed430024' \
-    && curl -fSL -o vernemq.deb "${VERNEMQ_URI}" \
-        && echo "${VERNEMQ_SHA} vernemq.deb" | sha1sum -c - \
-        && set +e; dpkg -i vernemq.deb || apt-get -y -f --no-install-recommends install; set -e \
-    && rm vernemq.deb
+COPY --from=vernemq "/vernemq" "/vernemq"
+COPY --from=vernemq /vernemq/etc/vm.args /vernemq/etc/vm.args
+
+RUN ln -s /vernemq/etc /etc/vernemq && \
+    ln -s /vernemq/data /var/lib/vernemq && \
+    ln -s /vernemq/log /var/log/vernemq
 
 COPY --from=mqtt-gateway-plugin "/app" "/app"
 
@@ -63,7 +99,7 @@ COPY --from=mqtt-gateway-plugin "/app" "/app"
 ENV APP_AUTHN_ENABLED "0"
 ENV APP_AUTHZ_ENABLED "0"
 RUN set -xe \
-    && VERNEMQ_ENV='/usr/lib/vernemq/lib/env.sh' \
+    && VERNEMQ_ENV='/vernemq/lib/env.sh' \
     && perl -pi -e 's/(RUNNER_USER=).*/${1}root\n/s' "${VERNEMQ_ENV}" \
     && VERNEMQ_CONF='/etc/vernemq/vernemq.conf' \
     && perl -pi -e 's/(listener.tcp.default = ).*/${1}0.0.0.0:1883\nlistener.ws.default = 0.0.0.0:8080/g' "${VERNEMQ_CONF}" \

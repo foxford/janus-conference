@@ -36,4 +36,4 @@ docker run ${DOCKER_RUN_OPTIONS} \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
     --env-file $(pwd)/docker/janus.plugin.conference.environment \
     ${DOCKER_CONTAINER_NAME} \
-    /bin/bash -c "set -x && vernemq start && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"
+    /bin/bash -c "set -x && /vernemq/bin/vernemq start && cd ${PROJECT_DIR} && ${DOCKER_RUN_COMMAND} && set +x && ${DOCKER_CONTAINER_COMMAND}"

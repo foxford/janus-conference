@@ -17,19 +17,21 @@ lazy_static = "1.2"
 atom = "0.3"
 multimap = "0.4"
 failure = "0.1"
-gstreamer = "0.12"
-gstreamer-app = "0.12" 
-gstreamer-base = "0.12"
-gstreamer-pbutils="0.12"
-glib = "0.6"
+gstreamer = "0.13"
+gstreamer-app = "0.13" 
+gstreamer-base = "0.13"
+gstreamer-pbutils="0.13"
+glib = "0.7.1"
 rusoto_core = "0.36"
 rusoto_s3 = "0.36"
-s4 = { version = "0.0.*", default_features = false }
+s4 = { version = "0.0.12", default_features = false }
 http = "0.1"
 tokio-threadpool = "0.1"
 futures = "0.1"
 
 [dev-dependencies]
+gstreamer-sdp = "0.13"
+gstreamer-webrtc = "0.13"
 rand = "0.6"
 rumqtt = "0.30"
 svc-agent = "0.7"
@@ -39,4 +41,4 @@ tempfile = "3.0"
 default = ["s4/native-tls"]
 
 [patch.crates-io]
-janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs" }
+janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "glib-0.8" }

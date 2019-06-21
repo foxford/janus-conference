@@ -11,7 +11,6 @@ use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
-use gstreamer_pbutils::prelude::*;
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
@@ -260,10 +259,14 @@ impl Recorder {
 
         filesink.set_property("location", &path)?;
 
+        pipeline
+            .set_state(gst::State::Playing)
+            .map_err(|err| format_err!("Failed to put pipeline to the `playing` state: {}", err))?;
+
         // Start the pipeline.
-        if pipeline.set_state(gst::State::Playing) == gst::StateChangeReturn::Failure {
-            return Err(err_msg("Failed to put pipeline to the `playing` state"));
-        }
+        pipeline
+            .set_state(gst::State::Playing)
+            .map_err(|err| format_err!("Failed to put pipeline to the `playing` state: {}", err))?;
 
         // Handle the pipeline in a separate thread.
         let recv = self
@@ -285,26 +288,20 @@ impl Recorder {
                             audio_src.push_buffer(buf)
                         };
 
-                        if res != gst::FlowReturn::Ok {
-                            let err = format_err!("Error pushing buffer to AppSrc: {:?}", res);
-                            return Err(err);
-                        };
+                        res.map_err(|err| format_err!("Error pushing buffer to AppSrc: {}", err))?;
                     }
                 }
             }
 
             // Notify the pipeline that there will be no more RTP packets and finish it.
-            let res = video_src.end_of_stream();
-            if res != gst::FlowReturn::Ok {
-                let err = format_err!("Failed to finish video stream: {:?}", res);
-                return Err(err);
-            }
+            video_src
+                .end_of_stream()
+                .map_err(|err| format_err!("Failed to finish video stream: {}", err))?;
 
-            let res = audio_src.end_of_stream();
-            if res != gst::FlowReturn::Ok {
-                let err = format_err!("Failed to finish audio stream: {:?}", res);
-                return Err(err);
-            }
+            audio_src
+                .end_of_stream()
+                .map_err(|err| format_err!("Failed to finish audio stream: {}", err))?;
+
 
             let eos_ev = gst::Event::new_eos().build();
             pipeline.send_event(eos_ev);
@@ -407,13 +404,14 @@ impl Recorder {
 
         main_loop.run();
         Self::shutdown_pipeline(pipeline);
-        bus.remove_watch();
+        bus.remove_watch()
+            .map_err(|err| format_err!("Failed to remove watch: {}", err))?;
         rx.recv().unwrap_or_else(|err| Err(format_err!("{}", err)))
     }
 
     fn shutdown_pipeline(pipeline: &gst::Pipeline) {
-        if pipeline.set_state(gst::State::Null) == gst::StateChangeReturn::Failure {
-            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL");
+        if let Err(err) = pipeline.set_state(gst::State::Null) {
+            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL: {}", err);
         }
     }
 }
