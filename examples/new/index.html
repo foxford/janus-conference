@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Janus client</title>
+    <style>
+      #localVideo {
+        height: 320px;
+        width: 480px;
+      }
+
+      #startBtn {
+        background-color: #99cc99;
+        color: #333333;
+        font-size: 20px;
+        height: 40px;
+        width: 480px;
+      }
+    </style>
+  </head>
+  <body>
+    <video autoplay id="localVideo"></video>
+    <div><button id="startBtn" onClick="javascript:start();">Start</button></div>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script type="text/javascript" src="./client.js"></script>
+  </body>
+</html>

@@ -11,7 +11,6 @@ RUN set -xe \
         libconfig-dev \
         libmicrohttpd-dev \
         libjansson-dev \
-        libnice-dev \
         libcurl4-openssl-dev \
         libsofia-sip-ua-dev \
         libopus-dev \
@@ -19,10 +18,11 @@ RUN set -xe \
         libwebsockets-dev \
         libsrtp2-dev \
         gengetopt \
-        openssl \
+        cmake \
+        glib2.0 \
+        libssl-dev \
         libtinfo5 \
         logrotate \
-        sudo \
         ffmpeg \
         wget
 
@@ -58,6 +58,15 @@ RUN set -eux; \
 ## Installing GStreamer
 ## -----------------------------------------------------------------------------
 RUN set -xe \
+    && cd /opt \
+    && wget https://nice.freedesktop.org/releases/libnice-0.1.13.tar.gz \
+    && tar -zxvf libnice-0.1.13.tar.gz \
+    && cd libnice-0.1.13 \
+    && ./configure \
+    && make \
+    && make install
+
+RUN set -xe \
     && apt-get install -y \
         libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev \
@@ -67,7 +76,8 @@ RUN set -xe \
         gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad \
         gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav
+        gstreamer1.0-libav \
+        gstreamer1.0-nice
 
 ## -----------------------------------------------------------------------------
 ## Installing Paho MQTT client
@@ -128,3 +138,11 @@ RUN set -xe \
     && make install \
     && make configs \
     && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
+
+## -----------------------------------------------------------------------------
+## Cleaning up
+## -----------------------------------------------------------------------------
+RUN set -xe \
+    && apt-get purge -y \
+        openssl \
+        wget

@@ -32,6 +32,7 @@ docker run ${DOCKER_RUN_OPTIONS} \
     -p ${DOCKER_WS_PORT}:8188 \
     -p 1883:1883 \
     -p 7088:7088 \
+    -p 8080:8080 \
     -p 30000-30020:30000-30020 \
     -e "DOCKER_RUN_COMMAND=${DOCKER_RUN_COMMAND}" \
     --env-file $(pwd)/docker/janus.plugin.conference.environment \

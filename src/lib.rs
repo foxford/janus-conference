@@ -394,6 +394,8 @@ fn incoming_rtp_impl(
     buf: *mut c_char,
     len: c_int,
 ) -> Result<(), Error> {
+    janus_info!("[CONFERENCE] Incoming RTP!");
+
     let sess = unsafe { Session::from_ptr(handle)? };
     sess.set_last_rtp_packet_timestamp(Some(SystemTime::now()))?;
 

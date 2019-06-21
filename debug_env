@@ -1,0 +1,5 @@
+export G_MESSAGES_DEBUG=libnice,libnice-stun
+export GST_DEBUG=3,glib:5,*dtls*:6,webrtc*:7
+
+unset G_MESSAGES_DEBUG
+unset GST_DEBUG

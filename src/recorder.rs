@@ -302,14 +302,13 @@ impl Recorder {
                 .end_of_stream()
                 .map_err(|err| format_err!("Failed to finish audio stream: {}", err))?;
 
-
             let eos_ev = gst::Event::new_eos().build();
             pipeline.send_event(eos_ev);
 
             Self::run_pipeline_to_completion(&pipeline)?;
 
-            mux.release_request_pad(&audio_sink_pad);
             mux.release_request_pad(&video_sink_pad);
+            mux.release_request_pad(&audio_sink_pad);
 
             janus_info!("[CONFERENCE] Stop recording");
             Ok(())

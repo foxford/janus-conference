@@ -12,6 +12,7 @@ general: {
   disconnect_timeout = 1000
 }
 admin: {
+  admin_enabled = true
   subscribe_topic = "to-janus-admin"
   publish_topic = "from-janus-admin"
 }
