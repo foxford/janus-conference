@@ -28,6 +28,12 @@ http = "0.1"
 tokio-threadpool = "0.1"
 futures = "0.1"
 
+[dev-dependencies]
+rand = "0.6"
+rumqtt = "0.30"
+svc-agent = "0.7"
+tempfile = "3.0"
+
 [features]
 default = ["s4/native-tls"]
 

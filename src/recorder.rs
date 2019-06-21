@@ -319,8 +319,8 @@ impl<V: crate::codecs::VideoCodec, A: crate::codecs::AudioCodec> Recorder for Re
         let path = path.to_string_lossy().into_owned();
 
         let filesink = GstElement::Filesink.make();
-        filesink.set_property("location", &path)?;        
-        
+        filesink.set_property("location", &path)?;
+
         pipeline.add_many(&[&mux, &filesink])?;
         mux.link(&filesink)?;
 
