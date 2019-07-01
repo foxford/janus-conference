@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 use failure::Error;
 
 use crate::janus_callbacks;
-use crate::ConcreteRecorder;
 use bidirectional_multimap::BidirectionalMultimap;
 use recorder::Recorder;
 use session::Session;
@@ -15,7 +14,7 @@ pub struct Switchboard {
     sessions: Vec<Box<Arc<Session>>>,
     publishers: HashMap<String, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
-    recorders: HashMap<Arc<Session>, ConcreteRecorder>,
+    recorders: HashMap<Arc<Session>, Recorder>,
 }
 
 impl Switchboard {
@@ -59,12 +58,12 @@ impl Switchboard {
         self.publishers_subscribers.get_key(subscriber)
     }
 
-    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: ConcreteRecorder) {
+    pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
         janus_info!("[CONFERENCE] Attaching recorder for {}", **publisher);
         self.recorders.insert(publisher, recorder);
     }
 
-    pub fn recorder_for(&self, publisher: &Session) -> Option<&ConcreteRecorder> {
+    pub fn recorder_for(&self, publisher: &Session) -> Option<&Recorder> {
         self.recorders.get(publisher)
     }
 

@@ -53,14 +53,11 @@ mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
-mod codecs;
-mod gst_elements;
 mod uploader;
 
 use conf::Config;
 use message_handler::MessageHandler;
 use messages::{APIError, ErrorStatus, StreamOperation};
-use recorder::Recorder;
 use session::{Session, SessionState};
 
 #[derive(Clone, Debug)]
@@ -81,8 +78,6 @@ pub enum Event {
         jsep: Option<JanssonValue>,
     },
 }
-
-pub type ConcreteRecorder = recorder::RecorderImpl<codecs::H264, codecs::OPUS>;
 
 lazy_static! {
     static ref MESSAGE_HANDLER: AtomSetOnce<Box<MessageHandler>> = AtomSetOnce::empty();

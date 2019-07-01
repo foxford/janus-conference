@@ -2,10 +2,9 @@ use std::sync::{mpsc, RwLock};
 
 use failure::{err_msg, Error};
 use futures::lazy;
-use janus::{JanssonDecodingFlags, JanssonValue};
+use janus::{sdp, JanssonDecodingFlags, JanssonValue};
 use tokio_threadpool::ThreadPool;
 
-use crate::codecs::{AudioCodec, VideoCodec};
 use crate::conf::Config;
 use crate::messages::{
     APIError, Create, ErrorStatus, JsepKind, Read, Response, StreamOperation, StreamResponse,
@@ -14,7 +13,7 @@ use crate::messages::{
 use crate::recorder::Recorder;
 use crate::switchboard::Switchboard;
 use crate::uploader::Uploader;
-use crate::{utils, ConcreteRecorder, Event, Message, MESSAGE_HANDLER};
+use crate::{utils, Event, Message, MESSAGE_HANDLER};
 
 #[derive(Debug)]
 pub struct MessageHandler {
@@ -145,7 +144,7 @@ impl MessageHandler {
 
         let start_recording_result = {
             if self.config.recordings.enabled {
-                let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
+                let mut recorder = Recorder::new(&self.config.recordings, &id);
 
                 recorder.start_recording().map_err(|err| {
                     APIError::new(
@@ -236,7 +235,7 @@ impl MessageHandler {
             )
         })?;
 
-        let mut recorder = ConcreteRecorder::new(&self.config.recordings, &id);
+        let mut recorder = Recorder::new(&self.config.recordings, &id);
         let msg = msg.to_owned();
         let bucket = bucket.to_owned();
         let object = object.to_owned();
@@ -329,9 +328,7 @@ impl MessageHandler {
         let offer = jsep_offer_parse_result
             .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, &msg.operation))?;
 
-        let video_codec = <ConcreteRecorder as Recorder>::VideoCodec::SDP_VIDEO_CODEC;
-        let audio_codec = <ConcreteRecorder as Recorder>::AudioCodec::SDP_AUDIO_CODEC;
-        let answer = offer.negotatiate(video_codec, audio_codec);
+        let answer = offer.negotatiate(sdp::VideoCodec::H264, sdp::AudioCodec::Opus);
 
         let jsep = serde_json::to_value(answer).map_err(|err| {
             APIError::new(
