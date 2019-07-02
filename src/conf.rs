@@ -3,8 +3,8 @@ use std::path::Path;
 use config;
 use failure::Error;
 
-use recorder;
-use uploader;
+use crate::recorder;
+use crate::uploader;
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 

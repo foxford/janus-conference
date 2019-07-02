@@ -15,7 +15,7 @@ impl JsepKind {
             JsepKind::Offer { sdp } => {
                 janus_verb!("[CONFERENCE] offer: {:?}", sdp);
 
-                let mut answer = answer_sdp!(
+                let answer = answer_sdp!(
                     sdp,
                     OfferAnswerParameters::AudioCodec,
                     audio_codec.to_cstr().as_ptr(),

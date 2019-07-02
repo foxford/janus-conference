@@ -229,7 +229,7 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     match unsafe { Session::associate(handle, initial_state) } {
         Ok(sess) => {
             janus_info!("[CONFERENCE] Initializing session {:p}...", sess.handle);
-            let mut switchboard = message_handler.switchboard.write();
+            let switchboard = message_handler.switchboard.write();
 
             match switchboard {
                 Ok(mut switchboard) => {

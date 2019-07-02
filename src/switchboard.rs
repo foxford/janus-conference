@@ -5,9 +5,9 @@ use std::time::{Duration, SystemTime};
 use failure::Error;
 
 use crate::janus_callbacks;
-use bidirectional_multimap::BidirectionalMultimap;
-use recorder::Recorder;
-use session::Session;
+use crate::bidirectional_multimap::BidirectionalMultimap;
+use crate::recorder::Recorder;
+use crate::session::Session;
 
 #[derive(Debug)]
 pub struct Switchboard {

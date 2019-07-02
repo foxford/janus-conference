@@ -2,6 +2,7 @@
 name = "janus-conference"
 version = "0.2.1"
 authors = ["Andrei Nesterov <ae.nesterov@gmail.com>"]
+edition = "2018"
 
 [lib]
 crate-type = ["cdylib"]
