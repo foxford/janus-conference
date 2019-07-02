@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use failure::Error;
 use janus::session::SessionWrapper;
 
-use messages::JsepKind;
+use crate::messages::JsepKind;
 
 #[derive(Debug)]
 pub struct SessionState {

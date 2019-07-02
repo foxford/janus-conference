@@ -11,6 +11,7 @@ pub struct BidirectionalMultimap<K: Eq + Hash, V: Eq + Hash> {
     inverse_mapping: HashMap<V, K>,
 }
 
+#[allow(dead_code)]
 impl<K, V> BidirectionalMultimap<K, V>
 where
     K: Eq + Hash + Clone + Debug,

@@ -3,7 +3,7 @@ use std::os::raw::{c_char, c_int};
 use janus::{JanssonValue, JanusError, JanusResult, PluginCallbacks, RawJanssonValue};
 
 use super::PLUGIN;
-use session::Session;
+use crate::session::Session;
 
 static mut CALLBACKS: Option<&PluginCallbacks> = None;
 
