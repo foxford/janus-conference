@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime};
 
 use failure::Error;
 
-use crate::janus_callbacks;
 use crate::bidirectional_multimap::BidirectionalMultimap;
+use crate::janus_callbacks;
 use crate::recorder::Recorder;
 use crate::session::Session;
 

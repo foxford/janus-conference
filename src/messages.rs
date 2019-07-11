@@ -74,12 +74,18 @@ impl Read {
 
 #[derive(Serialize)]
 pub struct Upload {
+    id: String,
+    started_at: u64,
     time: Vec<(u64, u64)>,
 }
 
 impl Upload {
-    pub fn new(time: Vec<(u64, u64)>) -> Self {
-        Self { time }
+    pub fn new(id: &str, started_at: u64, time: Vec<(u64, u64)>) -> Self {
+        Self {
+            id: id.to_owned(),
+            started_at,
+            time,
+        }
     }
 }
 

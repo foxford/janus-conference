@@ -8,7 +8,6 @@ use tokio_threadpool::ThreadPool;
 use crate::conf::Config;
 use crate::messages::{
     APIError, Create, ErrorStatus, JsepKind, Read, Response, StreamOperation, StreamResponse,
-    Upload,
 };
 use crate::recorder::Recorder;
 use crate::switchboard::Switchboard;
@@ -244,38 +243,29 @@ impl MessageHandler {
             janus_info!("[CONFERENCE] Upload task started. Finishing record");
 
             // We can't use just `self` because the compiler requires static lifetime for it.
-            let message_handler = match MESSAGE_HANDLER.get() {
-                Some(message_handler) => message_handler,
-                None => {
-                    janus_err!("[CONFERENCE] Message handler is not initialized");
-                    return Err(());
-                }
-            };
+            let message_handler = MESSAGE_HANDLER
+                .get()
+                .ok_or_else(|| janus_err!("[CONFERENCE] Message handler is not initialized"))?;
 
-            let start_stop_timestamps = match recorder.finish_record() {
-                Ok(start_stop_timestamps) => start_stop_timestamps,
-                Err(err) => {
-                    message_handler.respond(
-                        &msg,
-                        Err(APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            Error::from(err),
-                            &msg.operation,
-                        )),
-                        None,
-                    );
-
-                    return Err(());
-                }
-            };
+            let upload = recorder.finish_record().map_err(|err| {
+                message_handler.respond(
+                    &msg,
+                    Err(APIError::new(
+                        ErrorStatus::INTERNAL_SERVER_ERROR,
+                        Error::from(err),
+                        &msg.operation,
+                    )),
+                    None,
+                );
+            })?;
 
             janus_info!("[CONFERENCE] Uploading record");
             let uploader = &message_handler.uploader;
             let path = recorder.get_full_record_path();
 
-            match uploader.upload_file(&path, &bucket, &object) {
-                Ok(_) => {}
-                Err(err) => {
+            uploader
+                .upload_file(&path, &bucket, &object)
+                .map_err(|err| {
                     message_handler.respond(
                         &msg,
                         Err(APIError::new(
@@ -285,14 +275,10 @@ impl MessageHandler {
                         )),
                         None,
                     );
-
-                    return Err(());
-                }
-            };
+                })?;
 
             janus_info!("[CONFERENCE] Uploading finished");
 
-            let upload = Upload::new(start_stop_timestamps);
             let response = StreamResponse::UploadStreamResponse(upload);
             message_handler.respond(&msg, Ok(response), None);
 
