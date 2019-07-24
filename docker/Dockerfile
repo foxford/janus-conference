@@ -53,12 +53,12 @@ COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 ## -----------------------------------------------------------------------------
 ## Installing Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='553c2526ad7616b016f7f8a0a2a541b235d27c96'
+ARG JANUS_GATEWAY_COMMIT='90e00279665b15d8bcfee620703a0b3a6a532a26'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
-    && git clone 'https://github.com/meetecho/janus-gateway' . \
+    && git clone 'https://github.com/netology-group/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus \
