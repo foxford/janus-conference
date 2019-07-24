@@ -2,7 +2,8 @@ general: {
   enabled = true
   json = "compact"
   url = "tcp://0.0.0.0:1883"
-  client_id = "v1.mqtt3.payload-only/service-agents/alpha.janus-gateway.example.org"
+  mqtt_version = "5"
+  client_id = "v1/service-agents/alpha.janus-gateway.example.org"
   subscribe_topic = "agents/alpha.janus-gateway.example.org/api/v1/in/conference.example.org"
   subscribe_qos = 0
   publish_topic = "apps/janus-gateway.example.org/api/v1/responses"
