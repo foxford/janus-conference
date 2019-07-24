@@ -13,6 +13,8 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_pbutils::prelude::*;
 
+use crate::messages::Upload;
+
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub directory: String,
@@ -122,7 +124,7 @@ impl Recorder {
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<Vec<(u64, u64)>, Error> {
+    pub fn finish_record(&mut self) -> Result<Upload, Error> {
         if let Err(err) = self.stop_recording() {
             janus_err!("[CONFERENCE] Error during recording stop: {}", err);
         }
@@ -152,7 +154,8 @@ impl Recorder {
 
         parts.sort_by_key(|part| part.start);
 
-        let mut start_stop_timestamps: Vec<(u64, u64)> = Vec::with_capacity(parts.len());
+        let absolute_started_at = parts[0].start;
+        let mut relative_timestamps: Vec<(u64, u64)> = Vec::with_capacity(parts.len());
         let files_list_path = records_dir.join("parts.txt");
 
         {
@@ -164,8 +167,9 @@ impl Recorder {
                 let filename = part.path.as_path().to_string_lossy().into_owned();
                 writeln!(&mut files_list_writer, "file '{}'", filename)?;
 
-                let stop = part.start + part.duration;
-                start_stop_timestamps.push((part.start, stop));
+                let start = part.start - absolute_started_at;
+                let stop = start + part.duration;
+                relative_timestamps.push((start, stop));
             }
         }
 
@@ -205,7 +209,12 @@ impl Recorder {
                 "[CONFERENCE] Full record concatenated to {}",
                 full_record_path
             );
-            Ok(start_stop_timestamps)
+
+            Ok(Upload::new(
+                &self.stream_id,
+                absolute_started_at,
+                relative_timestamps,
+            ))
         } else {
             Err(format_err!(
                 "Failed to concatenate full record {} ({})",

@@ -81,12 +81,12 @@ fn it_uploads_full_record() {
 
     // Assert part timestamps from the response after removing the file from S3 to keep it clean
     // even in case of failure.
+    assert_eq!(response.plugindata.data.id, recording.id);
+    assert_eq!(response.plugindata.data.started_at, 1560489452218);
+
     assert_eq!(
         response.plugindata.data.time,
-        vec![
-            (1560489452218, 1560489453851),
-            (1560489460900, 1560489462900),
-        ]
+        vec![(0, 1633), (8682, 10682)]
     );
 }
 
@@ -205,6 +205,8 @@ struct UploadResponsePluginData {
 
 #[derive(Deserialize)]
 struct UploadResponsePluginDataData {
+    id: String,
     status: usize,
+    started_at: u64,
     time: Vec<(u64, u64)>,
 }
