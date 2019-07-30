@@ -20,4 +20,5 @@ transports: {
 }
 events: {
   broadcast = true
+  disable = "libjanus_sampleevh.so"
 }

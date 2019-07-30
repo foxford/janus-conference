@@ -1,57 +1,58 @@
-# We need ffmpeg 4 to use OPUS in MP4 but Debian stretch has only ffmpeg 4.
-FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
-
-# Using Debian here because official Rust image is based on Debian too.
-FROM debian:stretch as build-janus
+FROM alpine:latest
 
 ## -----------------------------------------------------------------------------
-## Installing dependencies
+## Install dependencies
+## -----------------------------------------------------------------------------
+RUN apk add --update --no-cache \
+      # Build tools
+      build-base \
+      gcc \
+      git \
+      autoconf \
+      automake \
+      libtool \
+      curl-dev \
+      # Janus Gateway dependencies
+      libressl-dev \
+      libsrtp-dev \
+      libconfig-dev \
+      libmicrohttpd-dev \
+      jansson-dev \
+      opus-dev \
+      libogg-dev \
+      libwebsockets-dev \
+      gengetopt \
+      libnice-dev \
+      # Janus Conference plugin dependencies
+      gstreamer-dev \
+      gstreamer-tools \
+      gst-plugins-base-dev \
+      gst-plugins-good \
+      gst-plugins-bad \
+      gst-plugins-ugly \
+      gst-libav \
+      libnice-gstreamer \
+      ffmpeg \
+      # Rust
+      # TODO: install latest Rust from rustup when rustup 1.19 gets released
+      rust \
+      cargo
+
+## -----------------------------------------------------------------------------
+## Build Paho MQTT client
 ## -----------------------------------------------------------------------------
 ARG PAHO_MQTT_VERSION=1.3.0
 
-RUN set -xe \
-    && apt-get update \
-    && apt-get -y --no-install-recommends install \
-        libconfig-dev \
-        libmicrohttpd-dev \
-        libjansson-dev \
-        libnice-dev \
-        libcurl4-openssl-dev \
-        libsofia-sip-ua-dev \
-        libopus-dev \
-        libogg-dev \
-        libwebsockets-dev \
-        libsrtp2-dev \
-        gengetopt \
-        ca-certificates \
-        git \
-        libtool \
-        m4 \
-        automake \
-        make \
-        libgstreamer1.0-dev \
-        libgstreamer-plugins-base1.0-dev \
-        gstreamer1.0-plugins-base \
-        gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad \
-        gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav \
-        libgstrtspserver-1.0-dev \
-    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-        && cd "${PAHO_MQTT_BUILD_DIR}" \
-        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-        && git checkout "v${PAHO_MQTT_VERSION}" \
-        && make \
-        && make install
+RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+    && cd "${PAHO_MQTT_BUILD_DIR}" \
+    && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+    && git checkout "v${PAHO_MQTT_VERSION}" \
+    && make \
+    && make install \
+    && rm -rf "${PAHO_MQTT_BUILD_DIR}"
 
 ## -----------------------------------------------------------------------------
-## Installing FFmpeg
-## -----------------------------------------------------------------------------
-
-COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
-
-## -----------------------------------------------------------------------------
-## Installing Janus Gateway
+## Build Janus Gateway
 ## -----------------------------------------------------------------------------
 ARG JANUS_GATEWAY_COMMIT='90e00279665b15d8bcfee620703a0b3a6a532a26'
 
@@ -67,36 +68,19 @@ RUN set -xe \
     && make configs \
     && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
 
-RUN set -xe \
-    && apt-get remove -y \
-        ca-certificates \
-        git \
-        libtool \
-        m4 \
-        automake \
-        make
-
 ## -----------------------------------------------------------------------------
-## Build Janus Conference plugin for deploy
+## Build Janus Conference plugin
 ## -----------------------------------------------------------------------------
-FROM rust:latest as build-plugin-deploy
-
-RUN set -xe \
-    && apt-get update \
-    && apt-get -y --no-install-recommends install \
-        libjansson-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav libgstrtspserver-1.0-dev
+ARG PLUGIN=libjanus_conference.so
 
 WORKDIR /build
 COPY . .
-RUN cargo build --release
+
+RUN cargo build --release \
+    && mv /build/target/release/${PLUGIN} /opt/janus/lib/janus/plugins/${PLUGIN} \
+    && rm -rf /build
 
 ## -----------------------------------------------------------------------------
-## Build image ready to deploy
+## Clean up
 ## -----------------------------------------------------------------------------
-FROM build-janus
-ARG PLUGIN=libjanus_conference.so
-WORKDIR /opt/janus
-COPY --from=build-plugin-deploy /build/target/release/${PLUGIN} ./lib/janus/plugins/${PLUGIN}
+RUN apk del build-base gcc git autoconf automake libtool curl-dev rust cargo

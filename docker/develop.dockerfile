@@ -1,87 +1,59 @@
-FROM netologygroup/mqtt-gateway:v0.11.1 as mqtt-gateway-plugin
-FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
-FROM rust:latest as build-janus
+FROM alpine:latest
 
 ## -----------------------------------------------------------------------------
-## Installing dependencies
+## Install dependencies
+## -----------------------------------------------------------------------------
+RUN apk add --update --no-cache \
+      # Build & debug tools
+      build-base \
+      gcc \
+      git \
+      autoconf \
+      automake \
+      libtool \
+      curl-dev \
+      gdb \
+      # Janus Gateway dependencies
+      libressl-dev \
+      libsrtp-dev \
+      libconfig-dev \
+      libmicrohttpd-dev \
+      jansson-dev \
+      opus-dev \
+      libogg-dev \
+      libwebsockets-dev \
+      gengetopt \
+      libnice-dev \
+      # Janus Conference plugin dependencies
+      gstreamer-dev \
+      gstreamer-tools \
+      gst-plugins-base-dev \
+      gst-plugins-good \
+      gst-plugins-bad \
+      gst-plugins-ugly \
+      gst-libav \
+      libnice-gstreamer \
+      ffmpeg \
+      # Rust
+      # TODO: install latest Rust from rustup when rustup 1.19 gets released
+      rust \
+      cargo
+
+## -----------------------------------------------------------------------------
+## Build Paho MQTT client
 ## -----------------------------------------------------------------------------
 ARG PAHO_MQTT_VERSION=1.3.0
 
-RUN set -xe \
-    && apt-get update \
-    && apt-get -y --no-install-recommends install \
-        libconfig-dev \
-        libmicrohttpd-dev \
-        libjansson-dev \
-        libnice-dev \
-        libcurl4-openssl-dev \
-        libsofia-sip-ua-dev \
-        libopus-dev \
-        libogg-dev \
-        libwebsockets-dev \
-        libsrtp2-dev \
-        gengetopt \
-    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-        && cd "${PAHO_MQTT_BUILD_DIR}" \
-        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-        && git checkout "v${PAHO_MQTT_VERSION}" \
-        && make \
-        && make install
+RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+    && cd "${PAHO_MQTT_BUILD_DIR}" \
+    && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+    && git checkout "v${PAHO_MQTT_VERSION}" \
+    && make \
+    && make install \
+    && rm -rf "${PAHO_MQTT_BUILD_DIR}"
 
 ## -----------------------------------------------------------------------------
-## Installing GStreamer
-## -----------------------------------------------------------------------------
-RUN set -xe \
-    && apt-get install -y \
-        gdb libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav libgstrtspserver-1.0-dev
-
-## -----------------------------------------------------------------------------
-## Installing FFmpeg
-## -----------------------------------------------------------------------------
-
-COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
-
-## -----------------------------------------------------------------------------
-## Installing VerneMQ
-## -----------------------------------------------------------------------------
-RUN set -xe \
-    && VERNEMQ_URI='https://github.com/vernemq/vernemq/releases/download/1.7.1/vernemq-1.7.1.stretch.x86_64.deb' \
-    && VERNEMQ_SHA='f705246a3390c506013921e67b2701f28b9acbd6585a318cfc537a84ed430024' \
-    && curl -fSL -o vernemq.deb "${VERNEMQ_URI}" \
-        && echo "${VERNEMQ_SHA} vernemq.deb" | sha1sum -c - \
-        && set +e; dpkg -i vernemq.deb || apt-get -y -f --no-install-recommends install; set -e \
-    && rm vernemq.deb
-
-COPY --from=mqtt-gateway-plugin "/app" "/app"
-
-## -----------------------------------------------------------------------------
-## Configuring VerneMQ
-## -----------------------------------------------------------------------------
-ENV APP_AUTHN_ENABLED "0"
-ENV APP_AUTHZ_ENABLED "0"
-RUN set -xe \
-    && VERNEMQ_ENV='/usr/lib/vernemq/lib/env.sh' \
-    && perl -pi -e 's/(RUNNER_USER=).*/${1}root\n/s' "${VERNEMQ_ENV}" \
-    && VERNEMQ_CONF='/etc/vernemq/vernemq.conf' \
-    && perl -pi -e 's/(listener.tcp.default = ).*/${1}0.0.0.0:1883\nlistener.ws.default = 0.0.0.0:8080/g' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/## (listener.tcp.allowed_protocol_versions = ).*/${1}3,4,5\n/s' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/## (listener.ssl.allowed_protocol_versions = ).*/${1}3,4,5\n/s' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/## (listener.ws.allowed_protocol_versions = ).*/${1}3,4,5\n/s' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/## (listener.wss.allowed_protocol_versions = ).*/${1}3,4,5\n/s' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/(plugins.vmq_passwd = ).*/${1}off/s' "${VERNEMQ_CONF}" \
-    && perl -pi -e 's/(plugins.vmq_acl = ).*/${1}off/s' "${VERNEMQ_CONF}" \
-    && printf "\nplugins.mqttgw = on\nplugins.mqttgw.path = /app\n" >> "${VERNEMQ_CONF}"
-
-## -----------------------------------------------------------------------------
-## Installing development tools
-## -----------------------------------------------------------------------------
-RUN rustup component add clippy-preview
-
-## -----------------------------------------------------------------------------
-## Installing Janus Gateway
+## Build Janus Gateway
 ## -----------------------------------------------------------------------------
 ARG JANUS_GATEWAY_COMMIT='90e00279665b15d8bcfee620703a0b3a6a532a26'
 
@@ -96,3 +68,8 @@ RUN set -xe \
     && make install \
     && make configs \
     && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
+
+## -----------------------------------------------------------------------------
+## Clean up
+## -----------------------------------------------------------------------------
+RUN apk del build-base gcc git autoconf automake libtool curl-dev rust cargo
