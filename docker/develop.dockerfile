@@ -55,12 +55,12 @@ RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='90e00279665b15d8bcfee620703a0b3a6a532a26'
+ARG JANUS_GATEWAY_COMMIT='f60b0ae9edf9dad3b5cff22a4db02ff5c980538a'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
-    && git clone 'https://github.com/netology-group/janus-gateway' . \
+    && git clone 'https://github.com/meetecho/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus \
@@ -68,8 +68,3 @@ RUN set -xe \
     && make install \
     && make configs \
     && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
-
-## -----------------------------------------------------------------------------
-## Clean up
-## -----------------------------------------------------------------------------
-RUN apk del build-base gcc git autoconf automake libtool curl-dev rust cargo
