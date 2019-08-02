@@ -15,7 +15,9 @@ execute following shell commands:
 cp docker/janus.plugin.conference.environment.sample docker/janus.plugin.conference.environment
 
 # Build and run Janus instance with plugin
-bash docker/develop.run.sh
+export COMPOSE_FILE=docker/docker-compose.yml
+docker-compose up -d
+docker-compose attach janus
 ```
 
 ### How to run conference example

@@ -1,0 +1,33 @@
+version: '3'
+services:
+  janus:
+    build:
+      context: ..
+      dockerfile: ./docker/develop.dockerfile
+    ports:
+      - "7088:7088"
+      - "8188:8188"
+      - "30000-30020:30000-30020"
+    volumes:
+      - ..:/build
+      - ../recordings:/recordings
+      - janus-conference-cargo:/usr/local/cargo
+    env_file: janus.plugin.conference.environment
+    links:
+      - vernemq
+    working_dir: /build
+    entrypoint: /build/docker/entrypoint.sh
+    stdin_open: true
+    tty: true
+  vernemq:
+    image: netologygroup/mqtt-gateway:v0.11.1
+    ports:
+      - "1883:1883"
+      - "8080:8080"
+    environment:
+      APP_AUTHN_ENABLED: 0
+      APP_AUTHZ_ENABLED: 0
+    logging:
+      driver: none
+volumes:
+  janus-conference-cargo: {}
