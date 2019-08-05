@@ -22,10 +22,11 @@ body.object | string | _required_ | Destination S3 object name.
 
 You should get a Janus event with specified `transaction` and following body:
 
-Name      | Type                   | Default    | Description
---------- | ---------------------- | ---------- | -----------
-status    | Int                    | _required_ | If status is equal to 200 then everything went well otherwise an error occurred (see [error object](./api.error.md)).
-time      | Array of Arrays of Int | []         | An array of start/stop recording timestamps.
+Name       | Type                   | Default    | Description
+---------- | ---------------------- | ---------- | -----------
+status     | Int                    | _required_ | If status is equal to 200 then everything went well otherwise an error occurred (see [error object](./api.error.md)).
+started_at | Int                    | _required_ | Absolute timestamp of the first recording's start.
+time       | Array of Arrays of Int | []         | An array of start/stop recording timestamps relative to started_at.
 
 
 ## Example
