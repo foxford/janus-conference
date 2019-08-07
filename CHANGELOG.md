@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 (August 7, 2019)
+
+### Bugfixes
+
+- Switch back to Debian due to segfault in libnice ([7ae406b](https://github.com/netology-group/janus-conference/commit/7ae406b69b75378879993798f49970e60b46e9a2))
+
 ## v0.3.0 (August 5, 2019)
 
 ### Changes
@@ -7,6 +13,8 @@
 - Return relative timestamps in `time` + absolute `started_at` in `stream.upload` response ([571db91](https://github.com/netology-group/janus-conference/commit/571db917e89a98145b4a1db3ce8f8d3843a5611b))
 
 - Switch to MQTT v5 ([5eb7756](https://github.com/netology-group/janus-conference/commit/5eb7756d25ec7c188f2d317ae455871e1b8a6ff6))
+
+- Switch to Alpine Linux
 
 ## v0.2.1 (June 13, 2019)
 
