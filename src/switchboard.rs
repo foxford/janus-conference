@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, SystemTime};
 
-use failure::Error;
+use failure::{err_msg, Error};
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
@@ -172,6 +172,34 @@ impl Switchboard {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+}
+
+pub struct LockedSwitchboard(RwLock<Switchboard>);
+
+impl LockedSwitchboard {
+    pub fn new() -> Self {
+        Self(RwLock::new(Switchboard::new()))
+    }
+
+    pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    where
+        F: Fn(RwLockReadGuard<Switchboard>) -> Result<R, Error>,
+    {
+        match self.0.read() {
+            Ok(switchboard) => callback(switchboard),
+            Err(_) => Err(err_msg("Failed to acquire switchboard read lock")),
+        }
+    }
+
+    pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    where
+        F: Fn(RwLockWriteGuard<Switchboard>) -> Result<R, Error>,
+    {
+        match self.0.write() {
+            Ok(switchboard) => callback(switchboard),
+            Err(_) => Err(err_msg("Failed to acquire switchboard write lock")),
         }
     }
 }

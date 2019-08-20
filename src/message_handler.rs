@@ -1,114 +1,239 @@
-use std::sync::{mpsc, RwLock};
+mod operation;
+mod router;
+
+use std::sync::{mpsc, Arc};
 
 use failure::{err_msg, Error};
-use futures::lazy;
-use janus::{sdp, JanssonDecodingFlags, JanssonValue};
-use tokio_threadpool::ThreadPool;
+use http::StatusCode;
+use janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
+use serde_json::Value as JsonValue;
+use svc_error::Error as SvcError;
 
-use crate::conf::Config;
-use crate::messages::{
-    APIError, Create, ErrorStatus, JsepKind, Read, Response, StreamOperation, StreamResponse,
-};
-use crate::recorder::Recorder;
-use crate::switchboard::Switchboard;
-use crate::uploader::Uploader;
-use crate::{utils, Event, Message, MESSAGE_HANDLER};
+use self::operation::OperationError;
+use self::router::Method;
+use crate::jsep::Jsep;
+use crate::session::Session;
+use crate::utils;
 
-#[derive(Debug)]
-pub struct MessageHandler {
-    pub tx: mpsc::SyncSender<Event>,
-    pub switchboard: RwLock<Switchboard>,
-    pub config: Config,
-    pub uploader: Uploader,
-    pub thread_pool: ThreadPool,
+#[derive(Clone, Debug)]
+pub struct Message {
+    session: Arc<Session>,
+    transaction: String,
+    method: Option<Method>,
+    jsep: Option<String>,
 }
 
-impl MessageHandler {
-    pub fn new(config: Config, tx: mpsc::SyncSender<Event>) -> Result<Self, Error> {
-        let uploader = Uploader::new(config.uploading.clone())
-            .map_err(|err| format_err!("Failed to init uploader: {}", err))?;
-
-        Ok(Self {
-            tx,
-            switchboard: RwLock::new(Switchboard::new()),
-            config,
-            uploader,
-            thread_pool: ThreadPool::new(),
-        })
-    }
-
-    pub fn handle(&self, msg: &Message) {
-        let result = match msg.operation.clone() {
-            Some(StreamOperation::Create { ref id }) => self.handle_create(msg, id),
-            Some(StreamOperation::Read { ref id }) => self.handle_read(msg, id),
-            Some(StreamOperation::Upload {
-                ref id,
-                ref bucket,
-                ref object,
-            }) => self.handle_upload(msg, id, bucket, object),
-            None => {
-                let err = err_msg("Missing operation");
-                Err(APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    err,
-                    &None,
-                ))
-            }
-        };
-
-        if let Err(err) = result {
-            self.respond(msg, Err(err), None);
+impl Message {
+    fn new(session: Arc<Session>, transaction: &str) -> Self {
+        Self {
+            session,
+            transaction: transaction.to_owned(),
+            method: None,
+            jsep: None,
         }
     }
 
-    pub fn respond(
-        &self,
-        msg: &Message,
-        result: Result<StreamResponse, APIError>,
+    fn set_method(self, method: Method) -> Self {
+        Self {
+            method: Some(method),
+            ..self
+        }
+    }
+
+    fn set_jsep(self, jsep: JanssonValue) -> Result<Self, Error> {
+        // TODO: suboptimal serialization to String for making Message thread safe.
+        let jsep = match jsep.to_libcstring(JanssonEncodingFlags::empty()).to_str() {
+            Ok(jsep) => Some(jsep.to_owned()),
+            Err(err) => bail!("Failed to serialize JSEP: {}", err),
+        };
+
+        Ok(Self { jsep, ..self })
+    }
+
+    pub fn session(&self) -> &Arc<Session> {
+        &self.session
+    }
+
+    pub fn transaction(&self) -> &str {
+        &self.transaction
+    }
+}
+
+#[derive(Serialize)]
+struct Response {
+    #[serde(with = "crate::serde::HttpStatusCodeRef")]
+    status: StatusCode,
+    #[serde(flatten)]
+    response: Option<JsonValue>,
+    #[serde(flatten)]
+    error: Option<SvcError>,
+}
+
+impl Response {
+    pub fn new(response: Option<JsonValue>, error: Option<SvcError>) -> Self {
+        let status = match &error {
+            None => StatusCode::OK,
+            Some(err) => err.status_code(),
+        };
+
+        Self {
+            status,
+            response,
+            error,
+        }
+    }
+}
+
+enum Event {
+    Request(Message),
+    Response {
+        request_msg: Message,
+        response: Option<JanssonValue>,
         jsep: Option<JanssonValue>,
+    },
+}
+
+#[derive(Debug)]
+pub struct MessageHandler {
+    tx: mpsc::SyncSender<Event>,
+    rx: mpsc::Receiver<Event>,
+}
+
+impl MessageHandler {
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::sync_channel(10);
+        Self { tx, rx }
+    }
+
+    pub fn schedule_handling(
+        &self,
+        session: Arc<Session>,
+        transaction: &str,
+        json: &JanssonValue,
+        jsep: Option<JanssonValue>,
+    ) -> Result<(), Error> {
+        match utils::jansson_to_serde::<Method>(json) {
+            Ok(method) => {
+                let msg = Message::new(session, &transaction).set_method(method);
+
+                let msg = match jsep {
+                    None => msg,
+                    Some(jsep) => msg.set_jsep(jsep)?,
+                };
+
+                self.tx
+                    .send(Event::Request(msg))
+                    .map_err(|err| format_err!("Failed to queue request: {}", err))
+            }
+            Err(err) => {
+                let msg = Message::new(session, &transaction);
+                Self::respond(&self.tx, &msg, Err(err.into()), &None);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn run<F>(&self, response_callback: F)
+    where
+        F: Fn(&Message, Option<JanssonValue>, Option<JanssonValue>),
+    {
+        for item in self.rx.iter() {
+            match item {
+                Event::Request(msg) => {
+                    match msg.method.clone() {
+                        Some(method) => {
+                            janus_info!("[CONFERENCE] Handling request");
+
+                            Self::handle_jsep(&msg)
+                                .and_then(|jsep| {
+                                    let tx = self.tx.clone();
+                                    let msg_clone = msg.clone();
+                                    let session = msg.session.clone();
+
+                                    let respond = move |result| {
+                                        Self::respond(&tx, &msg_clone, result, &jsep)
+                                    };
+
+                                    method.operation().call(session, Box::new(respond))
+                                })
+                                .unwrap_or_else(|err| Self::respond(&self.tx, &msg, Err(err), &None));
+                        }
+                        None => {
+                            janus_err!("[CONFERENCE] Missing method in request");
+                            let err = err_msg("Missing method in request");
+                            Self::respond(&self.tx, &msg, Err(err.into()), &None);
+                        }
+                    }
+                }
+                Event::Response {
+                    request_msg,
+                    response,
+                    jsep,
+                } => {
+                    response_callback(&request_msg, response, jsep);
+                }
+            }
+        }
+    }
+
+    fn respond(
+        tx: &mpsc::SyncSender<Event>,
+        msg: &Message,
+        result: Result<JsonValue, OperationError>,
+        jsep: &Option<JsonValue>,
     ) {
         let (response, jsep) = match result {
-            Ok(response) => match Self::build_ok_response(response, msg.operation.clone()) {
+            Ok(response) => match Self::build_ok_response(response) {
                 Ok(response) => (response, jsep),
-                Err(err) => (Self::build_error_response(err), None),
+                Err(err) => (Self::build_error_response(msg, err.into()), &None),
             },
             Err(err) => {
                 janus_err!("Error processing message: {}", err);
-                (Self::build_error_response(err), None)
+                (Self::build_error_response(msg, err), &None)
             }
         };
 
-        let response = Event::Response {
-            msg: msg.to_owned(),
+        let (response, jsep) = match jsep {
+            None => (response, None),
+            Some(value) => match utils::serde_to_jansson(&value) {
+                Ok(jansson_value) => (response, Some(jansson_value)),
+                Err(err) => {
+                    janus_err!("Failed to serialize JSEP: {}", err);
+                    (Self::build_error_response(msg, err.into()), None)
+                }
+            },
+        };
+
+        let response_event = Event::Response {
+            request_msg: msg.to_owned(),
             response: Some(response),
             jsep,
         };
 
         janus_info!("[CONFERENCE] Scheduling response ({})", msg.transaction);
-        self.tx.send(response).ok();
+        tx.send(response_event).ok();
     }
 
-    // TODO: move to StreamResponse.into_raw_response().
-    fn build_ok_response(
-        response: StreamResponse,
-        operation: Option<StreamOperation>,
-    ) -> Result<JanssonValue, APIError> {
-        let response =
-            serde_json::to_value(Response::new(Some(response), None)).map_err(|err| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    Error::from(err),
-                    &operation,
-                )
-            })?;
-
-        let response = utils::serde_to_jansson(&response)
-            .map_err(|err| APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &operation))?;
-
-        Ok(response)
+    fn build_ok_response(response: JsonValue) -> Result<JanssonValue, Error> {
+        let response = serde_json::to_value(Response::new(Some(response), None))?;
+        utils::serde_to_jansson(&response)
     }
 
-    fn build_error_response(err: APIError) -> JanssonValue {
+    fn build_error_response(msg: &Message, err: OperationError) -> JanssonValue {
+        let builder = SvcError::builder()
+            .status(err.status())
+            .detail(&err.cause().to_string());
+
+        let builder = match &msg.method {
+            None => builder,
+            Some(method) => {
+                let (kind, title) = method.operation().error_kind();
+                builder.kind(kind, title)
+            }
+        };
+
+        let err = builder.build();
+
         serde_json::to_value(Response::new(None, Some(err)))
             .map_err(|_| err_msg("Error dumping response to JSON"))
             .and_then(|response| utils::serde_to_jansson(&response))
@@ -127,211 +252,36 @@ impl MessageHandler {
         JanssonValue::from_str("JSON serialization error", JanssonDecodingFlags::empty()).unwrap()
     }
 
-    fn handle_create(&self, msg: &Message, id: &str) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling create message with id {}", id);
-        let jsep = Self::build_jsep(&msg)?;
-
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
-            )
-        })?;
-
-        switchboard.create_stream(id, msg.session.clone());
-
-        let start_recording_result = {
-            if self.config.recordings.enabled {
-                let mut recorder = Recorder::new(&self.config.recordings, &id);
-
-                recorder.start_recording().map_err(|err| {
-                    APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        Error::from(err),
-                        &msg.operation,
-                    )
-                })?;
-
-                switchboard.attach_recorder(msg.session.clone(), recorder);
-            }
-
-            Ok(())
+    fn handle_jsep(msg: &Message) -> Result<Option<JsonValue>, OperationError> {
+        let should_handle_jsep = match &msg.method {
+            None => false,
+            Some(method) => method.operation().is_handle_jsep(),
         };
 
-        match start_recording_result {
-            Ok(()) => {
-                let response = StreamResponse::CreateStreamResponse(Create::new());
-                self.respond(msg, Ok(response), jsep);
-                Ok(())
-            }
-            Err(err) => {
-                switchboard
-                    .remove_stream(id)
-                    .map_err(|remove_err| {
-                        APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            format_err!(
-                                "Failed to remove stream {}: {} while recovering from another error: {}",
-                                id,
-                                remove_err,
-                                err,
-                            ),
-                            &msg.operation,
-                        )
-                    })?;
-
-                Err(err)
-            }
+        if !should_handle_jsep {
+            return Ok(None);
         }
-    }
 
-    fn handle_read(&self, msg: &Message, id: &str) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling read message with id {}", id);
-        let jsep = Self::build_jsep(&msg)?;
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
+        let result = match &msg.jsep {
+            Some(jsep) => Jsep::negotiate(&jsep),
+            None => Err(err_msg("JSEP is empty")),
+        };
+
+        let result = match result {
+            Err(err) => Err(err),
+            Ok(None) => Ok(None),
+            Ok(Some((offer, answer))) => msg.session.set_offer(offer).and_then(|_| {
+                serde_json::to_value(answer)
+                    .map(|jsep| Some(jsep))
+                    .map_err(|err| format_err!("Failed to serialize JSEP answer: {}", err))
+            }),
+        };
+
+        result.map_err(|err| {
+            OperationError::new(
+                StatusCode::BAD_REQUEST,
+                format_err!("Failed to deserialize JSEP: {}", err),
             )
-        })?;
-
-        switchboard
-            .join_stream(&String::from(id), msg.session.clone())
-            .map_err(|err| {
-                APIError::new(ErrorStatus::NOT_FOUND, Error::from(err), &msg.operation)
-            })?;
-
-        let response = StreamResponse::ReadStreamResponse(Read::new());
-        self.respond(msg, Ok(response), jsep);
-        Ok(())
-    }
-
-    fn handle_upload(
-        &self,
-        msg: &Message,
-        id: &str,
-        bucket: &str,
-        object: &str,
-    ) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling upload message with id {}", id);
-
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
-            )
-        })?;
-
-        // Stopping active recording if any.
-        switchboard.stop_recording(id).map_err(|err| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                Error::from(err),
-                &msg.operation,
-            )
-        })?;
-
-        let mut recorder = Recorder::new(&self.config.recordings, &id);
-        let msg = msg.to_owned();
-        let bucket = bucket.to_owned();
-        let object = object.to_owned();
-
-        self.thread_pool.spawn(lazy(move || {
-            janus_info!("[CONFERENCE] Upload task started. Finishing record");
-
-            // We can't use just `self` because the compiler requires static lifetime for it.
-            let message_handler = MESSAGE_HANDLER
-                .get()
-                .ok_or_else(|| janus_err!("[CONFERENCE] Message handler is not initialized"))?;
-
-            let upload = recorder.finish_record().map_err(|err| {
-                message_handler.respond(
-                    &msg,
-                    Err(APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        Error::from(err),
-                        &msg.operation,
-                    )),
-                    None,
-                );
-            })?;
-
-            janus_info!("[CONFERENCE] Uploading record");
-            let uploader = &message_handler.uploader;
-            let path = recorder.get_full_record_path();
-
-            uploader
-                .upload_file(&path, &bucket, &object)
-                .map_err(|err| {
-                    message_handler.respond(
-                        &msg,
-                        Err(APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            Error::from(err),
-                            &msg.operation,
-                        )),
-                        None,
-                    );
-                })?;
-
-            janus_info!("[CONFERENCE] Uploading finished");
-
-            let response = StreamResponse::UploadStreamResponse(upload);
-            message_handler.respond(&msg, Ok(response), None);
-
-            janus_info!("[CONFERENCE] Upload task finished");
-            Ok(())
-        }));
-
-        Ok(())
-    }
-
-    fn build_jsep(msg: &Message) -> Result<Option<JanssonValue>, APIError> {
-        let jsep_offer_parse_result = msg
-            .jsep
-            .clone()
-            .ok_or_else(|| {
-                APIError::new(
-                    ErrorStatus::BAD_REQUEST,
-                    err_msg("JSEP is empty"),
-                    &msg.operation,
-                )
-            })
-            .and_then(|ref jsep| {
-                JanssonValue::from_str(jsep, JanssonDecodingFlags::empty()).map_err(|err| {
-                    APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        format_err!("Failed to deserialize JSEP: {}", err),
-                        &msg.operation,
-                    )
-                })
-            })
-            .map(|ref jsep| utils::jansson_to_serde::<JsepKind>(jsep))?;
-
-        let offer = jsep_offer_parse_result
-            .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, &msg.operation))?;
-
-        let answer = offer.negotatiate(sdp::VideoCodec::H264, sdp::AudioCodec::Opus);
-
-        let jsep = serde_json::to_value(answer).map_err(|err| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                Error::from(err),
-                &msg.operation,
-            )
-        })?;
-
-        let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
-            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &msg.operation)
-        })?;
-
-        msg.session.set_offer(offer).map_err(|err| {
-            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &msg.operation)
-        })?;
-
-        Ok(Some(jsep))
+        })
     }
 }
