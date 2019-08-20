@@ -49,7 +49,7 @@ COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='f60b0ae9edf9dad3b5cff22a4db02ff5c980538a'
+ARG JANUS_GATEWAY_COMMIT='642641f1e86be4a056076603b571cab7fb6b8a26'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
