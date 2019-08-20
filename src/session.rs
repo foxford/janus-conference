@@ -8,12 +8,12 @@ use std::time::SystemTime;
 use failure::Error;
 use janus::session::SessionWrapper;
 
-use crate::messages::JsepKind;
+use crate::jsep::Jsep;
 
 #[derive(Debug)]
 pub struct SessionState {
     fir_seq: AtomicIsize,
-    pub offer: Arc<Mutex<Option<JsepKind>>>,
+    pub offer: Arc<Mutex<Option<Jsep>>>,
     last_rtp_packet_timestamp: Arc<Mutex<Option<SystemTime>>>,
 }
 
@@ -30,7 +30,7 @@ impl SessionState {
         self.fir_seq.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn set_offer(&self, offer: JsepKind) -> Result<(), Error> {
+    pub fn set_offer(&self, offer: Jsep) -> Result<(), Error> {
         *self.offer.lock().map_err(|err| format_err!("{}", err))? = Some(offer);
         Ok(())
     }

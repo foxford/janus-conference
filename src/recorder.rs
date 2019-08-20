@@ -13,8 +13,6 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_pbutils::prelude::*;
 
-use crate::messages::Upload;
-
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub directory: String,
@@ -28,10 +26,10 @@ impl Config {
         }
 
         if !Path::new(&self.directory).exists() {
-            return Err(format_err!(
+            bail!(
                 "Recordings: recordings directory {} does not exist",
                 self.directory
-            ));
+            );
         }
 
         Ok(())
@@ -124,7 +122,7 @@ impl Recorder {
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<Upload, Error> {
+    pub fn finish_record(&mut self) -> Result<(u64, Vec<(u64, u64)>), Error> {
         if let Err(err) = self.stop_recording() {
             janus_err!("[CONFERENCE] Error during recording stop: {}", err);
         }
@@ -149,7 +147,7 @@ impl Recorder {
             .collect();
 
         if parts.is_empty() {
-            return Err(err_msg("Recordings not found"));
+            bail!("Recordings not found");
         }
 
         parts.sort_by_key(|part| part.start);
@@ -210,11 +208,7 @@ impl Recorder {
                 full_record_path
             );
 
-            Ok(Upload::new(
-                &self.stream_id,
-                absolute_started_at,
-                relative_timestamps,
-            ))
+            Ok((absolute_started_at, relative_timestamps))
         } else {
             Err(format_err!(
                 "Failed to concatenate full record {} ({})",
@@ -271,7 +265,7 @@ impl Recorder {
 
         // Start the pipeline.
         if pipeline.set_state(gst::State::Playing) == gst::StateChangeReturn::Failure {
-            return Err(err_msg("Failed to put pipeline to the `playing` state"));
+            bail!("Failed to put pipeline to the `playing` state");
         }
 
         // Handle the pipeline in a separate thread.
@@ -295,8 +289,7 @@ impl Recorder {
                         };
 
                         if res != gst::FlowReturn::Ok {
-                            let err = format_err!("Error pushing buffer to AppSrc: {:?}", res);
-                            return Err(err);
+                            bail!("Error pushing buffer to AppSrc: {:?}", res);
                         };
                     }
                 }
@@ -305,14 +298,12 @@ impl Recorder {
             // Notify the pipeline that there will be no more RTP packets and finish it.
             let res = video_src.end_of_stream();
             if res != gst::FlowReturn::Ok {
-                let err = format_err!("Failed to finish video stream: {:?}", res);
-                return Err(err);
+                bail!("Failed to finish video stream: {:?}", res);
             }
 
             let res = audio_src.end_of_stream();
             if res != gst::FlowReturn::Ok {
-                let err = format_err!("Failed to finish audio stream: {:?}", res);
-                return Err(err);
+                bail!("Failed to finish audio stream: {:?}", res);
             }
 
             let eos_ev = gst::Event::new_eos().build();
@@ -394,7 +385,7 @@ impl Recorder {
             Some(bus) => bus,
             None => {
                 Self::shutdown_pipeline(pipeline);
-                return Err(err_msg("Failed to get pipeline bus"));
+                bail!("Failed to get pipeline bus");
             }
         };
 

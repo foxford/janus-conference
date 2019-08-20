@@ -1,337 +1,257 @@
-use std::sync::{mpsc, RwLock};
+mod operation;
+mod request;
+mod response;
+mod router;
+
+use std::convert::TryFrom;
+use std::ffi::CString;
+use std::sync::{mpsc, Arc, Mutex};
 
 use failure::{err_msg, Error};
 use futures::lazy;
-use janus::{sdp, JanssonDecodingFlags, JanssonValue};
+use http::StatusCode;
+use janus::JanssonValue;
+use serde_json::Value as JsonValue;
+use svc_error::Error as SvcError;
 use tokio_threadpool::ThreadPool;
 
-use crate::conf::Config;
-use crate::messages::{
-    APIError, Create, ErrorStatus, JsepKind, Read, Response, StreamOperation, StreamResponse,
-};
-use crate::recorder::Recorder;
-use crate::switchboard::Switchboard;
-use crate::uploader::Uploader;
-use crate::{utils, Event, Message, MESSAGE_HANDLER};
+use self::request::Request;
+use self::response::{Payload as ResponsePayload, Response};
+use self::router::Method;
+use crate::janus_callbacks;
+use crate::jsep::Jsep;
+use crate::session::Session;
+use crate::utils;
 
-#[derive(Debug)]
+enum Message {
+    Request(Request),
+    Response(Response),
+}
+
 pub struct MessageHandler {
-    pub tx: mpsc::SyncSender<Event>,
-    pub switchboard: RwLock<Switchboard>,
-    pub config: Config,
-    pub uploader: Uploader,
-    pub thread_pool: ThreadPool,
+    tx: mpsc::SyncSender<Message>,
+    rx: Arc<Mutex<mpsc::Receiver<Message>>>,
+    thread_pool: ThreadPool,
 }
 
 impl MessageHandler {
-    pub fn new(config: Config, tx: mpsc::SyncSender<Event>) -> Result<Self, Error> {
-        let uploader = Uploader::new(config.uploading.clone())
-            .map_err(|err| format_err!("Failed to init uploader: {}", err))?;
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::sync_channel(10);
 
-        Ok(Self {
+        Self {
             tx,
-            switchboard: RwLock::new(Switchboard::new()),
-            config,
-            uploader,
+            rx: Arc::new(Mutex::new(rx)),
             thread_pool: ThreadPool::new(),
-        })
-    }
-
-    pub fn handle(&self, msg: &Message) {
-        let result = match msg.operation.clone() {
-            Some(StreamOperation::Create { ref id }) => self.handle_create(msg, id),
-            Some(StreamOperation::Read { ref id }) => self.handle_read(msg, id),
-            Some(StreamOperation::Upload {
-                ref id,
-                ref bucket,
-                ref object,
-            }) => self.handle_upload(msg, id, bucket, object),
-            None => {
-                let err = err_msg("Missing operation");
-                Err(APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    err,
-                    &None,
-                ))
-            }
-        };
-
-        if let Err(err) = result {
-            self.respond(msg, Err(err), None);
         }
     }
 
-    pub fn respond(
-        &self,
-        msg: &Message,
-        result: Result<StreamResponse, APIError>,
-        jsep: Option<JanssonValue>,
-    ) {
-        let (response, jsep) = match result {
-            Ok(response) => match Self::build_ok_response(response, msg.operation.clone()) {
-                Ok(response) => (response, jsep),
-                Err(err) => (Self::build_error_response(err), None),
-            },
-            Err(err) => {
-                janus_err!("Error processing message: {}", err);
-                (Self::build_error_response(err), None)
-            }
-        };
-
-        let response = Event::Response {
-            msg: msg.to_owned(),
-            response: Some(response),
-            jsep,
-        };
-
-        janus_info!("[CONFERENCE] Scheduling response ({})", msg.transaction);
-        self.tx.send(response).ok();
-    }
-
-    // TODO: move to StreamResponse.into_raw_response().
-    fn build_ok_response(
-        response: StreamResponse,
-        operation: Option<StreamOperation>,
-    ) -> Result<JanssonValue, APIError> {
-        let response =
-            serde_json::to_value(Response::new(Some(response), None)).map_err(|err| {
-                APIError::new(
-                    ErrorStatus::INTERNAL_SERVER_ERROR,
-                    Error::from(err),
-                    &operation,
-                )
-            })?;
-
-        let response = utils::serde_to_jansson(&response)
-            .map_err(|err| APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &operation))?;
-
-        Ok(response)
-    }
-
-    fn build_error_response(err: APIError) -> JanssonValue {
-        serde_json::to_value(Response::new(None, Some(err)))
-            .map_err(|_| err_msg("Error dumping response to JSON"))
-            .and_then(|response| utils::serde_to_jansson(&response))
-            .unwrap_or_else(|err| {
-                let err = format!("Error serializing other error: {}", &err);
-
-                JanssonValue::from_str(&err, JanssonDecodingFlags::empty())
-                    .unwrap_or_else(|_| Self::json_serialization_fallback_error())
-            })
-    }
-
-    // TODO: make it `const fn` in future Rust versions. Now it fails with:
-    // `error: trait bounds other than `Sized` on const fn parameters are unstable`
-    fn json_serialization_fallback_error() -> JanssonValue {
-        // `unwrap` is ok here because we're converting a constant string.
-        JanssonValue::from_str("JSON serialization error", JanssonDecodingFlags::empty()).unwrap()
-    }
-
-    fn handle_create(&self, msg: &Message, id: &str) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling create message with id {}", id);
-        let jsep = Self::build_jsep(&msg)?;
-
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
-            )
-        })?;
-
-        switchboard.create_stream(id, msg.session.clone());
-
-        let start_recording_result = {
-            if self.config.recordings.enabled {
-                let mut recorder = Recorder::new(&self.config.recordings, &id);
-
-                recorder.start_recording().map_err(|err| {
-                    APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        Error::from(err),
-                        &msg.operation,
-                    )
-                })?;
-
-                switchboard.attach_recorder(msg.session.clone(), recorder);
-            }
-
-            Ok(())
-        };
-
-        match start_recording_result {
-            Ok(()) => {
-                let response = StreamResponse::CreateStreamResponse(Create::new());
-                self.respond(msg, Ok(response), jsep);
-                Ok(())
-            }
-            Err(err) => {
-                switchboard
-                    .remove_stream(id)
-                    .map_err(|remove_err| {
-                        APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            format_err!(
-                                "Failed to remove stream {}: {} while recovering from another error: {}",
-                                id,
-                                remove_err,
-                                err,
-                            ),
-                            &msg.operation,
-                        )
-                    })?;
-
-                Err(err)
-            }
-        }
-    }
-
-    fn handle_read(&self, msg: &Message, id: &str) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling read message with id {}", id);
-        let jsep = Self::build_jsep(&msg)?;
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
-            )
-        })?;
-
-        switchboard
-            .join_stream(&String::from(id), msg.session.clone())
-            .map_err(|err| {
-                APIError::new(ErrorStatus::NOT_FOUND, Error::from(err), &msg.operation)
-            })?;
-
-        let response = StreamResponse::ReadStreamResponse(Read::new());
-        self.respond(msg, Ok(response), jsep);
-        Ok(())
-    }
-
-    fn handle_upload(
-        &self,
-        msg: &Message,
-        id: &str,
-        bucket: &str,
-        object: &str,
-    ) -> Result<(), APIError> {
-        janus_info!("[CONFERENCE] Handling upload message with id {}", id);
-
-        let mut switchboard = self.switchboard.write().map_err(|_| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                err_msg("Failed to acquire switchboard write lock"),
-                &msg.operation,
-            )
-        })?;
-
-        // Stopping active recording if any.
-        switchboard.stop_recording(id).map_err(|err| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                Error::from(err),
-                &msg.operation,
-            )
-        })?;
-
-        let mut recorder = Recorder::new(&self.config.recordings, &id);
-        let msg = msg.to_owned();
-        let bucket = bucket.to_owned();
-        let object = object.to_owned();
-
+    /// Starts message handling loop on the thread poll.
+    pub fn start(&self) {
         self.thread_pool.spawn(lazy(move || {
-            janus_info!("[CONFERENCE] Upload task started. Finishing record");
+            let app = match app!() {
+                Ok(app) => app,
+                Err(err) => {
+                    janus_err!("[CONFERENCE] {}", err);
+                    return Ok(());
+                }
+            };
 
-            // We can't use just `self` because the compiler requires static lifetime for it.
-            let message_handler = MESSAGE_HANDLER
-                .get()
-                .ok_or_else(|| janus_err!("[CONFERENCE] Message handler is not initialized"))?;
+            match app.message_handler.rx.lock() {
+                // Message handling loop.
+                Ok(rx) => loop {
+                    match rx.recv().ok() {
+                        None => (),
+                        Some(Message::Request(request)) => {
+                            janus_info!("[CONFERENCE] Scheduling request handling");
 
-            let upload = recorder.finish_record().map_err(|err| {
-                message_handler.respond(
-                    &msg,
-                    Err(APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        Error::from(err),
-                        &msg.operation,
-                    )),
-                    None,
-                );
-            })?;
-
-            janus_info!("[CONFERENCE] Uploading record");
-            let uploader = &message_handler.uploader;
-            let path = recorder.get_full_record_path();
-
-            uploader
-                .upload_file(&path, &bucket, &object)
-                .map_err(|err| {
-                    message_handler.respond(
-                        &msg,
-                        Err(APIError::new(
-                            ErrorStatus::INTERNAL_SERVER_ERROR,
-                            Error::from(err),
-                            &msg.operation,
-                        )),
-                        None,
-                    );
-                })?;
-
-            janus_info!("[CONFERENCE] Uploading finished");
-
-            let response = StreamResponse::UploadStreamResponse(upload);
-            message_handler.respond(&msg, Ok(response), None);
-
-            janus_info!("[CONFERENCE] Upload task finished");
-            Ok(())
+                            // Handle requests asynchonously.
+                            app.message_handler.thread_pool.spawn(lazy(move || {
+                                janus_info!("[CONFERENCE] Handling request");
+                                app.message_handler.handle_request(request);
+                                Ok(())
+                            }));
+                        }
+                        Some(Message::Response(response)) => {
+                            janus_info!("[CONFERENCE] Handling response");
+                            app.message_handler.handle_response(response);
+                        }
+                    }
+                },
+                Err(err) => {
+                    janus_err!("[CONFERENCE] Failed to acquire receiver lock: {}", err);
+                    return Ok(());
+                }
+            };
         }));
-
-        Ok(())
     }
 
-    fn build_jsep(msg: &Message) -> Result<Option<JanssonValue>, APIError> {
-        let jsep_offer_parse_result = msg
-            .jsep
-            .clone()
-            .ok_or_else(|| {
-                APIError::new(
-                    ErrorStatus::BAD_REQUEST,
-                    err_msg("JSEP is empty"),
-                    &msg.operation,
-                )
-            })
-            .and_then(|ref jsep| {
-                JanssonValue::from_str(jsep, JanssonDecodingFlags::empty()).map_err(|err| {
-                    APIError::new(
-                        ErrorStatus::INTERNAL_SERVER_ERROR,
-                        format_err!("Failed to deserialize JSEP: {}", err),
-                        &msg.operation,
+    /// Handles JSEP if needed, calls the operation and schedules its response.
+    fn handle_request(&self, request: Request) {
+        match request.operation().clone() {
+            None => janus_err!("[CONFERENCE] Missing request operation"),
+            Some(operation) => match Self::handle_jsep(&request) {
+                Err(err) => self.schedule_response(request, err.into(), None),
+                Ok(jsep_answer) => {
+                    janus_info!("[CONFERENCE] Calling operation");
+                    let session = request.session().clone();
+
+                    let payload = match operation.call(session) {
+                        Ok(payload) => JsonValue::from(payload).into(),
+                        Err(err) => err.into(),
+                    };
+
+                    self.schedule_response(request, payload, jsep_answer);
+                }
+            },
+        }
+    }
+
+    /// Serializes the response and pushes it to Janus for sending to the client.
+    fn handle_response(&self, response: Response) {
+        let jsep_answer = match response.jsep_answer() {
+            None => None,
+            Some(json_value) => match utils::serde_to_jansson(&json_value) {
+                Ok(jansson_value) => Some(jansson_value),
+                Err(err) => {
+                    janus_err!("[CONFERENCE] Failed to serialize JSEP answer: {}", err);
+                    return;
+                }
+            },
+        };
+
+        CString::new(response.transaction().to_owned())
+            .map_err(Error::from)
+            .and_then(|transaction| {
+                janus_info!("[CONFERENCE] Sending response ({})", response.transaction());
+
+                JanssonValue::try_from(response.payload()).and_then(|payload| {
+                    janus_callbacks::push_event(
+                        response.session(),
+                        transaction.into_raw(),
+                        Some(payload),
+                        jsep_answer,
                     )
+                    .map_err(Error::from)
                 })
             })
-            .map(|ref jsep| utils::jansson_to_serde::<JsepKind>(jsep))?;
+            .unwrap_or_else(|err| janus_err!("[CONFERENCE] Error sending response: {}", err));
+    }
 
-        let offer = jsep_offer_parse_result
-            .map_err(|err| APIError::new(ErrorStatus::BAD_REQUEST, err, &msg.operation))?;
+    /// Determines the operation by router method, builds a request object and pushes it
+    /// to the message handling queue.
+    pub fn schedule_request(
+        &self,
+        session: Arc<Session>,
+        transaction: &str,
+        payload: &JanssonValue,
+        jsep_offer: Option<JanssonValue>,
+    ) -> Result<(), Error> {
+        janus_info!("[CONFERENCE] Scheduling request");
+        let request = Request::new(session, &transaction);
 
-        let answer = offer.negotatiate(sdp::VideoCodec::H264, sdp::AudioCodec::Opus);
+        match utils::jansson_to_serde::<Method>(payload) {
+            Ok(method) => {
+                janus_info!("[CONFERENCE] Pushing request to queue");
+                let request = request.set_operation(method.into());
 
-        let jsep = serde_json::to_value(answer).map_err(|err| {
-            APIError::new(
-                ErrorStatus::INTERNAL_SERVER_ERROR,
-                Error::from(err),
-                &msg.operation,
-            )
-        })?;
+                let request = match jsep_offer {
+                    None => request,
+                    Some(jansson_value) => {
+                        let jsep = utils::jansson_to_serde::<Jsep>(&jansson_value)?;
+                        let json_value = serde_json::to_value(jsep)?;
+                        request.set_jsep_offer(json_value)
+                    }
+                };
 
-        let jsep = utils::serde_to_jansson(&jsep).map_err(|err| {
-            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &msg.operation)
-        })?;
+                self.tx
+                    .send(Message::Request(request))
+                    .map_err(|err| format_err!("Failed to schedule request: {}", err))
+            }
+            Err(err) => {
+                janus_info!("[CONFERENCE] Bad request. Couldn't determine method");
 
-        msg.session.set_offer(offer).map_err(|err| {
-            APIError::new(ErrorStatus::INTERNAL_SERVER_ERROR, err, &msg.operation)
-        })?;
+                let err = SvcError::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .detail(&err.to_string())
+                    .build();
 
-        Ok(Some(jsep))
+                self.schedule_response(request, err.into(), None);
+                Ok(())
+            }
+        }
+    }
+
+    /// Builds a response object for the reuqest and pushes it to the message handling queue.
+    fn schedule_response(
+        &self,
+        request: Request,
+        payload: ResponsePayload,
+        jsep_answer: Option<JsonValue>,
+    ) {
+        let response = Response::new(request, payload);
+
+        let response = match jsep_answer {
+            None => response,
+            Some(jsep_answer) => response.set_jsep_answer(jsep_answer),
+        };
+
+        janus_info!(
+            "[CONFERENCE] Scheduling response ({})",
+            response.transaction()
+        );
+
+        self.tx
+            .send(Message::Response(response))
+            .unwrap_or_else(|err| janus_err!("[CONFERENCE] Failed to schedule response: {}", err));
+    }
+
+    /// Parses SDP offer, gets the answer, sets the offer to the request's session.
+    /// Returns the answer which is intended to send in the response.
+    fn handle_jsep(request: &Request) -> Result<Option<JsonValue>, SvcError> {
+        let error = |status: StatusCode, err: Error| {
+            SvcError::builder()
+                .status(status)
+                .detail(&format!("Failed to handle JSEP: {}", err))
+                .build()
+        };
+
+        let operation = match request.operation() {
+            Some(operation) => operation,
+            None => return Ok(None),
+        };
+
+        if !operation.is_handle_jsep() {
+            return Ok(None);
+        }
+
+        let negotiation_result = match &request.jsep_offer() {
+            Some(jsep_offer) => Jsep::negotiate(jsep_offer),
+            None => Err(err_msg("JSEP is empty")),
+        };
+
+        match negotiation_result {
+            Ok(None) => Ok(None),
+            Ok(Some((offer, answer))) => {
+                if let Err(err) = request.session().set_offer(offer) {
+                    return Err(error(StatusCode::INTERNAL_SERVER_ERROR, err));
+                }
+
+                match serde_json::to_value(answer) {
+                    Ok(jsep) => Ok(Some(jsep)),
+                    Err(err) => {
+                        return Err(error(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format_err!("Failed to serialize JSEP answer: {}", err),
+                        ));
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    format_err!("Failed to negotiate JSEP: {}", err),
+                ));
+            }
+        }
     }
 }
