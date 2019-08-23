@@ -35,3 +35,7 @@ impl Jsep {
         Ok(Some((offer, answer)))
     }
 }
+
+pub trait JsepStore {
+    fn set_jsep(&self, jsep: Jsep) -> Result<(), Error>;
+}

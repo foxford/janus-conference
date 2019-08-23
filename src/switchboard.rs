@@ -206,20 +206,14 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn start_vacuum_thread(&self) {
-        thread::spawn(|| {
-            if let Ok(app) = app!() {
-                janus_info!("[CONFERENCE] Vacuum thread is alive.");
-                let interval = Duration::new(app.config.general.vacuum_interval, 0);
+    pub fn vacuum_publishers_loop(&self, interval: Duration) {
+        janus_info!("[CONFERENCE] Vacuum thread is alive.");
 
-                loop {
-                    app.switchboard
-                        .with_read_lock(|switchboard| switchboard.vacuum_publishers(&interval))
-                        .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
+        loop {
+            self.with_read_lock(|switchboard| switchboard.vacuum_publishers(&interval))
+                .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
 
-                    thread::sleep(interval);
-                }
-            }
-        });
+            thread::sleep(interval);
+        }
     }
 }

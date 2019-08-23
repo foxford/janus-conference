@@ -1,5 +1,4 @@
 use std::convert::TryFrom;
-use std::sync::Arc;
 
 use failure::Error;
 use http::StatusCode;
@@ -8,18 +7,17 @@ use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
 use super::request::Request;
-use crate::session::Session;
 use crate::utils;
 
 #[derive(Debug)]
-pub struct Response {
-    request: Request,
+pub struct Response<C> {
+    request: Request<C>,
     payload: Payload,
     jsep_answer: Option<JsonValue>,
 }
 
-impl Response {
-    pub fn new(request: Request, payload: Payload) -> Self {
+impl<C> Response<C> {
+    pub fn new(request: Request<C>, payload: Payload) -> Self {
         Self {
             request,
             payload,
@@ -42,8 +40,8 @@ impl Response {
         self.jsep_answer.as_ref()
     }
 
-    pub fn session(&self) -> &Arc<Session> {
-        self.request.session()
+    pub fn context(&self) -> &C {
+        self.request.context()
     }
 
     pub fn transaction(&self) -> &str {

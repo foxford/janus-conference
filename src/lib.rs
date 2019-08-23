@@ -1,3 +1,5 @@
+#![feature(c_variadic)]
+
 #[macro_use]
 extern crate janus_plugin as janus;
 
@@ -52,6 +54,8 @@ mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
+#[cfg(test)]
+mod test_stubs;
 mod uploader;
 
 use app::App;
@@ -178,7 +182,7 @@ extern "C" fn handle_message(
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
 
         let result = app!().map(|app| {
-            app.message_handler
+            app.message_handling_loop
                 .schedule_request(session, &transaction, &json, jsep_offer)
         });
 

@@ -35,9 +35,11 @@ rand = "0.6"
 rumqtt = "0.30"
 svc-agent = "0.7"
 tempfile = "3.0"
+janus-plugin-sys = "0.6"
 
 [features]
 default = ["s4/native-tls"]
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs" }
+janus-plugin-sys = { git = "https://github.com/netology-group/janus-plugin-rs" }

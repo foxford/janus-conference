@@ -14,12 +14,14 @@ pub struct Request {
 #[derive(Serialize)]
 struct Response {}
 
-impl super::Operation for Request {
-    fn call(&self, session: Arc<Session>) -> super::Result {
+impl super::Operation<Arc<Session>> for Request {
+    fn call(&self, request: &super::Request<Arc<Session>>) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.read operation with id {}",
             self.id
         );
+
+        let session = request.context();
 
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()

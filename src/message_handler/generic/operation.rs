@@ -1,19 +1,12 @@
 use std::fmt;
-use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
-use crate::session::Session;
-
-pub mod stream_create;
-pub mod stream_read;
-pub mod stream_upload;
-
-pub trait Operation: fmt::Debug + Send {
+pub trait Operation<C>: fmt::Debug + Send {
     /// Operation implementation
-    fn call(&self, session: Arc<Session>) -> self::Result;
+    fn call(&self, request: &super::Request<C>) -> self::Result;
 
     /// Whether MessageHandler should process SDP offer/answer before calling this operation.
     fn is_handle_jsep(&self) -> bool;
@@ -36,6 +29,7 @@ where
             Ok(payload) => Self { payload },
             Err(err) => {
                 janus_err!("Failed to serialize response payload: {}", err);
+
                 Self {
                     payload: serde_json::from_str("Serialization error").unwrap(),
                 }

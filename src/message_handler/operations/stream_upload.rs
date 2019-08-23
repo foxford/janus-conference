@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
 use failure::Error;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::recorder::Recorder;
-use crate::session::Session;
 use crate::uploader::Uploader;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -22,8 +19,8 @@ struct Response {
     time: Vec<(u64, u64)>,
 }
 
-impl super::Operation for Request {
-    fn call(&self, _session: Arc<Session>) -> super::Result {
+impl<C> super::Operation<C> for Request {
+    fn call(&self, _request: &super::Request<C>) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.upload operation with id {}",
             self.id
