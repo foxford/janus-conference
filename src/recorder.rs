@@ -1,12 +1,11 @@
-use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
-use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, io, thread};
 
-use failure::{err_msg, Error};
+use failure::{err_msg, Error, Fail};
 use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -122,7 +121,7 @@ impl Recorder {
         self.sender.send(msg).map_err(Error::from)
     }
 
-    pub fn finish_record(&mut self) -> Result<(u64, Vec<(u64, u64)>), Error> {
+    pub fn finish_record(&mut self) -> Result<(u64, Vec<(u64, u64)>), RecorderError> {
         if let Err(err) = self.stop_recording() {
             janus_err!("[CONFERENCE] Error during recording stop: {}", err);
         }
@@ -138,6 +137,10 @@ impl Recorder {
 
         let records_dir = self.get_records_dir();
 
+        if !records_dir.is_dir() {
+            return Err(RecorderError::RecordingMissing);
+        }
+
         let mut parts: Vec<RecordPart> = fs::read_dir(&records_dir)?
             .filter_map(|maybe_dir_entry| {
                 maybe_dir_entry
@@ -147,7 +150,7 @@ impl Recorder {
             .collect();
 
         if parts.is_empty() {
-            bail!("Recordings not found");
+            return Err(RecorderError::RecordingMissing);
         }
 
         parts.sort_by_key(|part| part.start);
@@ -210,11 +213,13 @@ impl Recorder {
 
             Ok((absolute_started_at, relative_timestamps))
         } else {
-            Err(format_err!(
+            let err = format_err!(
                 "Failed to concatenate full record {} ({})",
                 full_record_path,
                 status
-            ))
+            );
+
+            Err(err.into())
         }
     }
 
@@ -509,5 +514,27 @@ impl RecordPart {
             .get_duration()
             .mseconds()
             .ok_or_else(|| err_msg("Empty duration"))
+    }
+}
+
+#[derive(Fail, Debug)]
+pub enum RecorderError {
+    #[fail(display = "{}", _0)]
+    InternalError(#[cause] Error),
+    #[fail(display = "{}", _0)]
+    IoError(#[cause] io::Error),
+    #[fail(display = "Recording missing")]
+    RecordingMissing,
+}
+
+impl From<Error> for RecorderError {
+    fn from(err: Error) -> RecorderError {
+        RecorderError::InternalError(err)
+    }
+}
+
+impl From<io::Error> for RecorderError {
+    fn from(err: io::Error) -> RecorderError {
+        RecorderError::IoError(err)
     }
 }

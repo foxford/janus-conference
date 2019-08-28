@@ -1,8 +1,8 @@
-use failure::Error;
+use failure::{err_msg, Error};
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::recorder::Recorder;
+use crate::recorder::{Recorder, RecorderError};
 use crate::uploader::Uploader;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,22 +26,32 @@ impl<C> super::Operation<C> for Request {
             self.id
         );
 
-        let internal_error = |err: Error| {
+        let error = |status: StatusCode, err: Error| {
             SvcError::builder()
                 .kind(
                     "stream_upload_error",
                     "Error uploading a recording of stream",
                 )
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .status(status)
                 .detail(&err.to_string())
                 .build()
         };
+
+        let internal_error = |err| error(StatusCode::INTERNAL_SERVER_ERROR, err);
 
         let app = app!().map_err(internal_error)?;
         let mut recorder = Recorder::new(&app.config.recordings, &self.id);
 
         janus_info!("[CONFERENCE] Upload task started. Finishing record");
-        let (started_at, time) = recorder.finish_record().map_err(internal_error)?;
+        let (started_at, time) = recorder.finish_record().map_err(|err| match err {
+            RecorderError::InternalError(cause) => internal_error(cause),
+            RecorderError::IoError(cause) => {
+                internal_error(format_err!("Recorder IO error: {}", cause))
+            }
+            RecorderError::RecordingMissing => {
+                error(StatusCode::NOT_FOUND, err_msg("Record not found"))
+            }
+        })?;
 
         janus_info!("[CONFERENCE] Uploading record");
         let uploader = Uploader::new(app.config.uploading.clone())

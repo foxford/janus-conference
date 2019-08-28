@@ -16,8 +16,7 @@ cp docker/janus.plugin.conference.environment.sample docker/janus.plugin.confere
 
 # Build and run Janus instance with plugin
 export COMPOSE_FILE=docker/docker-compose.yml
-docker-compose up -d
-docker-compose attach janus
+docker-compose up
 ```
 
 ### How to run conference example
