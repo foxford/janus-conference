@@ -4,6 +4,9 @@ FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
 # Using Debian here because official Rust image is based on Debian too.
 FROM debian:stretch as build-janus
 
+## -----------------------------------------------------------------------------
+## Install dependencies
+## -----------------------------------------------------------------------------
 ARG PAHO_MQTT_VERSION=1.3.0
 
 RUN set -xe \
@@ -42,7 +45,7 @@ RUN set -xe \
         && make install
 
 ## -----------------------------------------------------------------------------
-## Installing FFmpeg
+## Install FFmpeg
 ## -----------------------------------------------------------------------------
 COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
@@ -75,7 +78,23 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
 ## -----------------------------------------------------------------------------
-FROM rust:latest as build-plugin-deploy
+FROM buildpack-deps:stretch
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN set -eux; \
+    \
+    url="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"; \
+    wget "$url"; \
+    chmod +x rustup-init; \
+    ./rustup-init -y --no-modify-path --default-toolchain nightly; \
+    rm rustup-init; \
+    chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
+    rustup --version; \
+    cargo --version; \
+    rustc --version;
 
 RUN set -xe \
     && apt-get update \

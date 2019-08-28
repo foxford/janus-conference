@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
-use failure::Error;
+use failure::{err_msg, Error};
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
@@ -134,7 +135,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&self, timeout: &Duration) {
+    pub fn vacuum_publishers(&self, timeout: &Duration) -> Result<(), Error> {
         for (stream_id, publisher) in self.publishers.iter() {
             match Self::vacuum_publisher(&publisher, timeout) {
                 Ok(false) => (),
@@ -155,6 +156,8 @@ impl Switchboard {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn vacuum_publisher(publisher: &Session, timeout: &Duration) -> Result<bool, Error> {
@@ -172,6 +175,45 @@ impl Switchboard {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+}
+
+pub struct LockedSwitchboard(RwLock<Switchboard>);
+
+impl LockedSwitchboard {
+    pub fn new() -> Self {
+        Self(RwLock::new(Switchboard::new()))
+    }
+
+    pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    where
+        F: Fn(RwLockReadGuard<Switchboard>) -> Result<R, Error>,
+    {
+        match self.0.read() {
+            Ok(switchboard) => callback(switchboard),
+            Err(_) => Err(err_msg("Failed to acquire switchboard read lock")),
+        }
+    }
+
+    pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    where
+        F: Fn(RwLockWriteGuard<Switchboard>) -> Result<R, Error>,
+    {
+        match self.0.write() {
+            Ok(switchboard) => callback(switchboard),
+            Err(_) => Err(err_msg("Failed to acquire switchboard write lock")),
+        }
+    }
+
+    pub fn vacuum_publishers_loop(&self, interval: Duration) {
+        janus_info!("[CONFERENCE] Vacuum thread is alive.");
+
+        loop {
+            self.with_read_lock(|switchboard| switchboard.vacuum_publishers(&interval))
+                .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
+
+            thread::sleep(interval);
         }
     }
 }

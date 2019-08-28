@@ -15,6 +15,7 @@ media: {
   no_media_timer = 10
 }
 plugins: {
+  disable = "libjanus_audiobridge.so,libjanus_echotest.so,libjanus_nosip.so,libjanus_recordplay.so,libjanus_streaming.so,libjanus_textroom.so,libjanus_videocall.so,libjanus_videoroom.so,libjanus_voicemail.so"
 }
 transports: {
 }

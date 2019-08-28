@@ -1,56 +1,74 @@
-FROM alpine:latest
+# We need ffmpeg 4 to use OPUS in MP4 but Debian stretch has only ffmpeg 4.
+FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
+
+# Using Debian here because official Rust image is based on Debian too.
+FROM debian:stretch as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Install dependencies
 ## -----------------------------------------------------------------------------
-RUN apk add --update --no-cache \
-      # Build & debug tools
-      build-base \
-      gcc \
-      git \
-      autoconf \
-      automake \
-      libtool \
-      curl-dev \
-      gdb \
-      # Janus Gateway dependencies
-      libressl-dev \
-      libsrtp-dev \
-      libconfig-dev \
-      libmicrohttpd-dev \
-      jansson-dev \
-      opus-dev \
-      libogg-dev \
-      libwebsockets-dev \
-      gengetopt \
-      libnice-dev \
-      # Janus Conference plugin dependencies
-      gstreamer-dev \
-      gstreamer-tools \
-      gst-plugins-base-dev \
-      gst-plugins-good \
-      gst-plugins-bad \
-      gst-plugins-ugly \
-      gst-libav \
-      libnice-gstreamer \
-      ffmpeg \
-      # Rust
-      # TODO: install latest Rust from rustup when rustup 1.19 gets released
-      rust \
-      cargo
-
-## -----------------------------------------------------------------------------
-## Build Paho MQTT client
-## -----------------------------------------------------------------------------
 ARG PAHO_MQTT_VERSION=1.3.0
 
-RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-    && cd "${PAHO_MQTT_BUILD_DIR}" \
-    && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-    && git checkout "v${PAHO_MQTT_VERSION}" \
-    && make \
-    && make install \
-    && rm -rf "${PAHO_MQTT_BUILD_DIR}"
+RUN set -xe \
+    && apt-get update \
+    && apt-get -y --no-install-recommends install \
+        libconfig-dev \
+        libmicrohttpd-dev \
+        libjansson-dev \
+        libnice-dev \
+        libcurl4-openssl-dev \
+        libsofia-sip-ua-dev \
+        libopus-dev \
+        libogg-dev \
+        libwebsockets-dev \
+        libsrtp2-dev \
+        gengetopt \
+        ca-certificates \
+        git \
+        libtool \
+        m4 \
+        automake \
+        make \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
+        gstreamer1.0-plugins-base \
+        gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad \
+        gstreamer1.0-plugins-ugly \
+        gstreamer1.0-libav \
+        libgstrtspserver-1.0-dev \
+        wget \
+        gdb \
+    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+        && cd "${PAHO_MQTT_BUILD_DIR}" \
+        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+        && git checkout "v${PAHO_MQTT_VERSION}" \
+        && make \
+        && make install
+
+## -----------------------------------------------------------------------------
+## Install nightly Rust
+## -----------------------------------------------------------------------------
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN set -eux; \
+    \
+    url="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"; \
+    wget "$url"; \
+    chmod +x rustup-init; \
+    ./rustup-init -y --no-modify-path --default-toolchain nightly; \
+    rm rustup-init; \
+    chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
+    rustup --version; \
+    cargo --version; \
+    rustc --version;
+
+## -----------------------------------------------------------------------------
+## Install FFmpeg
+## -----------------------------------------------------------------------------
+COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway

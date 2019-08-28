@@ -1,7 +1,8 @@
+#![feature(c_variadic)]
+
 #[macro_use]
 extern crate janus_plugin as janus;
 
-extern crate serde;
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
@@ -32,56 +33,34 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::sync::{mpsc, Arc};
-use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use atom::AtomSetOnce;
-use failure::{err_msg, Error};
+use failure::Error;
 use janus::{
-    JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue, LibraryMetadata, Plugin,
-    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
+    JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult,
+    PluginSession, RawJanssonValue, RawPluginResult,
 };
 
+#[macro_use]
+mod app;
 mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
+mod jsep;
 mod message_handler;
-mod messages;
 mod recorder;
+mod serde;
 mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
+#[cfg(test)]
+mod test_stubs;
 mod uploader;
 
+use app::App;
 use conf::Config;
-use message_handler::MessageHandler;
-use messages::{APIError, ErrorStatus, StreamOperation};
 use session::{Session, SessionState};
-
-#[derive(Clone, Debug)]
-pub struct Message {
-    session: Arc<Session>,
-    transaction: String,
-    operation: Option<StreamOperation>,
-    jsep: Option<String>,
-}
-
-unsafe impl Send for Message {}
-
-pub enum Event {
-    Request(Message),
-    Response {
-        msg: Message,
-        response: Option<JanssonValue>,
-        jsep: Option<JanssonValue>,
-    },
-}
-
-lazy_static! {
-    static ref MESSAGE_HANDLER: AtomSetOnce<Box<MessageHandler>> = AtomSetOnce::empty();
-}
 
 fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
     for publisher in publishers {
@@ -117,95 +96,26 @@ fn init_config(config_path: *const c_char) -> Result<Config, Error> {
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
-        Ok(config) => {
-            janus_info!("{:?}", config);
-            config
-        }
+        Ok(config) => config,
         Err(err) => {
             janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
             return -1;
         }
     };
 
-    let (tx, rx) = mpsc::sync_channel(10);
+    janus_info!("{:?}", config);
 
-    match MessageHandler::new(config.clone(), tx) {
-        Ok(message_handler) => {
-            MESSAGE_HANDLER.set_if_none(Box::new(message_handler));
-        }
-        Err(err) => {
-            janus_fatal!("[CONFERENCE] Message handler init failed: {}", err);
-            return -1;
-        }
+    if let Err(err) = App::init(config) {
+        janus_fatal!("[CONFERENCE] Janus Conference plugin init failed: {}", err);
+        return -1;
     };
 
-    janus_callbacks::init(callbacks);
-
-    thread::spawn(move || {
-        janus_info!("[CONFERENCE] Message processing thread is alive.");
-
-        let message_handler = match MESSAGE_HANDLER.get() {
-            Some(message_handler) => message_handler,
-            None => {
-                janus_fatal!("[CONFERENCE] Message handler not initialized");
-                return;
-            }
-        };
-
-        for item in rx.iter() {
-            match item {
-                Event::Request(msg) => {
-                    janus_info!("[CONFERENCE] Handling request ({})", msg.transaction);
-                    message_handler.handle(&msg)
-                }
-                Event::Response {
-                    msg,
-                    response,
-                    jsep,
-                } => {
-                    janus_info!("[CONFERENCE] Sending response ({})", msg.transaction);
-
-                    let push_result = CString::new(msg.transaction.clone()).map(|transaction| {
-                        janus_callbacks::push_event(
-                            &msg.session,
-                            transaction.into_raw(),
-                            response,
-                            jsep,
-                        )
-                    });
-
-                    if let Err(err) = push_result {
-                        janus_err!("[CONFERENCE] Error pushing event: {}", err);
-                    }
-                }
-            }
-        }
-    });
-
-    let res = gstreamer::init();
-    if let Err(err) = res {
+    if let Err(err) = gstreamer::init() {
         janus_fatal!("[CONFERENCE] Failed to init GStreamer: {}", err);
         return -1;
     }
 
-    let interval = Duration::new(config.general.vacuum_interval, 0);
-
-    thread::spawn(move || loop {
-        thread::sleep(interval);
-
-        report_error(
-            MESSAGE_HANDLER
-                .get()
-                .ok_or_else(|| err_msg("Message handler not initialized"))
-                .and_then(|message_handler| {
-                    message_handler
-                        .switchboard
-                        .read()
-                        .map_err(|_| err_msg("Failed to acquire switchboard read lock"))
-                })
-                .map(|switchboard| switchboard.vacuum_publishers(&interval)),
-        );
-    });
+    janus_callbacks::init(callbacks);
 
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
     0
@@ -216,40 +126,23 @@ extern "C" fn destroy() {
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
-    let initial_state = SessionState::new();
-
-    let message_handler = match MESSAGE_HANDLER.get() {
-        Some(message_handler) => message_handler,
-        None => {
-            janus_err!("[CONFERENCE] Message handler is not initialized");
-            return;
-        }
-    };
-
-    match unsafe { Session::associate(handle, initial_state) } {
-        Ok(sess) => {
-            janus_info!("[CONFERENCE] Initializing session {:p}...", sess.handle);
-            let switchboard = message_handler.switchboard.write();
-
-            match switchboard {
-                Ok(mut switchboard) => {
-                    switchboard.connect(sess);
-                }
-                Err(err) => {
-                    janus_err!("[CONFERENCE] {}", err);
-                    unsafe {
-                        *error = -1;
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            janus_err!("[CONFERENCE] {}", e);
-            unsafe {
-                *error = -1;
-            }
-        }
+    if let Err(err) = create_session_impl(handle) {
+        janus_err!("[CONFERENCE] {}", err);
+        unsafe { *error = -1 };
     }
+}
+
+fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
+    app!()?.switchboard.with_write_lock(|mut switchboard| {
+        let initial_state = SessionState::new();
+
+        let session = unsafe { Session::associate(handle, initial_state) }
+            .map_err(|err| format_err!("Session associate error: {}", err))?;
+
+        janus_info!("[CONFERENCE] Initializing session {:p}...", session.handle);
+        switchboard.connect(session);
+        Ok(())
+    })
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, _error: *mut c_int) {
@@ -267,15 +160,7 @@ extern "C" fn handle_message(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
-    janus_info!("[CONFERENCE] Queueing message on {:p}.", handle);
-
-    let message_handler = match MESSAGE_HANDLER.get() {
-        Some(message_handler) => message_handler,
-        None => {
-            janus_err!("[CONFERENCE] Message handler not initialized");
-            return PluginResult::error(c_str!("Message handler not initialized")).into_raw();
-        }
-    };
+    janus_info!("[CONFERENCE] Handling message on {:p}.", handle);
 
     let session = match unsafe { Session::from_ptr(handle) } {
         Ok(session) => session,
@@ -293,43 +178,19 @@ extern "C" fn handle_message(
         }
     };
 
-    // TODO: Suboptimal serialization to String for making Message thread safe.
-    let jsep = match unsafe { JanssonValue::from_raw(jsep) } {
-        None => None,
-        Some(jsep) => match jsep.to_libcstring(JanssonEncodingFlags::empty()).to_str() {
-            Ok(jsep) => Some(String::from(jsep)),
-            Err(err) => {
-                janus_err!("[CONFERENCE] Failed to serialize JSEP: {}", err);
-                return PluginResult::error(c_str!("Failed serialize JSEP")).into_raw();
-            }
-        },
-    };
+    if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
+        let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
 
-    unsafe { JanssonValue::from_raw(message) }.map(|message| {
-        match utils::jansson_to_serde(&message) {
-            Ok(operation) => {
-                let msg = Message {
-                    session,
-                    transaction,
-                    operation: Some(operation),
-                    jsep,
-                };
+        let result = app!().map(|app| {
+            app.message_handling_loop
+                .schedule_request(session, &transaction, &json, jsep_offer)
+        });
 
-                message_handler.tx.send(Event::Request(msg)).ok();
-            }
-            Err(err) => {
-                let msg = Message {
-                    session,
-                    transaction,
-                    operation: None,
-                    jsep: None,
-                };
-
-                let err = APIError::new(ErrorStatus::BAD_REQUEST, err, &None);
-                message_handler.respond(&msg, Err(err), None);
-            }
-        };
-    });
+        if let Err(err) = result {
+            janus_err!("[CONFERENCE] Failed to schedule message handling: {}", err);
+            return PluginResult::error(c_str!("Failed to schedule message handling")).into_raw();
+        }
+    }
 
     PluginResult::ok_wait(None).into_raw()
 }
@@ -341,25 +202,18 @@ extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJa
 }
 
 fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    let sess = unsafe { Session::from_ptr(handle)? };
+    let app = app!()?;
+    let session = unsafe { Session::from_ptr(handle)? };
 
-    let switchboard = MESSAGE_HANDLER
-        .get()
-        .ok_or_else(|| err_msg("Message handler not initialized"))
-        .and_then(|message_handler| {
-            message_handler
-                .switchboard
-                .read()
-                .map_err(|_| err_msg("Failed to acquire switchboard read lock"))
-        })?;
-
-    send_fir(switchboard.publisher_to(&sess));
+    app.switchboard.with_read_lock(|switchboard| {
+        send_fir(switchboard.publisher_to(&session));
+        Ok(())
+    })?;
 
     janus_info!(
         "[CONFERENCE] WebRTC media is now available on {:p}.",
         handle
     );
-
     Ok(())
 }
 
@@ -370,18 +224,12 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
 
-    let message_handler = MESSAGE_HANDLER
-        .get()
-        .ok_or_else(|| err_msg("Message handler is not initialized"))?;
-
-    let mut switchboard = message_handler
-        .switchboard
-        .write()
-        .map_err(|_| err_msg("Failed to acquire switchboard write lock"))?;
-
+    let app = app!()?;
     let session = unsafe { Session::from_ptr(handle) }?;
     session.set_last_rtp_packet_timestamp(None)?;
-    switchboard.disconnect(&session)
+
+    app.switchboard
+        .with_write_lock(|mut switchboard| switchboard.disconnect(&session))
 }
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
@@ -394,37 +242,32 @@ fn incoming_rtp_impl(
     buf: *mut c_char,
     len: c_int,
 ) -> Result<(), Error> {
-    let sess = unsafe { Session::from_ptr(handle)? };
-    sess.set_last_rtp_packet_timestamp(Some(SystemTime::now()))?;
+    let app = app!()?;
+    let session = unsafe { Session::from_ptr(handle)? };
+    session.set_last_rtp_packet_timestamp(Some(SystemTime::now()))?;
 
-    let switchboard = MESSAGE_HANDLER
-        .get()
-        .ok_or_else(|| err_msg("Message handler not initialized"))
-        .and_then(|message_handler| {
-            message_handler
-                .switchboard
-                .read()
-                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
-        })?;
+    app.switchboard.with_read_lock(|switchboard| {
+        let subscribers = switchboard.subscribers_to(&session);
+        let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
 
-    let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+        for subscriber in subscribers {
+            janus_callbacks::relay_rtp(subscriber, video, buf_slice);
+        }
 
-    for subscriber in switchboard.subscribers_to(&sess) {
-        janus_callbacks::relay_rtp(subscriber, video, buf_slice);
-    }
+        let recorder = switchboard.recorder_for(&session);
 
-    if let Some(recorder) = switchboard.recorder_for(&sess) {
-        let is_video = match video {
-            0 => false,
-            _ => true,
-        };
+        if let Some(recorder) = recorder {
+            let is_video = match video {
+                0 => false,
+                _ => true,
+            };
 
-        let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
+            let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
+            recorder.record_packet(buf, is_video)?;
+        }
 
-        recorder.record_packet(buf, is_video)?;
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
@@ -437,35 +280,26 @@ fn incoming_rtcp_impl(
     buf: *mut c_char,
     len: c_int,
 ) -> Result<(), Error> {
-    let sess = unsafe { Session::from_ptr(handle)? };
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let session = unsafe { Session::from_ptr(handle)? };
+        let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
 
-    let switchboard = MESSAGE_HANDLER
-        .get()
-        .ok_or_else(|| err_msg("Message handler not initialized"))
-        .and_then(|message_handler| {
-            message_handler
-                .switchboard
-                .read()
-                .map_err(|_| err_msg("Failed to acquire message handler read lock"))
-        })?;
-
-    let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
-
-    match video {
-        1 if janus::rtcp::has_pli(packet) => {
-            send_pli(switchboard.publisher_to(&sess));
-        }
-        1 if janus::rtcp::has_fir(packet) => {
-            send_fir(switchboard.publisher_to(&sess));
-        }
-        _ => {
-            for subscriber in switchboard.subscribers_to(&sess) {
-                janus_callbacks::relay_rtcp(subscriber, video, packet);
+        match video {
+            1 if janus::rtcp::has_pli(packet) => {
+                send_pli(switchboard.publisher_to(&session));
+            }
+            1 if janus::rtcp::has_fir(packet) => {
+                send_fir(switchboard.publisher_to(&session));
+            }
+            _ => {
+                for subscriber in switchboard.subscribers_to(&session) {
+                    janus_callbacks::relay_rtcp(subscriber, video, packet);
+                }
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 extern "C" fn incoming_rtcp(
