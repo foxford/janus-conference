@@ -22,13 +22,14 @@ gstreamer-app = "0.12"
 gstreamer-base = "0.12"
 gstreamer-pbutils="0.12"
 glib = "0.6"
-rusoto_core = "0.36"
-rusoto_s3 = "0.36"
+rusoto_core = "0.40"
+rusoto_s3 = "0.40"
 s4 = { version = "0.0.*", default_features = false }
 http = "0.1"
 tokio-threadpool = "0.1"
 futures = "0.1"
-svc-error = "0.1"
+svc-error = { version = "0.1", features = ["sentry-extension"] }
+sentry = "0.17"
 
 [dev-dependencies]
 rand = "0.6"

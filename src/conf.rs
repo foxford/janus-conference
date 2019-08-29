@@ -13,6 +13,7 @@ pub struct Config {
     pub general: General,
     pub recordings: recorder::Config,
     pub uploading: uploader::Config,
+    pub sentry: Option<svc_error::extension::sentry::Config>,
 }
 
 impl Config {
