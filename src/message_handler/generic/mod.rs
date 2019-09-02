@@ -11,7 +11,7 @@ use futures::lazy;
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
-use svc_error::Error as SvcError;
+use svc_error::{extension::sentry, Error as SvcError};
 use tokio_threadpool::ThreadPool;
 
 use self::response::{Payload as ResponsePayload, Response};
@@ -68,11 +68,9 @@ where
                 None => (),
                 Some(Message::Request(operation, request)) => {
                     janus_info!("[CONFERENCE] Scheduling request handling");
-                    let tx = self.tx.to_owned();
-                    let sender = self.sender.to_owned();
+                    let handler = handler.clone();
 
                     self.thread_pool.spawn(lazy(move || {
-                        let handler: MessageHandler<C, S> = MessageHandler::new(tx, sender);
                         handler.handle_request(operation, request);
                         Ok(())
                     }));
@@ -131,6 +129,7 @@ where
     }
 }
 
+#[derive(Clone)]
 struct MessageHandler<C, S> {
     tx: mpsc::SyncSender<Message<C>>,
     sender: S,
@@ -155,16 +154,22 @@ where
         };
 
         match jsep_answer_result {
-            Err(err) => self.schedule_response(request, err.into(), None),
             Ok(jsep_answer) => {
                 janus_info!("[CONFERENCE] Calling operation");
 
                 let payload = match operation.call(&request) {
                     Ok(payload) => JsonValue::from(payload).into(),
-                    Err(err) => err.into(),
+                    Err(err) => {
+                        self.notify_error(&err);
+                        err.into()
+                    }
                 };
 
                 self.schedule_response(request, payload, jsep_answer);
+            }
+            Err(err) => {
+                self.notify_error(&err);
+                self.schedule_response(request, err.into(), None)
             }
         }
     }
@@ -260,6 +265,16 @@ where
                     format_err!("Failed to negotiate JSEP: {}", err),
                 ));
             }
+        }
+    }
+
+    fn notify_error(&self, err: &SvcError) {
+        if err.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
+            janus_info!("[CONFERENCE] Sending error to Sentry");
+
+            sentry::send(err.to_owned()).unwrap_or_else(|err| {
+                janus_err!("[CONFERENCE] Failed to send error to Sentry: {}", err);
+            });
         }
     }
 }
@@ -391,6 +406,7 @@ mod tests {
             message_handling_loop
                 .schedule_request(ctx, "txn", &json, None)
                 .unwrap();
+
             message_handling_loop.start();
         });
 
