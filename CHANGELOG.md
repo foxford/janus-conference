@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 (September 3, 2019)
+
+### Changes
+
+- Major refactor of message handling; use svc-error crate ([a47804b](https://github.com/netology-group/janus-conference/commit/a47804b95e24fb54accd3ddf146f759c318a3e17), [82b53eb](https://github.com/netology-group/janus-conference/commit/82b53eb396794e9137f12830454e93fa7cd0881c))
+- Return 404 on missing recording ([99a081e](https://github.com/netology-group/janus-conference/commit/99a081eb306ff0fed962968c0a21fe8cba11d947))
+- Add Sentry error tracking ([35df5dc](https://github.com/netology-group/janus-conference/commit/35df5dc210b960ab5ba1f46581cec494535e26d7))
+
+### Bugfixes
+
+-  Upgrade Janus to a version with MQTT transport automatic reconnection fix ([b7ec792](https://github.com/netology-group/janus-conference/commit/b7ec792f85851a8f79c881603255e3b438f35d93))
+
 ## v0.3.1 (August 7, 2019)
 
 ### Bugfixes
