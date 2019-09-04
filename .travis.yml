@@ -1,7 +1,7 @@
 dist: xenial
 language: rust
 rust:
-  - stable
+  - nightly
 addons:
   apt:
     packages:
@@ -29,11 +29,11 @@ jobs:
       script: cargo test
     - stage: check
       name: Rustfmt
-      install: rustup component add rustfmt-preview
+      install: rustup component add rustfmt
       script: cargo fmt -- --check
     - stage: check
       name: Clippy
-      install: rustup component add clippy-preview
+      install: rustup component add clippy
       script: cargo clippy
     - stage: deploy
       name: Docs
@@ -44,4 +44,3 @@ stages:
   - name: deploy
 notifications:
   email: false
-
