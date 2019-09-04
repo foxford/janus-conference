@@ -148,9 +148,10 @@ where
     fn handle_request(&self, operation: Box<dyn Operation<C>>, request: Request<C>) {
         janus_info!("[CONFERENCE] Handling request");
 
-        let jsep_answer_result = match operation.is_handle_jsep() {
-            true => Self::handle_jsep(&request),
-            false => Ok(None),
+        let jsep_answer_result = if operation.is_handle_jsep() {
+            Self::handle_jsep(&request)
+        } else {
+            Ok(None)
         };
 
         match jsep_answer_result {
@@ -251,20 +252,16 @@ where
 
                 match serde_json::to_value(answer) {
                     Ok(jsep) => Ok(Some(jsep)),
-                    Err(err) => {
-                        return Err(error(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format_err!("Failed to serialize JSEP answer: {}", err),
-                        ));
-                    }
+                    Err(err) => Err(error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format_err!("Failed to serialize JSEP answer: {}", err),
+                    )),
                 }
             }
-            Err(err) => {
-                return Err(error(
-                    StatusCode::BAD_REQUEST,
-                    format_err!("Failed to negotiate JSEP: {}", err),
-                ));
-            }
+            Err(err) => Err(error(
+                StatusCode::BAD_REQUEST,
+                format_err!("Failed to negotiate JSEP: {}", err),
+            )),
         }
     }
 

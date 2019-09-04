@@ -30,10 +30,10 @@ pub struct App {
 
 impl App {
     pub fn init(config: Config) -> Result<(), Error> {
-        config.sentry.as_ref().map(|sentry_config| {
+        if let Some(sentry_config) = config.sentry.as_ref() {
             janus_info!("[CONFERENCE] Initializing Sentry");
-            svc_error::extension::sentry::init(sentry_config)
-        });
+            svc_error::extension::sentry::init(sentry_config);
+        };
 
         let app = App::new(config)?;
         APP.set_if_none(Box::new(app));

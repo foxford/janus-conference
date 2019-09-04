@@ -428,7 +428,7 @@ unsafe impl Sync for Recorder {}
 fn unix_time_ms() -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-    now.as_secs() * 1000 + now.subsec_millis() as u64
+    now.as_secs() * 1000 + u64::from(now.subsec_millis())
 }
 
 struct RecordPart {
@@ -480,7 +480,7 @@ impl RecordPart {
             None => return false,
         };
 
-        if stem.to_string_lossy().starts_with(".") {
+        if stem.to_string_lossy().starts_with('.') {
             return false;
         }
 

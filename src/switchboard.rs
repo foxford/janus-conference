@@ -12,7 +12,7 @@ use crate::session::Session;
 
 #[derive(Debug)]
 pub struct Switchboard {
-    sessions: Vec<Box<Arc<Session>>>,
+    sessions: Vec<Arc<Session>>,
     publishers: HashMap<String, Arc<Session>>,
     publishers_subscribers: BidirectionalMultimap<Arc<Session>, Arc<Session>>,
     recorders: HashMap<Arc<Session>, Recorder>,
@@ -28,7 +28,7 @@ impl Switchboard {
         }
     }
 
-    pub fn connect(&mut self, session: Box<Arc<Session>>) {
+    pub fn connect(&mut self, session: Arc<Session>) {
         self.sessions.push(session);
     }
 
@@ -108,7 +108,7 @@ impl Switchboard {
 
     pub fn remove_stream(&mut self, id: &str) -> Result<(), Error> {
         janus_info!("[CONFERENCE] Removing stream {}", id);
-        self.stop_recording(id.clone())?;
+        self.stop_recording(&id.to_owned())?;
 
         match self.publishers.get_mut(id) {
             Some(publisher) => self.publishers_subscribers.remove_key(publisher),

@@ -140,7 +140,7 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
             .map_err(|err| format_err!("Session associate error: {}", err))?;
 
         janus_info!("[CONFERENCE] Initializing session {:p}...", session.handle);
-        switchboard.connect(session);
+        switchboard.connect(*session);
         Ok(())
     })
 }
