@@ -22,12 +22,12 @@ use svc_agent::mqtt::{
 };
 use svc_agent::{AccountId, AgentId, Subscription};
 
-const MQTT_BROKER_URL: &str = "localhost:1883";
+const MQTT_BROKER_URL: &str = "vernemq:1883";
 const AGENT_VERSION: &str = "v1";
 const AGENT_ID_LABEL: &str = "alpha";
 const JANUS_ACCOUNT_LABEL: &str = "janus-gateway";
 const CONFERENCE_ACCOUNT_LABEL: &str = "conference";
-const AUDIENCE: &str = "svc.example.org";
+const AUDIENCE: &str = "dev.svc.example.org";
 const PLUGIN: &str = "janus.plugin.conference";
 const RESPONSE_TIMEOUT: u64 = 5;
 const RESPONSE_SKIP_MAX: usize = 10;
