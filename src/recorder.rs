@@ -421,6 +421,15 @@ impl Recorder {
             janus_err!("[CONFERENCE] Failed to set pipeline state to NULL");
         }
     }
+
+    pub fn delete_record(&self) -> Result<(), RecorderError> {
+        let records_dir = self.get_records_dir();
+
+        fs::remove_dir_all(records_dir).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => RecorderError::RecordingMissing,
+            _ => RecorderError::IoError(err),
+        })
+    }
 }
 
 unsafe impl Sync for Recorder {}
