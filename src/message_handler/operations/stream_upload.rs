@@ -26,32 +26,11 @@ impl<C> super::Operation<C> for Request {
             self.id
         );
 
-        let error = |status: StatusCode, err: Error| {
-            SvcError::builder()
-                .kind(
-                    "stream_upload_error",
-                    "Error uploading a recording of stream",
-                )
-                .status(status)
-                .detail(&err.to_string())
-                .build()
-        };
-
-        let internal_error = |err| error(StatusCode::INTERNAL_SERVER_ERROR, err);
-
         let app = app!().map_err(internal_error)?;
         let mut recorder = Recorder::new(&app.config.recordings, &self.id);
 
         janus_info!("[CONFERENCE] Upload task started. Finishing record");
-        let (started_at, time) = recorder.finish_record().map_err(|err| match err {
-            RecorderError::InternalError(cause) => internal_error(cause),
-            RecorderError::IoError(cause) => {
-                internal_error(format_err!("Recorder IO error: {}", cause))
-            }
-            RecorderError::RecordingMissing => {
-                error(StatusCode::NOT_FOUND, err_msg("Record not found"))
-            }
-        })?;
+        let (started_at, time) = recorder.finish_record().map_err(recorder_error)?;
 
         janus_info!("[CONFERENCE] Uploading record");
         let uploader = Uploader::new(app.config.uploading.clone())
@@ -63,7 +42,8 @@ impl<C> super::Operation<C> for Request {
             .upload_file(&path, &self.bucket, &self.object)
             .map_err(internal_error)?;
 
-        janus_info!("[CONFERENCE] Uploading finished");
+        janus_info!("[CONFERENCE] Uploading finished, deleting source files");
+        recorder.delete_record().map_err(recorder_error)?;
 
         Ok(Response {
             id: self.id.clone(),
@@ -75,5 +55,32 @@ impl<C> super::Operation<C> for Request {
 
     fn is_handle_jsep(&self) -> bool {
         false
+    }
+}
+
+fn error(status: StatusCode, err: Error) -> SvcError {
+    SvcError::builder()
+        .kind(
+            "stream_upload_error",
+            "Error uploading a recording of stream",
+        )
+        .status(status)
+        .detail(&err.to_string())
+        .build()
+}
+
+fn internal_error(err: Error) -> SvcError {
+    error(StatusCode::INTERNAL_SERVER_ERROR, err)
+}
+
+fn recorder_error(err: RecorderError) -> SvcError {
+    match err {
+        RecorderError::InternalError(cause) => internal_error(cause),
+        RecorderError::IoError(cause) => {
+            internal_error(format_err!("Recorder IO error: {}", cause))
+        }
+        RecorderError::RecordingMissing => {
+            error(StatusCode::NOT_FOUND, err_msg("Record not found"))
+        }
     }
 }
