@@ -26,8 +26,8 @@ rusoto_core = "0.40"
 rusoto_s3 = "0.40"
 s4 = { version = "0.0.*", default_features = false }
 http = "0.1"
-tokio-threadpool = "0.1"
-futures = "0.1"
+futures = { version = "0.3", features = ["thread-pool"] }
+futures-channel = "0.3"
 svc-error = { version = "0.1", features = ["sentry-extension"] }
 sentry = "0.17"
 

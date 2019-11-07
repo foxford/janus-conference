@@ -2,32 +2,12 @@
 
 #[macro_use]
 extern crate janus_plugin as janus;
-
-extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
-extern crate config;
-extern crate http;
-
 #[macro_use]
 extern crate lazy_static;
-extern crate atom;
-extern crate multimap;
-
-extern crate glib;
-extern crate gstreamer;
-extern crate gstreamer_app;
-extern crate gstreamer_base;
-extern crate gstreamer_pbutils;
-
-extern crate rusoto_core;
-extern crate rusoto_s3;
-extern crate s4;
-
 #[macro_use]
 extern crate failure;
-extern crate futures;
-extern crate tokio_threadpool;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
