@@ -1,12 +1,5 @@
 #[macro_use]
 extern crate failure;
-extern crate rand;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate rumqtt;
-extern crate serde_json;
-extern crate svc_agent;
 
 use std::time::Duration;
 

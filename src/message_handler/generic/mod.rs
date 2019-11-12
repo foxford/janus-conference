@@ -7,12 +7,11 @@ use std::marker::PhantomData;
 use std::sync::mpsc;
 
 use failure::{err_msg, Error};
-use futures::lazy;
+use futures::{executor::ThreadPool, future::lazy};
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
-use tokio_threadpool::ThreadPool;
 
 use self::response::{Payload as ResponsePayload, Response};
 use crate::jsep::{Jsep, JsepStore};
@@ -50,7 +49,7 @@ where
         let (tx, rx) = mpsc::sync_channel(10);
 
         Self {
-            thread_pool: ThreadPool::new(),
+            thread_pool: ThreadPool::new().expect("Failed to created thread pool"),
             tx,
             rx,
             router: PhantomData,
@@ -70,9 +69,8 @@ where
                     janus_info!("[CONFERENCE] Scheduling request handling");
                     let handler = handler.clone();
 
-                    self.thread_pool.spawn(lazy(move || {
+                    self.thread_pool.spawn_ok(lazy(move |_| {
                         handler.handle_request(operation, request);
-                        Ok(())
                     }));
                 }
                 Some(Message::Response(response)) => {
@@ -291,9 +289,9 @@ pub trait Sender<C> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
+    use std::sync::mpsc;
 
     use super::MessageHandlingLoop;
     use super::Router;
