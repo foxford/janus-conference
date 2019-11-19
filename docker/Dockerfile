@@ -52,6 +52,9 @@ COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
+
+# TODO: Before the next upgrade consider thsi task:
+#       https://burning-heart.atlassian.net/browse/ULMS-855
 ARG JANUS_GATEWAY_COMMIT='cd4607a59582e0c2b3214eacf9cf3102d2c962b4'
 
 RUN set -xe \
