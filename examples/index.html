@@ -1,25 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Janus client</title>
+    <style>
+      #video {
+        height: 320px;
+        width: 480px;
+      }
 
-<head>
-    <meta charset="UTF-8">
-    <title>Realtime communication with WebRTC</title>
-</head>
+      .btn-wrapper {
+        margin-bottom: 0.5em;
+      }
 
-<body>
-    <h1>Realtime communication with WebRTC</h1>
+      .btn {
+        background-color: #99cc99;
+        border: none;
+        color: #333333;
+        font-size: 20px;
+        height: 40px;
+        width: 480px;
+      }
 
-    <video autoplay style="height: 320px; width: 480px;" id="localVideo"></video>
-    <video autoplay style="height: 320px; width: 480px;" id="remoteVideo"></video>
+      .btn[disabled] {
+        background-color: #cccccc;
+      }
+    </style>
+  </head>
+  <body>
+    <video autoplay id="video"></video>
+
+    <div class="btn-wrapper"><button class="btn" id="startBtn">Start</button></div>
+    <div class="btn-wrapper"><button class="btn" id="joinBtn">Join</button></div>
+    <div class="btn-wrapper"><button class="btn" id="hangUpBtn" disabled>Hang up</button></div>
 
     <div>
-        <button id="publisherStartButton">Start translation</button>
-        <button id="listenerStartButton">Join translation</button>
-        <button id="hangupButton">Hang Up</button>
-        <button id="uploadButton">Upload</button>
+      <p>Connection state: <span id="connectionStateIndicator">null</span></p>
+      <p>Signaling state: <span id="signalingStateIndicator">null</span></p>
+      <p>ICE gathering state: <span id="iceGatheringStateIndicator">null</span></p>
     </div>
 
-    <script src="client.js"></script>
-</body>
-
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script type="text/javascript" src="main.js"></script>
+  </body>
 </html>
