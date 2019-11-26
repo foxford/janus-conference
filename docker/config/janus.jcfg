@@ -1,16 +1,16 @@
-    
 general: {
   configs_folder = "/opt/janus/etc/janus"
   plugins_folder = "/opt/janus/lib/janus/plugins"
   transports_folder = "/opt/janus/lib/janus/transports"
   events_folder = "/opt/janus/lib/janus/events"
-  debug_level = 5
+  debug_level = 4
   debug_timestamps = true
   admin_secret = "12345"
   session_timeout = 0
   opaqueid_in_api = true
 }
 media: {
+  max_nack_queue = 0
   rtp_port_range = "30000-30099"
   no_media_timer = 10
 }
