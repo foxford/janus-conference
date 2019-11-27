@@ -5,7 +5,7 @@ general: {
   events_folder = "/opt/janus/lib/janus/events"
   debug_level = 4
   debug_timestamps = true
-  admin_secret = "12345"
+  admin_secret = "janusoverlord"
   session_timeout = 0
   opaqueid_in_api = true
 }

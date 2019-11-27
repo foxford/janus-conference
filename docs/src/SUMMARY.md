@@ -3,6 +3,7 @@
 - [Overview](overview.md)
 - [API](api.md)
     - [Intro](api.intro.md)
+    - [agent.leave](api.agent.leave.md)
     - [stream.create](api.stream.create.md)
     - [stream.read](api.stream.read.md)
     - [stream.upload](api.stream.upload.md)

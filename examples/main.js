@@ -17,6 +17,11 @@ const CONSTRAINTS = { audio: true, video: { width: 1280, height: 720 } };
 
 class JanusClient {
   constructor() {
+    this._reset();
+  }
+
+  _reset() {
+    if (this.client) this.client.end();
     this.client = null;
     this.sessionId = null;
     this.handleId = null;
@@ -38,11 +43,13 @@ class JanusClient {
           if (err) return reject(err);
 
           let sessionResponse = await this._makeRequest({ janus: 'create' });
-          this.sessionId = sessionResponse.data.id;
+          if (sessionResponse.status !== 'replied') reject(sessionResponse);
+          this.sessionId = sessionResponse.payload.data.id;
           console.debug(`Session ID: ${this.sessionId}`);
 
           let handleResponse = await this._makeRequest({ janus: 'attach', plugin: PLUGIN });
-          this.handleId = handleResponse.data.id;
+          if (handleResponse.status !== 'replied') reject(handleResponse);
+          this.handleId = handleResponse.payload.data.id;
           console.debug(`Handle ID: ${this.handleId}`);
 
           resolve();
@@ -65,12 +72,17 @@ class JanusClient {
     payload.transaction = Math.random().toString(36).substr(2, 10);
 
     let promise = new Promise((resolve, reject) => {
-      this.pendingTransactions[payload.transaction] = { resolve, reject, janus: payload.janus };
-
-      setTimeout(() => {
+      let timeoutHandle = setTimeout(() => {
         delete this.pendingTransactions[payload.transaction];
         reject(`Request with transaction ID ${payload.transaction} timed out`);
       }, 60000);
+
+      this.pendingTransactions[payload.transaction] = {
+        resolve,
+        reject,
+        janus: payload.janus,
+        timeoutHandle
+      };
     });
 
     console.debug('Outgoing message', payload);
@@ -86,23 +98,23 @@ class JanusClient {
   }
 
   async callMethod(method, payload, jsep) {
-    let response = await this.makeRequest({
-      janus: 'message',
-      body: { ...payload, method },
-      jsep
-    });
+    let requestPayload = { janus: 'message', body: { ...payload, method } };
+    if (jsep) requestPayload.jsep = jsep;
 
-    let data = response.plugindata.data;
+    let result = await this.makeRequest(requestPayload);
+    if (result.status !== 'replied') return;
+    
+    let data = result.payload.plugindata.data;
 
     if (data.status === '200') {
-      return response;
+      return result.payload;
     } else {
-      throw `${data.status} ${data.title}: ${data.detail} (${response.transaction})`;
+      throw `${data.status} ${data.title}: ${data.detail} (${result.payload.transaction})`;
     }
   }
 
-  disconnect() {
-    this.client.end();
+  async disconnect() {
+    await this.callMethod('agent.leave', {});
   }
 
   _handleMessage(_topic, payloadBytes, _packet) {
@@ -114,7 +126,14 @@ class JanusClient {
       if (payload.janus === 'ack' && janus === 'message') return;
 
       delete this.pendingTransactions[payload.transaction];
-      payload.janus === 'error' ? reject(payload) : resolve(payload);
+      payload.janus === 'error' ? reject(payload) : resolve({ status: 'replied', payload });
+    } else if (['detached', 'hangup'].indexOf(payload.janus) !== -1) {
+      for (let { resolve, timeoutHandle } of Object.values(this.pendingTransactions)) {
+        clearInterval(timeoutHandle);
+        resolve({ status: 'detached' });
+      }
+
+      this._reset()
     }
   }
 }
@@ -170,9 +189,9 @@ class Peer {
     this.peerConnection.setRemoteDescription(sdpAnswer);
   }
 
-  hangUp() {
-    this.janusClient.disconnect();
+  async hangUp() {
     this.peerConnection.close();
+    await this.janusClient.disconnect();
     this._resetPeerConnection();
   }
 
@@ -209,33 +228,36 @@ document.addEventListener('DOMContentLoaded', function () {
   peer.onIceGatheringStateChange = state => iceGatheringStateIndicator.innerHTML = state;
 
   startBtn.addEventListener('click', async function () {
+    startBtn.disabled = true;
+    joinBtn.disabled = true;
+
     const stream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS);
     videoEl.srcObject = stream;
 
     peer.addStream(stream);
-    peer.attach(true);
+    await peer.attach(true);
 
-    startBtn.disabled = true;
-    joinBtn.disabled = true;
     hangUpBtn.disabled = false;
   });
 
   joinBtn.addEventListener('click', async function () {
-    peer.onStreamAdded = stream => videoEl.srcObject = stream;
-    peer.attach(false);
-
     startBtn.disabled = true;
     joinBtn.disabled = true;
+
+    peer.onStreamAdded = stream => videoEl.srcObject = stream;
+    await peer.attach(false);
+
     hangUpBtn.disabled = false;
   });
 
   hangUpBtn.addEventListener('click', async function () {
+    hangUpBtn.disabled = true;
+
     videoEl.srcObject = null;
-    peer.hangUp();
+    await peer.hangUp();
 
     startBtn.disabled = false;
-    joinBtn.disabled = false;
-    hangUpBtn.disabled = true;
+    joinBtn.disabled = false;    
 
     connectionStateIndicator.innerHTML = 'null';
     signalingStateIndicator.innerHTML = 'null';

@@ -48,6 +48,7 @@ impl Switchboard {
 
         self.sessions.retain(|s| s.handle != session.handle);
         self.publishers_subscribers.remove_value(session);
+        janus_callbacks::end_session(session);
         Ok(())
     }
 
@@ -135,32 +136,28 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&self, timeout: &Duration) -> Result<(), Error> {
-        for (stream_id, publisher) in self.publishers.iter() {
-            match Self::vacuum_publisher(&publisher, timeout) {
+    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<(), Error> {
+        for (stream_id, publisher) in self.publishers.clone().iter() {
+            match self.vacuum_publisher(&publisher, timeout) {
                 Ok(false) => (),
-                Ok(true) => {
-                    janus_info!(
-                        "[CONFERENCE] Publisher {:p} timed out on stream {}; PeerConnection closed",
-                        publisher.handle,
-                        stream_id
-                    );
-                }
-                Err(err) => {
-                    janus_err!(
-                        "[CONFERENCE] Failed to vacuum publisher {:p} on stream {}: {}",
-                        publisher.handle,
-                        stream_id,
-                        err
-                    );
-                }
+                Ok(true) => janus_info!(
+                    "[CONFERENCE] Publisher {:p} timed out on stream {}; PeerConnection closed",
+                    publisher.handle,
+                    stream_id
+                ),
+                Err(err) => janus_err!(
+                    "[CONFERENCE] Failed to vacuum publisher {:p} on stream {}: {}",
+                    publisher.handle,
+                    stream_id,
+                    err
+                ),
             }
         }
 
         Ok(())
     }
 
-    fn vacuum_publisher(publisher: &Session, timeout: &Duration) -> Result<bool, Error> {
+    fn vacuum_publisher(&mut self, publisher: &Session, timeout: &Duration) -> Result<bool, Error> {
         let last_rtp_packet_timestamp = match publisher.last_rtp_packet_timestamp()? {
             Some(timestamp) => timestamp,
             None => return Ok(false),
@@ -171,7 +168,7 @@ impl Switchboard {
             .map_err(|err| format_err!("{}", err))?;
 
         if duration >= *timeout {
-            janus_callbacks::close_pc(&publisher);
+            self.disconnect(publisher)?;
             Ok(true)
         } else {
             Ok(false)
@@ -210,7 +207,7 @@ impl LockedSwitchboard {
         janus_info!("[CONFERENCE] Vacuum thread is alive.");
 
         loop {
-            self.with_read_lock(|switchboard| switchboard.vacuum_publishers(&interval))
+            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
                 .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
 
             thread::sleep(interval);
