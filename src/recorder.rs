@@ -176,7 +176,7 @@ impl Recorder {
 
         let full_record_path = self.get_full_record_path().to_string_lossy().into_owned();
 
-        janus_info!(
+        janus_verb!(
             "[CONFERENCE] Concatenating full record to {}",
             full_record_path
         );
@@ -202,11 +202,11 @@ impl Recorder {
             &full_record_path,
         ]);
 
-        janus_info!("[CONFERENCE] {:?}", command);
+        janus_verb!("[CONFERENCE] {:?}", command);
         let status = command.status()?;
 
         if status.success() {
-            janus_info!(
+            janus_verb!(
                 "[CONFERENCE] Full record concatenated to {}",
                 full_record_path
             );
@@ -224,7 +224,7 @@ impl Recorder {
     }
 
     pub fn start_recording(&mut self) -> Result<(), Error> {
-        janus_info!("[CONFERENCE] Initialize recording pipeline");
+        janus_verb!("[CONFERENCE] Initialize recording pipeline");
 
         // Build pipeline by description and get necessary elements' and pads' handles.
         let pipeline = gst::parse_launch(RECORDING_PIPELINE)?

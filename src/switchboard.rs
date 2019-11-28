@@ -33,7 +33,7 @@ impl Switchboard {
     }
 
     pub fn disconnect(&mut self, session: &Session) -> Result<(), Error> {
-        janus_info!("[CONFERENCE] Disconnecting session {}.", **session);
+        janus_info!("[CONFERENCE] Disconnecting session {:p}.", session.handle);
 
         let ids: Vec<String> = self
             .publishers
@@ -61,7 +61,7 @@ impl Switchboard {
     }
 
     pub fn attach_recorder(&mut self, publisher: Arc<Session>, recorder: Recorder) {
-        janus_info!("[CONFERENCE] Attaching recorder for {}", **publisher);
+        janus_info!("[CONFERENCE] Attaching recorder for {:p}", publisher.handle);
         self.recorders.insert(publisher, recorder);
     }
 
@@ -71,9 +71,9 @@ impl Switchboard {
 
     pub fn create_stream(&mut self, id: &str, publisher: Arc<Session>) {
         janus_info!(
-            "[CONFERENCE] Creating stream {}. Publisher: {}",
+            "[CONFERENCE] Creating stream {}. Publisher: {:p}",
             id,
-            **publisher
+            publisher.handle
         );
 
         let maybe_old_publisher = self.publishers.remove(id);
@@ -93,9 +93,9 @@ impl Switchboard {
         match self.publishers.get(id) {
             Some(publisher) => {
                 janus_info!(
-                    "[CONFERENCE] Joining to stream {}. Subscriber: {}",
+                    "[CONFERENCE] Joining to stream {}. Subscriber: {:p}",
                     id,
-                    **subscriber
+                    subscriber.handle
                 );
 
                 self.publishers_subscribers
@@ -204,7 +204,7 @@ impl LockedSwitchboard {
     }
 
     pub fn vacuum_publishers_loop(&self, interval: Duration) {
-        janus_info!("[CONFERENCE] Vacuum thread is alive.");
+        janus_verb!("[CONFERENCE] Vacuum thread is alive");
 
         loop {
             self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))

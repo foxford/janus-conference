@@ -23,7 +23,7 @@ impl Config {
 
         let p = p.to_string_lossy();
 
-        janus_info!("[CONFERENCE] Reading config located at {}", p);
+        janus_verb!("[CONFERENCE] Reading config located at {}", p);
 
         let mut parser = config::Config::default();
         parser.merge(config::File::new(&p, config::FileFormat::Toml))?;
