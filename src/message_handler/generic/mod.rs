@@ -66,7 +66,7 @@ where
             match self.rx.recv().ok() {
                 None => (),
                 Some(Message::Request(operation, request)) => {
-                    janus_info!("[CONFERENCE] Scheduling request handling");
+                    janus_verb!("[CONFERENCE] Scheduling request handling");
                     let handler = handler.clone();
 
                     self.thread_pool.spawn_ok(lazy(move |_| {
@@ -89,12 +89,12 @@ where
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
     ) -> Result<(), Error> {
-        janus_info!("[CONFERENCE] Scheduling request");
+        janus_verb!("[CONFERENCE] Scheduling request");
         let request = Request::new(context, &transaction);
 
         match utils::jansson_to_serde::<R>(payload) {
             Ok(route) => {
-                janus_info!("[CONFERENCE] Pushing request to queue");
+                janus_verb!("[CONFERENCE] Pushing request to queue");
 
                 let request = match jsep_offer {
                     None => request,
@@ -110,7 +110,7 @@ where
                     .map_err(|err| format_err!("Failed to schedule request: {}", err))
             }
             Err(err) => {
-                janus_info!("[CONFERENCE] Bad request. Couldn't determine method");
+                janus_err!("[CONFERENCE] Bad request. Couldn't determine method");
 
                 let err = SvcError::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -144,7 +144,7 @@ where
 
     /// Handles JSEP if needed, calls the operation and schedules its response.
     fn handle_request(&self, operation: Box<dyn Operation<C>>, request: Request<C>) {
-        janus_info!("[CONFERENCE] Handling request");
+        janus_verb!("[CONFERENCE] Handling request");
 
         let jsep_answer_result = match operation.is_handle_jsep() {
             true => Self::handle_jsep(&request),
@@ -153,7 +153,7 @@ where
 
         match jsep_answer_result {
             Ok(jsep_answer) => {
-                janus_info!("[CONFERENCE] Calling operation");
+                janus_verb!("[CONFERENCE] Calling operation");
 
                 let payload = match operation.call(&request) {
                     Ok(payload) => JsonValue::from(payload).into(),
@@ -174,7 +174,7 @@ where
 
     /// Serializes the response and pushes it to Janus for sending to the client.
     fn handle_response(&self, response: Response<C>) {
-        janus_info!("[CONFERENCE] Handling response");
+        janus_verb!("[CONFERENCE] Handling response");
 
         let jsep_answer = match response.jsep_answer() {
             None => None,
@@ -187,7 +187,7 @@ where
             },
         };
 
-        janus_info!("[CONFERENCE] Sending response ({})", response.transaction());
+        janus_verb!("[CONFERENCE] Sending response ({})", response.transaction());
 
         JanssonValue::try_from(response.payload())
             .and_then(|payload| {
@@ -215,7 +215,7 @@ where
             Some(jsep_answer) => response.set_jsep_answer(jsep_answer),
         };
 
-        janus_info!(
+        janus_verb!(
             "[CONFERENCE] Scheduling response ({})",
             response.transaction()
         );
@@ -268,7 +268,7 @@ where
 
     fn notify_error(&self, err: &SvcError) {
         if err.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
-            janus_info!("[CONFERENCE] Sending error to Sentry");
+            janus_verb!("[CONFERENCE] Sending error to Sentry");
 
             sentry::send(err.to_owned()).unwrap_or_else(|err| {
                 janus_err!("[CONFERENCE] Failed to send error to Sentry: {}", err);
@@ -289,9 +289,9 @@ pub trait Sender<C> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    use std::sync::mpsc;
 
     use super::MessageHandlingLoop;
     use super::Router;

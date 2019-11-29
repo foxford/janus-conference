@@ -83,7 +83,6 @@ pub fn push_event(
             } else {
                 janus_info!("[CONFERENCE] About to dereference session (push_event)");
                 let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
-
                 JanusError::from(res)
             }
         }

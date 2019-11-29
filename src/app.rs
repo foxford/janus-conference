@@ -31,7 +31,7 @@ pub struct App {
 impl App {
     pub fn init(config: Config) -> Result<(), Error> {
         config.sentry.as_ref().map(|sentry_config| {
-            janus_info!("[CONFERENCE] Initializing Sentry");
+            janus_verb!("[CONFERENCE] Initializing Sentry");
             svc_error::extension::sentry::init(sentry_config)
         });
 
