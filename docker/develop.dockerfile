@@ -39,6 +39,7 @@ RUN set -xe \
         libgstrtspserver-1.0-dev \
         wget \
         gdb \
+        libasan3 \
     && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
         && cd "${PAHO_MQTT_BUILD_DIR}" \
         && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
@@ -77,6 +78,8 @@ ARG JANUS_GATEWAY_COMMIT='cd4607a59582e0c2b3214eacf9cf3102d2c962b4'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
+    && CFLAGS="-g -fsanitize=address -fno-omit-frame-pointer" \
+    && LDFLAGS="-lasan" \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
     && git clone 'https://github.com/meetecho/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
