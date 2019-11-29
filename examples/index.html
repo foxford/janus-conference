@@ -1,25 +1,86 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Janus client</title>
+    <style>
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 14px;
+      }
 
-<head>
-    <meta charset="UTF-8">
-    <title>Realtime communication with WebRTC</title>
-</head>
+      .content {
+        width: 480px;
+      }
 
-<body>
-    <h1>Realtime communication with WebRTC</h1>
+      #video {
+        border: 1px solid #cccccc;
+        height: 320px;
+        margin-bottom: 0.5em;
+        width: 100%;
+      }
 
-    <video autoplay style="height: 320px; width: 480px;" id="localVideo"></video>
-    <video autoplay style="height: 320px; width: 480px;" id="remoteVideo"></video>
+      .btn-wrapper {
+        margin-bottom: 0.5em;
+      }
 
-    <div>
-        <button id="publisherStartButton">Start translation</button>
-        <button id="listenerStartButton">Join translation</button>
-        <button id="hangupButton">Hang Up</button>
-        <button id="uploadButton">Upload</button>
-    </div>
+      .btn {
+        background-color: #99cc99;
+        border: none;
+        color: #333333;
+        font-size: 20px;
+        height: 40px;
+        width: 100%;
+      }
 
-    <script src="client.js"></script>
-</body>
+      .btn[disabled] {
+        background-color: #cccccc;
+      }
 
+      dl.state {
+        border-top: 1px solid #cccccc;
+        padding-top: 0.5em;
+      }
+
+      dl.state>dt {
+        float: left;
+        margin-bottom: 0.5em;
+      }
+
+      dl.state>dd {
+        margin-left: 13em;
+        margin-bottom: 0.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="content">
+      <video autoplay id="video"></video>
+
+      <div class="btn-wrapper"><button class="btn" id="connectBtn">Connect</button></div>
+      <div class="btn-wrapper"><button class="btn" id="startBtn" disabled>Start</button></div>
+      <div class="btn-wrapper"><button class="btn" id="joinBtn" disabled>Join</button></div>
+      <div class="btn-wrapper"><button class="btn" id="hangUpBtn" disabled>Hang up</button></div>
+
+      <dl class="state">
+        <dt>MQTT:</dt>
+        <dd id="mqttStateIndicator">not connected</dd>
+        <dt>Session ID:</dt>
+        <dd id="sessionIdIndicator">null</dd>
+        <dt>Client handle ID:</dt>
+        <dd id="clientHandleIdIndicator">null</dd>
+        <dt>Peer handle ID:</dt>
+        <dd id="peerHandleIdIndicator">null</dd>
+        <dt>Connection state:</dt>
+        <dd id="connectionStateIndicator">null</dd>
+        <dt>Signaling state:</dt>
+        <dd id="signalingStateIndicator">null</dd>
+        <dt>ICE gathering state:</dt>
+        <dd id="iceGatheringStateIndicator">null</dd>
+      </dl>
+    </main>
+
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script type="text/javascript" src="main.js"></script>
+  </body>
 </html>
