@@ -150,6 +150,28 @@ extern "C" fn handle_message(
         }
     };
 
+    janus_info!("[CONFERENCE] Got session for handle {:p}", handle);
+
+    match session.closing().read() {
+        Ok(value) => {
+            if *value {
+                janus_warn!("[CONFERENCE] Skipping handling a message sent to a closing session");
+                let err = c_str!("Skipping handling a message sent to a closing session");
+                return PluginResult::error(err).into_raw();
+            }
+        }
+        Err(err) => {
+            janus_err!(
+                "[CONFERENCE] Failed to acquire closing flag mutex (handle_message): {}",
+                err
+            );
+            let err = c_str!("Failed acquire closing flag mutex");
+            return PluginResult::error(err).into_raw();
+        }
+    }
+
+    janus_info!("[CONFERENCE] Closing check OK for {:p}", handle);
+
     let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
         Ok(transaction) => String::from(transaction),
         Err(err) => {

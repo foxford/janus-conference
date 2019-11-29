@@ -1,6 +1,6 @@
 use std::sync::{
     atomic::{AtomicIsize, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
 };
 
 use std::time::SystemTime;
@@ -13,8 +13,11 @@ use crate::jsep::{Jsep, JsepStore};
 #[derive(Debug)]
 pub struct SessionState {
     fir_seq: AtomicIsize,
+    // TODO: Do we really need Arc? The struct doesn't derive Clone & is under Arc already.
+    //       Also get rid of pub field in favor of getter/setter.
     pub offer: Arc<Mutex<Option<Jsep>>>,
     last_rtp_packet_timestamp: Arc<Mutex<Option<SystemTime>>>,
+    closing: RwLock<bool>,
 }
 
 impl SessionState {
@@ -23,6 +26,7 @@ impl SessionState {
             fir_seq: AtomicIsize::new(0),
             offer: Arc::new(Mutex::new(None)),
             last_rtp_packet_timestamp: Arc::new(Mutex::new(None)),
+            closing: RwLock::new(false),
         }
     }
 
@@ -44,6 +48,10 @@ impl SessionState {
             .map_err(|err| format_err!("{}", err))? = value;
 
         Ok(())
+    }
+
+    pub fn closing(&self) -> &RwLock<bool> {
+        &self.closing
     }
 }
 

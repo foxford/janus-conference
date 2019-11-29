@@ -13,6 +13,7 @@ pub fn init(callbacks: *mut PluginCallbacks) {
         let callbacks = callbacks
             .as_ref()
             .expect("Invalid callbacks ptr from Janus Core");
+
         CALLBACKS = Some(callbacks);
     }
 }
@@ -22,11 +23,43 @@ fn acquire_callbacks() -> &'static PluginCallbacks {
 }
 
 pub fn relay_rtp(session: &Session, video: c_int, buf: &mut [i8]) {
-    (acquire_callbacks().relay_rtp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+    // A parallel thread may have deleted the raw handle pointer while we want to send in a packet.
+    // Skip this packet safely since the client has already gone away.
+    match session.closing().read() {
+        Ok(value) => {
+            if *value {
+                janus_warn!("[CONFERENCE] Skipping relaying an RTP packet to a closing session");
+            } else {
+                let callback = acquire_callbacks().relay_rtp;
+                janus_info!("[CONFERENCE] About to dereference session (relay_rtp)");
+                callback(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+            }
+        }
+        Err(err) => janus_err!(
+            "[CONFERENCE] Failed to acquire closing flag mutex (relay_rtp): {}",
+            err
+        ),
+    }
 }
 
 pub fn relay_rtcp(session: &Session, video: c_int, buf: &mut [i8]) {
-    (acquire_callbacks().relay_rtcp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+    // A parallel thread may have deleted the raw handle pointer while we want to send in a packet.
+    // Skip this packet safely since the client has already gone away.
+    match session.closing().read() {
+        Ok(value) => {
+            if *value {
+                janus_warn!("[CONFERENCE] Skipping relaying an RTCP packet to a closing session");
+            } else {
+                let callback = acquire_callbacks().relay_rtcp;
+                janus_info!("[CONFERENCE] About to dereference session (relay_rtcp)");
+                callback(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+            }
+        }
+        Err(err) => janus_err!(
+            "[CONFERENCE] Failed to acquire closing flag mutex (relay_rtcp): {}",
+            err
+        ),
+    }
 }
 
 pub fn push_event(
@@ -40,9 +73,28 @@ pub fn push_event(
     let body = unwrap_jansson_option_mut(body);
     let jsep = unwrap_jansson_option_mut(jsep);
 
-    let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
+    // There may be some responses in the queue while the handle pointer may be already deleted.
+    // Skip this messages safely since the client has already gone away.
+    match session.closing().read() {
+        Ok(value) => {
+            if *value {
+                janus_warn!("[CONFERENCE] Skipping pushing an event to a closing session");
+                return Ok(());
+            } else {
+                janus_info!("[CONFERENCE] About to dereference session (push_event)");
+                let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
 
-    JanusError::from(res)
+                JanusError::from(res)
+            }
+        }
+        Err(err) => {
+            janus_err!(
+                "[CONFERENCE] Failed to acquire closing flag mutex (push_event): {}",
+                err
+            );
+            return Ok(());
+        }
+    }
 }
 
 fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue {
