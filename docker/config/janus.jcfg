@@ -3,7 +3,7 @@ general: {
   plugins_folder = "/opt/janus/lib/janus/plugins"
   transports_folder = "/opt/janus/lib/janus/transports"
   events_folder = "/opt/janus/lib/janus/events"
-  debug_level = 4
+  debug_level = 5
   debug_timestamps = true
   admin_secret = "janusoverlord"
   session_timeout = 0

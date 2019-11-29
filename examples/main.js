@@ -17,14 +17,8 @@ const CONSTRAINTS = { audio: true, video: { width: 1280, height: 720 } };
 
 class JanusClient {
   constructor() {
-    this._reset();
-  }
-
-  _reset() {
-    if (this.client) this.client.end();
     this.client = null;
-    this.sessionId = null;
-    this.handleId = null;
+    this.clientHandleId = null;
     this.pendingTransactions = {};
   }
 
@@ -38,37 +32,50 @@ class JanusClient {
 
       this.client.on('message', this._handleMessage.bind(this))
 
-      this.client.on('connect', async () => {
+      this.client.on('connect', async evt => {
+        if (this.onConnect) this.onConnect(evt);
+
         this.client.subscribe(SUBSCRIBE_TOPIC, async err => {
           if (err) return reject(err);
-
-          let sessionResponse = await this._makeRequest({ janus: 'create' });
-          if (sessionResponse.status !== 'replied') reject(sessionResponse);
-          this.sessionId = sessionResponse.payload.data.id;
-          console.debug(`Session ID: ${this.sessionId}`);
-
-          let handleResponse = await this._makeRequest({ janus: 'attach', plugin: PLUGIN });
-          if (handleResponse.status !== 'replied') reject(handleResponse);
-          this.handleId = handleResponse.payload.data.id;
-          console.debug(`Handle ID: ${this.handleId}`);
-
+          await this._initSession();
+          await this._initclientHandle();
           resolve();
         });
       });
+
+      this.client.on('offline', evt => this.onDisconnect && this.onDisconnect(evt));
     });
   }
 
-  async makeRequest(payload) {
-    if (this.handleId) {
-      return this._makeRequest(payload);
-    } else {
-      throw 'Expected to await on `JanusClient#connect` before making any requests';
-    }
+  async _initSession() {
+    let sessionResponse = await this._makeRequest({ janus: 'create' });
+    if (sessionResponse.status !== 'replied') throw sessionResponse;
+    this.sessionId = sessionResponse.payload.data.id;
+    console.debug(`Session ID: ${this.sessionId}`);
+    if (this.onSessionIdChange) this.onSessionIdChange(this.sessionId);
   }
 
-  async _makeRequest(payload) {
+  async _initclientHandle() {
+    this.clientHandleId = await this.createHandle();;
+    console.debug(`client handle ID: ${this.clientHandleId}`);
+    if (this.onclientHandleIdChange) this.onclientHandleIdChange(this.clientHandleId);
+  }
+
+  async createHandle() {
+    let handleResponse = await this._makeRequest({ janus: 'attach', plugin: PLUGIN });
+    if (handleResponse.status !== 'replied') throw handleResponse;
+    return handleResponse.payload.data.id
+  }
+
+  async _makeRequest(payload, handleId) {
     if (this.sessionId) payload.session_id = this.sessionId;
-    if (this.handleId) payload.handle_id = this.handleId;
+
+    if (handleId) {
+      payload.handle_id = handleId;
+    } else if (this.clientHandleId) {
+      payload.handle_id = this.handleclientId;
+    }
+
     payload.transaction = Math.random().toString(36).substr(2, 10);
 
     let promise = new Promise((resolve, reject) => {
@@ -97,11 +104,11 @@ class JanusClient {
     return promise;
   }
 
-  async callMethod(method, payload, jsep) {
+  async callMethod(method, handleId, payload, jsep) {
     let requestPayload = { janus: 'message', body: { ...payload, method } };
     if (jsep) requestPayload.jsep = jsep;
 
-    let result = await this.makeRequest(requestPayload);
+    let result = await this._makeRequest(requestPayload, handleId);
     if (result.status !== 'replied') return;
     
     let data = result.payload.plugindata.data;
@@ -113,8 +120,12 @@ class JanusClient {
     }
   }
 
-  async disconnect() {
-    await this.callMethod('agent.leave', {});
+  async trickle(candidate, handleId) {
+    return await this._makeRequest({ janus: 'trickle', candidate }, handleId);
+  }
+
+  async leave(handleId) {
+    return await this.callMethod('agent.leave', handleId, {});
   }
 
   _handleMessage(_topic, payloadBytes, _packet) {
@@ -127,22 +138,27 @@ class JanusClient {
 
       delete this.pendingTransactions[payload.transaction];
       payload.janus === 'error' ? reject(payload) : resolve({ status: 'replied', payload });
-    } else if (['detached', 'hangup'].indexOf(payload.janus) !== -1) {
-      for (let { resolve, timeoutHandle } of Object.values(this.pendingTransactions)) {
-        clearInterval(timeoutHandle);
-        resolve({ status: 'detached' });
-      }
-
-      this._reset()
+    } else if (payload.janus === 'hangup') {
+      this._resetPendingTransactions();
     }
+  }
+
+  _resetPendingTransactions() {
+    for (let { resolve, timeoutHandle } of Object.values(this.pendingTransactions)) {
+      clearInterval(timeoutHandle);
+      resolve({ status: 'detached' });
+    }
+
+    this.pendingTransactions = {};
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 class Peer {
-  constructor() {
-    this.janusClient = null;
+  constructor(janusClient) {
+    this.janusClient = janusClient;
+    this.handleId = null;
     this._resetPeerConnection();
   }
 
@@ -151,11 +167,11 @@ class Peer {
 
     this.peerConnection.onicecandidate = evt => {
       if (!evt.candidate) return;
-      this.janusClient.makeRequest({ janus: 'trickle', candidate: evt.candidate });
+      this.janusClient.trickle(evt.candidate, this.handleId);
     }
 
-    this.peerConnection.onaddstream = evt => {
-      this.onStreamAdded && this.onStreamAdded(evt.stream);
+    this.peerConnection.ontrack = evt => {
+      this.onStreamAdded && this.onStreamAdded(evt.streams[0]);
     }
 
     this.peerConnection.onconnectionstatechange = evt => {
@@ -176,14 +192,14 @@ class Peer {
   }
 
   async attach(isPublisher) {
-    this.janusClient = new JanusClient();
-    await this.janusClient.connect();
+    this._setHandleId(await this.janusClient.createHandle());
 
     let sdpOffer = await this._createSdpOffer(isPublisher);
     this.peerConnection.setLocalDescription(sdpOffer);
 
     let method = isPublisher ? 'stream.create' : 'stream.read';
-    let response = await this.janusClient.callMethod(method, { id: STREAM_ID }, sdpOffer);
+    let payload = { id: STREAM_ID };
+    let response = await this.janusClient.callMethod(method, this.handleId, payload, sdpOffer);
 
     let sdpAnswer = new RTCSessionDescription(response.jsep);
     this.peerConnection.setRemoteDescription(sdpAnswer);
@@ -191,8 +207,14 @@ class Peer {
 
   async hangUp() {
     this.peerConnection.close();
-    await this.janusClient.disconnect();
+    await this.janusClient.leave(this.handleId);
+    this._setHandleId(null);
     this._resetPeerConnection();
+  }
+
+  _setHandleId(handleId) {
+    this.handleId = handleId;
+    if (this.onHandleIdChange) this.onHandleIdChange(handleId);
   }
 
   async _createSdpOffer(isPublisher) {
@@ -205,7 +227,7 @@ class Peer {
           resolve(sdpOffer);
         },
         err => reject(err),
-        { offerToReceiveVideo: !isPublisher }
+        { offerToReceiveVideo: !isPublisher, offerToReceiveAudio: !isPublisher }
       );
     });
   }
@@ -213,20 +235,45 @@ class Peer {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
+  // Getting DOM elements
   let videoEl = document.getElementById('video');
+  let connectBtn = document.getElementById('connectBtn');
   let startBtn = document.getElementById('startBtn');
   let joinBtn = document.getElementById('joinBtn');
   let hangUpBtn = document.getElementById('hangUpBtn');
+  let mqttStateIndicator = document.getElementById('mqttStateIndicator');
+  let sessionIdIndicator = document.getElementById('sessionIdIndicator');
+  let clientHandleIdIndicator = document.getElementById('clientHandleIdIndicator');
+  let peerHandleIdIndicator = document.getElementById('peerHandleIdIndicator');
   let connectionStateIndicator = document.getElementById('connectionStateIndicator');
   let signalingStateIndicator = document.getElementById('signalingStateIndicator');
   let iceGatheringStateIndicator = document.getElementById('iceGatheringStateIndicator');
 
-  let peer = new Peer();
-  peer.onConnectionStateChange = state => connectionStateIndicator.innerHTML = state;
-  peer.onSignalingStateChange = state => signalingStateIndicator.innerHTML = state;
-  peer.onIceGatheringStateChange = state => iceGatheringStateIndicator.innerHTML = state;
+  let peer;
 
+  // Connect button click
+  connectBtn.addEventListener('click', async function () {
+    connectBtn.disabled = true;
+
+    let janusClient = new JanusClient();
+    janusClient.onConnect = () => mqttStateIndicator.innerHTML = 'connected';
+    janusClient.onDisconnect = () => mqttStateIndicator.innerHTML = 'not connected';
+    janusClient.onSessionIdChange = id => sessionIdIndicator.innerHTML = id || 'null';
+    janusClient.onclientHandleIdChange = id => clientHandleIdIndicator.innerHTML = id || 'null';
+    await janusClient.connect();
+
+    peer = new Peer(janusClient);
+    peer.onHandleIdChange = id => peerHandleIdIndicator.innerHTML = id || 'null';
+    peer.onConnectionStateChange = state => connectionStateIndicator.innerHTML = state;
+    peer.onSignalingStateChange = state => signalingStateIndicator.innerHTML = state;
+    peer.onIceGatheringStateChange = state => iceGatheringStateIndicator.innerHTML = state;
+
+    startBtn.disabled = false;
+    joinBtn.disabled = false;
+  });
+
+  // Start button click
   startBtn.addEventListener('click', async function () {
     startBtn.disabled = true;
     joinBtn.disabled = true;
@@ -240,6 +287,7 @@ document.addEventListener('DOMContentLoaded', function () {
     hangUpBtn.disabled = false;
   });
 
+  // Join button click
   joinBtn.addEventListener('click', async function () {
     startBtn.disabled = true;
     joinBtn.disabled = true;
@@ -250,6 +298,7 @@ document.addEventListener('DOMContentLoaded', function () {
     hangUpBtn.disabled = false;
   });
 
+  // Hang up button click
   hangUpBtn.addEventListener('click', async function () {
     hangUpBtn.disabled = true;
 

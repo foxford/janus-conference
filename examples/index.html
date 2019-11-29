@@ -4,9 +4,20 @@
     <meta charset="UTF-8" />
     <title>Janus client</title>
     <style>
-      #video {
-        height: 320px;
+      body {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 14px;
+      }
+
+      .content {
         width: 480px;
+      }
+
+      #video {
+        border: 1px solid #cccccc;
+        height: 320px;
+        margin-bottom: 0.5em;
+        width: 100%;
       }
 
       .btn-wrapper {
@@ -19,26 +30,55 @@
         color: #333333;
         font-size: 20px;
         height: 40px;
-        width: 480px;
+        width: 100%;
       }
 
       .btn[disabled] {
         background-color: #cccccc;
       }
+
+      dl.state {
+        border-top: 1px solid #cccccc;
+        padding-top: 0.5em;
+      }
+
+      dl.state>dt {
+        float: left;
+        margin-bottom: 0.5em;
+      }
+
+      dl.state>dd {
+        margin-left: 13em;
+        margin-bottom: 0.5em;
+      }
     </style>
   </head>
   <body>
-    <video autoplay id="video"></video>
+    <main class="content">
+      <video autoplay id="video"></video>
 
-    <div class="btn-wrapper"><button class="btn" id="startBtn">Start</button></div>
-    <div class="btn-wrapper"><button class="btn" id="joinBtn">Join</button></div>
-    <div class="btn-wrapper"><button class="btn" id="hangUpBtn" disabled>Hang up</button></div>
+      <div class="btn-wrapper"><button class="btn" id="connectBtn">Connect</button></div>
+      <div class="btn-wrapper"><button class="btn" id="startBtn" disabled>Start</button></div>
+      <div class="btn-wrapper"><button class="btn" id="joinBtn" disabled>Join</button></div>
+      <div class="btn-wrapper"><button class="btn" id="hangUpBtn" disabled>Hang up</button></div>
 
-    <div>
-      <p>Connection state: <span id="connectionStateIndicator">null</span></p>
-      <p>Signaling state: <span id="signalingStateIndicator">null</span></p>
-      <p>ICE gathering state: <span id="iceGatheringStateIndicator">null</span></p>
-    </div>
+      <dl class="state">
+        <dt>MQTT:</dt>
+        <dd id="mqttStateIndicator">not connected</dd>
+        <dt>Session ID:</dt>
+        <dd id="sessionIdIndicator">null</dd>
+        <dt>Client handle ID:</dt>
+        <dd id="clientHandleIdIndicator">null</dd>
+        <dt>Peer handle ID:</dt>
+        <dd id="peerHandleIdIndicator">null</dd>
+        <dt>Connection state:</dt>
+        <dd id="connectionStateIndicator">null</dd>
+        <dt>Signaling state:</dt>
+        <dd id="signalingStateIndicator">null</dd>
+        <dt>ICE gathering state:</dt>
+        <dd id="iceGatheringStateIndicator">null</dd>
+      </dl>
+    </main>
 
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script type="text/javascript" src="main.js"></script>

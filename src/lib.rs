@@ -119,18 +119,22 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
         let session = unsafe { Session::associate(handle, initial_state) }
             .map_err(|err| format_err!("Session associate error: {}", err))?;
 
-        janus_info!("[CONFERENCE] Initializing session {:p}...", session.handle);
+        janus_info!(
+            "[CONFERENCE] Initializing session for handle {:p}",
+            session.handle
+        );
+
         switchboard.connect(session);
         Ok(())
     })
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, _error: *mut c_int) {
-    janus_info!("[CONFERENCE] Destroying Conference session {:p}...", handle);
+    janus_info!("[CONFERENCE] Destroying session for handle {:p}", handle);
 }
 
-extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
-    janus_info!("[CONFERENCE] Querying session...");
+extern "C" fn query_session(handle: *mut PluginSession) -> *mut RawJanssonValue {
+    janus_info!("[CONFERENCE] Querying session for handle {:p}", handle);
     std::ptr::null_mut()
 }
 
@@ -140,7 +144,7 @@ extern "C" fn handle_message(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
-    janus_info!("[CONFERENCE] Handling message on {:p}.", handle);
+    janus_info!("[CONFERENCE] Handling message on {:p}", handle);
 
     let session = match unsafe { Session::from_ptr(handle) } {
         Ok(session) => session,
@@ -149,6 +153,28 @@ extern "C" fn handle_message(
             return PluginResult::error(c_str!("Failed to restore session state")).into_raw();
         }
     };
+
+    janus_info!("[CONFERENCE] Got session for handle {:p}", handle);
+
+    match session.closing().read() {
+        Ok(value) => {
+            if *value {
+                janus_warn!("[CONFERENCE] Skipping handling a message sent to a closing session");
+                let err = c_str!("Skipping handling a message sent to a closing session");
+                return PluginResult::error(err).into_raw();
+            }
+        }
+        Err(err) => {
+            janus_err!(
+                "[CONFERENCE] Failed to acquire closing flag mutex (handle_message): {}",
+                err
+            );
+            let err = c_str!("Failed acquire closing flag mutex");
+            return PluginResult::error(err).into_raw();
+        }
+    }
+
+    janus_info!("[CONFERENCE] Closing check OK for {:p}", handle);
 
     let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
         Ok(transaction) => String::from(transaction),
@@ -190,10 +216,7 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
         Ok(())
     })?;
 
-    janus_info!(
-        "[CONFERENCE] WebRTC media is now available on {:p}.",
-        handle
-    );
+    janus_info!("[CONFERENCE] WebRTC media is now available on {:p}", handle);
     Ok(())
 }
 
@@ -202,7 +225,7 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 }
 
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
+    janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}", handle);
 
     let app = app!()?;
     let session = unsafe { Session::from_ptr(handle) }?;

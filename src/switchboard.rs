@@ -48,7 +48,7 @@ impl Switchboard {
 
         self.sessions.retain(|s| s.handle != session.handle);
         self.publishers_subscribers.remove_value(session);
-        janus_callbacks::end_session(session);
+        janus_callbacks::end_session(session)
         Ok(())
     }
 
