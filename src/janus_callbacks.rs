@@ -1,5 +1,6 @@
 use std::os::raw::{c_char, c_int};
 
+use failure::Error;
 use janus::{JanssonValue, JanusError, JanusResult, PluginCallbacks, RawJanssonValue};
 
 use super::PLUGIN;
@@ -49,6 +50,18 @@ fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue 
         .unwrap_or(std::ptr::null_mut())
 }
 
-pub fn close_pc(session: &Session) {
-    (acquire_callbacks().close_pc)(session.as_ptr());
+pub fn end_session(session: &Session) -> Result<(), Error> {
+    // Mark the session closing to ensure we won't dereference raw handle pointer when
+    // Janus might have deleted it and cause segfault.
+    match session.closing().write() {
+        Ok(mut closing) => *closing = true,
+        Err(err) => bail!(
+            "Failed to acquire closing flag mutex (end_session): {}",
+            err
+        ),
+    }
+
+    janus_info!("[CONFERENCE] About to dereference session (end_session)");
+    (acquire_callbacks().end_session)(session.as_ptr());
+    Ok(())
 }

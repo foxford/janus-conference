@@ -124,6 +124,10 @@ class JanusClient {
     return await this._makeRequest({ janus: 'trickle', candidate }, handleId);
   }
 
+  async leave(handleId) {
+    return await this.callMethod('agent.leave', handleId, {});
+  }
+
   _handleMessage(_topic, payloadBytes, _packet) {
     let payload = JSON.parse(payloadBytes);
     console.debug('Incoming message', payload);
@@ -203,6 +207,7 @@ class Peer {
 
   async hangUp() {
     this.peerConnection.close();
+    await this.janusClient.leave(this.handleId);
     this._setHandleId(null);
     this._resetPeerConnection();
   }
