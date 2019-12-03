@@ -4,9 +4,9 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
-pub trait Operation<C>: fmt::Debug + Send {
+pub trait Operation: fmt::Debug + Send {
     /// Operation implementation
-    fn call(&self, request: &super::Request<C>) -> self::Result;
+    fn call(&self, request: &super::Request) -> self::Result;
 
     /// Whether MessageHandler should process SDP offer/answer before calling this operation.
     fn is_handle_jsep(&self) -> bool;

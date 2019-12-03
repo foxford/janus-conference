@@ -3,31 +3,32 @@ use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::recorder::{Recorder, RecorderError};
+use crate::switchboard::StreamId;
 use crate::uploader::Uploader;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: String,
+    id: StreamId,
     bucket: String,
     object: String,
 }
 
 #[derive(Serialize)]
 struct Response {
-    id: String,
+    id: StreamId,
     started_at: u64,
     time: Vec<(u64, u64)>,
 }
 
-impl<C> super::Operation<C> for Request {
-    fn call(&self, _request: &super::Request<C>) -> super::OperationResult {
+impl super::Operation for Request {
+    fn call(&self, _request: &super::Request) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.upload operation with id {}",
             self.id
         );
 
         let app = app!().map_err(internal_error)?;
-        let mut recorder = Recorder::new(&app.config.recordings, &self.id);
+        let mut recorder = Recorder::new(&app.config.recordings, self.id);
 
         janus_info!("[CONFERENCE] Upload task started. Finishing record");
         let (started_at, time) = recorder.finish_record().map_err(recorder_error)?;
@@ -46,7 +47,7 @@ impl<C> super::Operation<C> for Request {
         recorder.delete_record().map_err(recorder_error)?;
 
         Ok(Response {
-            id: self.id.clone(),
+            id: self.id,
             started_at,
             time,
         }

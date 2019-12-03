@@ -12,6 +12,8 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_pbutils::prelude::*;
 
+use crate::switchboard::StreamId;
+
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub directory: String,
@@ -79,7 +81,7 @@ pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
     receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
     recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
-    stream_id: String,
+    stream_id: StreamId,
     filename: Option<String>,
     save_root_dir: String,
 }
@@ -101,14 +103,14 @@ pub struct Recorder {
 /// for that.
 
 impl Recorder {
-    pub fn new(config: &Config, stream_id: &str) -> Self {
+    pub fn new(config: &Config, stream_id: StreamId) -> Self {
         let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
 
         Self {
             sender,
             receiver_for_recorder_thread: Some(recv),
             recorder_thread_handle: None,
-            stream_id: stream_id.to_owned(),
+            stream_id,
             save_root_dir: config.directory.clone(),
             filename: None,
         }
@@ -358,7 +360,7 @@ impl Recorder {
     fn get_records_dir(&self) -> PathBuf {
         let mut path = PathBuf::new();
         path.push(&self.save_root_dir);
-        path.push(&self.stream_id);
+        path.push(&self.stream_id.to_string());
 
         path
     }

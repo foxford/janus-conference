@@ -16,7 +16,7 @@ services:
     links:
       - vernemq
     working_dir: /build
-    entrypoint: /build/docker/entrypoint.sh
+    entrypoint: /bin/bash # /build/docker/entrypoint.sh
     stdin_open: true
     tty: true
   vernemq:

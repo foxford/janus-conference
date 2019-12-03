@@ -10,8 +10,8 @@ pub enum Jsep {
 }
 
 impl Jsep {
-    /// Parses JSEP SDP offer and returns it along with the answer.
-    pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<(Self, Self)>, Error> {
+    /// Parses JSEP SDP offer and returns the answer.
+    pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<Self>, Error> {
         let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
             .map_err(|err| format_err!("Failed to deserialize JSEP: {}", err))?;
 
@@ -32,10 +32,6 @@ impl Jsep {
 
         janus_verb!("[CONFERENCE] answer: {:?}", answer_sdp);
         let answer = Jsep::Answer { sdp: answer_sdp };
-        Ok(Some((offer, answer)))
+        Ok(Some(answer))
     }
-}
-
-pub trait JsepStore {
-    fn set_jsep(&self, jsep: Jsep) -> Result<(), Error>;
 }

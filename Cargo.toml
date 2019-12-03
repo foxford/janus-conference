@@ -30,6 +30,7 @@ futures = { version = "0.3", features = ["thread-pool"] }
 futures-channel = "0.3"
 svc-error = { version = "0.1", features = ["sentry-extension"] }
 sentry = "0.17"
+uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [dev-dependencies]
 rand = "0.6"
