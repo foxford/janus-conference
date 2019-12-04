@@ -5,9 +5,10 @@ services:
       context: ..
       dockerfile: ./docker/develop.dockerfile
     ports:
-      - "7088:7088"
-      - "8188:8188"
-      - "30000-30020:30000-30020"
+      - "2000:2000"               # gdbserver
+      - "7088:7088"               # HTTP transport
+      - "8188:8188"               # WebSocket transport
+      - "30000-30020:30000-30020" # WebRTC UDP
     volumes:
       - ..:/build
       - ../recordings:/recordings
