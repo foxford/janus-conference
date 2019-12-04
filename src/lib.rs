@@ -16,8 +16,8 @@ use std::slice;
 
 use failure::Error;
 use janus::{
-    JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult,
-    PluginSession, RawJanssonValue, RawPluginResult,
+    session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
+    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 #[macro_use]
@@ -38,7 +38,7 @@ mod uploader;
 
 use app::App;
 use conf::Config;
-use switchboard::{Session, SessionId};
+use switchboard::SessionId;
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -91,10 +91,15 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
         let session_id = SessionId::new();
         janus_verb!("[CONFERENCE] Initializing session {}", session_id);
 
-        let session = unsafe { Session::associate(handle, session_id) }
+        // WARNING: If this variable gets droppped the memory will be freed by C.
+        //          Any future calls to `SessionWrapper::from_ptr` will return an invalid result
+        //          which will cause segfault on drop.
+        //          To prevent this we have to store this variable as is and make sure it won't
+        //          be dropped until there're no callbacks are possible to call for this handle.
+        let session = unsafe { SessionWrapper::associate(handle, session_id) }
             .map_err(|err| format_err!("Session associate error: {}", err))?;
 
-        switchboard.connect(&session)?;
+        switchboard.connect(session)?;
         Ok(())
     })
 }
@@ -299,7 +304,7 @@ extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_i
 ///////////////////////////////////////////////////////////////////////////////
 
 fn session_id(handle: *mut PluginSession) -> Result<SessionId, Error> {
-    match unsafe { Session::from_ptr(handle) } {
+    match unsafe { SessionWrapper::from_ptr(handle) } {
         Ok(session) => Ok(**session),
         Err(err) => bail!("Failed to get session: {}", err),
     }

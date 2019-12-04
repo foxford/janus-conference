@@ -17,7 +17,7 @@ use crate::recorder::Recorder;
 
 pub type AgentId = String;
 pub type StreamId = Uuid;
-pub type Session = SessionWrapper<SessionId>;
+pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
 pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -126,10 +126,10 @@ impl Switchboard {
         }
     }
 
-    pub fn connect(&mut self, session: &Session) -> Result<(), Error> {
-        let session_id = **session;
+    pub fn connect(&mut self, session: Session) -> Result<(), Error> {
+        let session_id = ***session;
         janus_verb!("[CONFERENCE] Connecting session {}", session_id);
-        let locked_session = Arc::new(Mutex::new(session.to_owned()));
+        let locked_session = Arc::new(Mutex::new(session));
         self.sessions.insert(session_id, locked_session);
         self.states.insert(session_id, SessionState::new());
         Ok(())
@@ -137,14 +137,6 @@ impl Switchboard {
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<(), Error> {
         janus_verb!("[CONFERENCE] Disconnecting session {}", id);
-
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to get mutex for session {}: {}", id, err))?;
-
-        janus_callbacks::end_session(&session);
-        drop(session);
 
         let stream_ids: Vec<StreamId> = self
             .publishers
@@ -310,7 +302,11 @@ impl Switchboard {
         };
 
         if is_timed_out {
-            self.disconnect(publisher)?;
+            let session = self.session(publisher)?.lock().map_err(|err| {
+                format_err!("Failed to acquire session mutex {}: {}", publisher, err)
+            })?;
+
+            janus_callbacks::end_session(&session);
         }
 
         Ok(is_timed_out)
