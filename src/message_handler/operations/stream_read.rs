@@ -1,27 +1,23 @@
-use std::sync::Arc;
-
 use failure::Error;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::session::Session;
+use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: String,
+    id: StreamId,
 }
 
 #[derive(Serialize)]
 struct Response {}
 
-impl super::Operation<Arc<Session>> for Request {
-    fn call(&self, request: &super::Request<Arc<Session>>) -> super::OperationResult {
+impl super::Operation for Request {
+    fn call(&self, request: &super::Request) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.read operation with id {}",
             self.id
         );
-
-        let session = request.context();
 
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
@@ -34,7 +30,9 @@ impl super::Operation<Arc<Session>> for Request {
         app!()
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
-            .with_write_lock(|mut switchboard| switchboard.join_stream(&self.id, session.clone()))
+            .with_write_lock(|mut switchboard| {
+                switchboard.join_stream(self.id, request.session_id())
+            })
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
         Ok(Response {}.into())

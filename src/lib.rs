@@ -13,12 +13,11 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::time::SystemTime;
 
 use failure::Error;
 use janus::{
-    JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin, PluginCallbacks, PluginResult,
-    PluginSession, RawJanssonValue, RawPluginResult,
+    session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
+    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 #[macro_use]
@@ -30,7 +29,6 @@ mod jsep;
 mod message_handler;
 mod recorder;
 mod serde;
-mod session;
 mod switchboard;
 #[macro_use]
 mod utils;
@@ -40,39 +38,7 @@ mod uploader;
 
 use app::App;
 use conf::Config;
-use session::{Session, SessionState};
-
-fn send_pli<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
-    for publisher in publishers {
-        let mut pli = janus::rtcp::gen_pli();
-        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut pli);
-    }
-}
-
-fn send_fir<T: IntoIterator<Item = U>, U: AsRef<Session>>(publishers: T) {
-    for publisher in publishers {
-        let mut seq = publisher.as_ref().incr_fir_seq() as i32;
-        let mut fir = janus::rtcp::gen_fir(&mut seq);
-        janus_callbacks::relay_rtcp(publisher.as_ref(), 1, &mut fir);
-    }
-}
-
-fn report_error(res: Result<(), Error>) {
-    match res {
-        Ok(_) => {}
-        Err(err) => {
-            janus_err!("[CONFERENCE] {}", err);
-        }
-    }
-}
-
-fn init_config(config_path: *const c_char) -> Result<Config, Error> {
-    let config_path = unsafe { CStr::from_ptr(config_path) };
-    let config_path = config_path.to_str()?;
-    let config_path = Path::new(config_path);
-
-    Ok(Config::from_path(config_path)?)
-}
+use switchboard::SessionId;
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -101,8 +67,12 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     0
 }
 
-extern "C" fn destroy() {
-    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
+fn init_config(config_path: *const c_char) -> Result<Config, Error> {
+    let config_path = unsafe { CStr::from_ptr(config_path) };
+    let config_path = config_path.to_str()?;
+    let config_path = Path::new(config_path);
+
+    Ok(Config::from_path(config_path)?)
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -114,23 +84,24 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let initial_state = SessionState::new();
+        let session_id = SessionId::new();
+        janus_verb!("[CONFERENCE] Initializing session {}", session_id);
 
-        let session = unsafe { Session::associate(handle, initial_state) }
+        // WARNING: If this variable gets droppped the memory will be freed by C.
+        //          Any future calls to `SessionWrapper::from_ptr` will return an invalid result
+        //          which will cause segfault on drop.
+        //          To prevent this we have to store this variable as is and make sure it won't
+        //          be dropped until there're no callbacks are possible to call for this handle.
+        let session = unsafe { SessionWrapper::associate(handle, session_id) }
             .map_err(|err| format_err!("Session associate error: {}", err))?;
 
-        janus_info!("[CONFERENCE] Initializing session {:p}...", session.handle);
-        switchboard.connect(session);
+        switchboard.connect(session)?;
         Ok(())
     })
 }
 
-extern "C" fn destroy_session(handle: *mut PluginSession, _error: *mut c_int) {
-    janus_info!("[CONFERENCE] Destroying Conference session {:p}...", handle);
-}
-
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
-    janus_info!("[CONFERENCE] Querying session...");
+    janus_verb!("[CONFERENCE] Querying session");
     std::ptr::null_mut()
 }
 
@@ -140,39 +111,39 @@ extern "C" fn handle_message(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
-    janus_info!("[CONFERENCE] Handling message on {:p}.", handle);
-
-    let session = match unsafe { Session::from_ptr(handle) } {
-        Ok(session) => session,
+    match handle_message_impl(handle, transaction, message, jsep) {
+        Ok(()) => PluginResult::ok_wait(None).into_raw(),
         Err(err) => {
-            janus_err!("[CONFERENCE] Failed to restore session state: {}", err);
-            return PluginResult::error(c_str!("Failed to restore session state")).into_raw();
+            janus_err!("[CONFERENCE] Message handling error: {}", err);
+            PluginResult::error(c_str!("Failed to handle message")).into_raw()
         }
-    };
+    }
+}
+
+fn handle_message_impl(
+    handle: *mut PluginSession,
+    transaction: *mut c_char,
+    message: *mut RawJanssonValue,
+    jsep: *mut RawJanssonValue,
+) -> Result<(), Error> {
+    let session_id = session_id(handle)?;
+    janus_verb!("[CONFERENCE] Handling message on {}.", session_id);
 
     let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
         Ok(transaction) => String::from(transaction),
-        Err(err) => {
-            janus_err!("[CONFERENCE] Failed to serialize transaction: {}", err);
-            return PluginResult::error(c_str!("Failed serialize transaction")).into_raw();
-        }
+        Err(err) => bail!("Failed to serialize transaction: {}", err),
     };
 
     if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
 
-        let result = app!().map(|app| {
-            app.message_handling_loop
-                .schedule_request(session, &transaction, &json, jsep_offer)
-        });
-
-        if let Err(err) = result {
-            janus_err!("[CONFERENCE] Failed to schedule message handling: {}", err);
-            return PluginResult::error(c_str!("Failed to schedule message handling")).into_raw();
-        }
+        app!()?
+            .message_handling_loop
+            .schedule_request(session_id, &transaction, &json, jsep_offer)
+            .map_err(|err| format_err!("Failed to schedule message handling: {}", err))?;
     }
 
-    PluginResult::ok_wait(None).into_raw()
+    Ok(())
 }
 
 extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJanssonValue {
@@ -181,70 +152,19 @@ extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJa
         .into_raw()
 }
 
-fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    let app = app!()?;
-    let session = unsafe { Session::from_ptr(handle)? };
-
-    app.switchboard.with_read_lock(|switchboard| {
-        send_fir(switchboard.publisher_to(&session));
-        Ok(())
-    })?;
-
-    janus_info!(
-        "[CONFERENCE] WebRTC media is now available on {:p}.",
-        handle
-    );
-    Ok(())
-}
-
 extern "C" fn setup_media(handle: *mut PluginSession) {
     report_error(setup_media_impl(handle));
 }
 
-fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    janus_info!("[CONFERENCE] Hanging up WebRTC media on {:p}.", handle);
+fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let session_id = session_id(handle)?;
+        switchboard.publisher_to(session_id).map(send_fir);
 
-    let app = app!()?;
-    let session = unsafe { Session::from_ptr(handle) }?;
-    session.set_last_rtp_packet_timestamp(None)?;
-
-    app.switchboard
-        .with_write_lock(|mut switchboard| switchboard.disconnect(&session))
-}
-
-extern "C" fn hangup_media(handle: *mut PluginSession) {
-    report_error(hangup_media_impl(handle));
-}
-
-fn incoming_rtp_impl(
-    handle: *mut PluginSession,
-    video: c_int,
-    buf: *mut c_char,
-    len: c_int,
-) -> Result<(), Error> {
-    let app = app!()?;
-    let session = unsafe { Session::from_ptr(handle)? };
-    session.set_last_rtp_packet_timestamp(Some(SystemTime::now()))?;
-
-    app.switchboard.with_read_lock(|switchboard| {
-        let subscribers = switchboard.subscribers_to(&session);
-        let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
-
-        for subscriber in subscribers {
-            janus_callbacks::relay_rtp(subscriber, video, buf_slice);
-        }
-
-        let recorder = switchboard.recorder_for(&session);
-
-        if let Some(recorder) = recorder {
-            let is_video = match video {
-                0 => false,
-                _ => true,
-            };
-
-            let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
-            recorder.record_packet(buf, is_video)?;
-        }
+        janus_info!(
+            "[CONFERENCE] WebRTC media is now available for {}.",
+            session_id
+        );
 
         Ok(())
     })
@@ -254,28 +174,41 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c
     report_error(incoming_rtp_impl(handle, video, buf, len));
 }
 
-fn incoming_rtcp_impl(
+fn incoming_rtp_impl(
     handle: *mut PluginSession,
     video: c_int,
     buf: *mut c_char,
     len: c_int,
 ) -> Result<(), Error> {
     app!()?.switchboard.with_read_lock(|switchboard| {
-        let session = unsafe { Session::from_ptr(handle)? };
-        let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
+        let session_id = session_id(handle)?;
 
-        match video {
-            1 if janus::rtcp::has_pli(packet) => {
-                send_pli(switchboard.publisher_to(&session));
-            }
-            1 if janus::rtcp::has_fir(packet) => {
-                send_fir(switchboard.publisher_to(&session));
-            }
-            _ => {
-                for subscriber in switchboard.subscribers_to(&session) {
-                    janus_callbacks::relay_rtcp(subscriber, video, packet);
-                }
-            }
+        let state = switchboard.state(session_id)?;
+        state.touch_last_rtp_packet_timestamp()?;
+
+        let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+
+        for subscriber_id in switchboard.subscribers_to(session_id) {
+            let subscriber_session =
+                switchboard.session(*subscriber_id)?.lock().map_err(|err| {
+                    format_err!(
+                        "Failed to acquire subscriber session mutex id = {}: {}",
+                        subscriber_id,
+                        err
+                    )
+                })?;
+
+            janus_callbacks::relay_rtp(&subscriber_session, video, buf_slice);
+        }
+
+        if let Some(recorder) = state.recorder() {
+            let is_video = match video {
+                0 => false,
+                _ => true,
+            };
+
+            let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
+            recorder.record_packet(buf, is_video)?;
         }
 
         Ok(())
@@ -291,6 +224,43 @@ extern "C" fn incoming_rtcp(
     report_error(incoming_rtcp_impl(handle, video, buf, len));
 }
 
+fn incoming_rtcp_impl(
+    handle: *mut PluginSession,
+    video: c_int,
+    buf: *mut c_char,
+    len: c_int,
+) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let session_id = session_id(handle)?;
+        let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
+
+        match video {
+            1 if janus::rtcp::has_pli(packet) => {
+                switchboard.publisher_to(session_id).map(send_pli);
+            }
+            1 if janus::rtcp::has_fir(packet) => {
+                switchboard.publisher_to(session_id).map(send_fir);
+            }
+            _ => {
+                for subscriber in switchboard.subscribers_to(session_id) {
+                    let subscriber_session =
+                        switchboard.session(*subscriber)?.lock().map_err(|err| {
+                            format_err!(
+                                "Failed to acquire subscriber session mutex for id = {}: {}",
+                                subscriber,
+                                err
+                            )
+                        })?;
+
+                    janus_callbacks::relay_rtcp(&subscriber_session, video, packet);
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
 extern "C" fn incoming_data(
     _handle: *mut PluginSession,
     _label: *mut c_char,
@@ -301,8 +271,101 @@ extern "C" fn incoming_data(
 }
 
 extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_int) {
-    janus_info!("[CONFERENCE] slow link callback")
+    janus_info!("[CONFERENCE] Slow link")
 }
+
+extern "C" fn hangup_media(handle: *mut PluginSession) {
+    report_error(hangup_media_impl(handle));
+}
+
+fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let session_id = session_id(handle)?;
+        janus_info!("[CONFERENCE] Hanging up WebRTC media on {}.", session_id);
+
+        let session = switchboard.session(session_id)?.lock().map_err(|err| {
+            format_err!(
+                "Failed to acquire session mutex for id = {}: {}",
+                session_id,
+                err
+            )
+        })?;
+
+        janus_callbacks::end_session(&session);
+        Ok(())
+    })
+}
+
+extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
+    report_error(destroy_session_impl(handle, error));
+}
+
+fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<(), Error> {
+    let session_id = session_id(handle)?;
+    janus_verb!("[CONFERENCE] Destroying Conference session {}", session_id);
+
+    app!()?
+        .switchboard
+        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
+}
+
+extern "C" fn destroy() {
+    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+fn session_id(handle: *mut PluginSession) -> Result<SessionId, Error> {
+    match unsafe { SessionWrapper::from_ptr(handle) } {
+        Ok(session) => Ok(**session),
+        Err(err) => bail!("Failed to get session: {}", err),
+    }
+}
+
+fn send_pli(publisher: SessionId) {
+    report_error(send_pli_impl(publisher));
+}
+
+fn send_pli_impl(publisher: SessionId) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(move |switchboard| {
+        let session = switchboard.session(publisher)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        })?;
+
+        let mut pli = janus::rtcp::gen_pli();
+        janus_callbacks::relay_rtcp(&session, 1, &mut pli);
+        Ok(())
+    })
+}
+
+fn send_fir(publisher: SessionId) {
+    report_error(send_fir_impl(publisher));
+}
+
+fn send_fir_impl(publisher: SessionId) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(move |switchboard| {
+        let session = switchboard.session(publisher)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        })?;
+
+        let state = switchboard.state(publisher)?;
+        let mut seq = state.increment_fir_seq();
+        let mut fir = janus::rtcp::gen_fir(&mut seq);
+        janus_callbacks::relay_rtcp(&session, 1, &mut fir);
+        Ok(())
+    })
+}
+
+fn report_error(res: Result<(), Error>) {
+    match res {
+        Ok(_) => {}
+        Err(err) => {
+            janus_err!("[CONFERENCE] {}", err);
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {

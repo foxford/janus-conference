@@ -7,17 +7,18 @@ use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
 use super::request::Request;
+use crate::switchboard::SessionId;
 use crate::utils;
 
 #[derive(Debug)]
-pub struct Response<C> {
-    request: Request<C>,
+pub struct Response {
+    request: Request,
     payload: Payload,
     jsep_answer: Option<JsonValue>,
 }
 
-impl<C> Response<C> {
-    pub fn new(request: Request<C>, payload: Payload) -> Self {
+impl Response {
+    pub fn new(request: Request, payload: Payload) -> Self {
         Self {
             request,
             payload,
@@ -40,8 +41,8 @@ impl<C> Response<C> {
         self.jsep_answer.as_ref()
     }
 
-    pub fn context(&self) -> &C {
-        self.request.context()
+    pub fn session_id(&self) -> SessionId {
+        self.request.session_id()
     }
 
     pub fn transaction(&self) -> &str {

@@ -14,36 +14,34 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::{Payload as ResponsePayload, Response};
-use crate::jsep::{Jsep, JsepStore};
+use crate::jsep::Jsep;
+use crate::switchboard::SessionId;
 use crate::utils;
 
 pub use self::operation::{Operation, Result as OperationResult};
 pub use self::request::Request;
 
-pub trait Router<C>: serde::de::DeserializeOwned + Into<Box<dyn Operation<C>>> {}
+pub trait Router: serde::de::DeserializeOwned + Into<Box<dyn Operation>> {}
 
-enum Message<C> {
-    Request(Box<dyn Operation<C>>, Request<C>),
-    Response(Response<C>),
+enum Message {
+    Request(Box<dyn Operation>, Request),
+    Response(Response),
 }
 
-pub struct MessageHandlingLoop<C, R, S> {
+pub struct MessageHandlingLoop<R, S> {
     thread_pool: ThreadPool,
-    tx: mpsc::SyncSender<Message<C>>,
-    rx: mpsc::Receiver<Message<C>>,
+    tx: mpsc::SyncSender<Message>,
+    rx: mpsc::Receiver<Message>,
     router: PhantomData<R>,
     sender: S,
 }
 
-/// C is for request's context which is being passed into operation's call.
-///          Think of plugin handle session as concrete implementation.
 /// R is for Router. It's an enum that can convert into operation.
 /// S is for Sender. It actually sends the response.
-impl<C, R, S> MessageHandlingLoop<C, R, S>
+impl<R, S> MessageHandlingLoop<R, S>
 where
-    C: 'static + Clone + Send + JsepStore,
-    R: Router<C>,
-    S: 'static + Clone + Send + Sender<C>,
+    R: Router,
+    S: 'static + Clone + Send + Sender,
 {
     pub fn new(sender: S) -> Self {
         let (tx, rx) = mpsc::sync_channel(10);
@@ -60,7 +58,7 @@ where
     pub fn start(&self) {
         let tx = self.tx.to_owned();
         let sender = self.sender.to_owned();
-        let handler: MessageHandler<C, S> = MessageHandler::new(tx, sender);
+        let handler: MessageHandler<S> = MessageHandler::new(tx, sender);
 
         loop {
             match self.rx.recv().ok() {
@@ -84,13 +82,13 @@ where
     /// to the message handling queue.
     pub fn schedule_request(
         &self,
-        context: C,
+        session_id: SessionId,
         transaction: &str,
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
     ) -> Result<(), Error> {
         janus_info!("[CONFERENCE] Scheduling request");
-        let request = Request::new(context, &transaction);
+        let request = Request::new(session_id, &transaction);
 
         match utils::jansson_to_serde::<R>(payload) {
             Ok(route) => {
@@ -119,7 +117,7 @@ where
 
                 let tx = self.tx.to_owned();
                 let sender = self.sender.to_owned();
-                let handler: MessageHandler<C, S> = MessageHandler::new(tx, sender);
+                let handler: MessageHandler<S> = MessageHandler::new(tx, sender);
                 handler.schedule_response(request, err.into(), None);
                 Ok(())
             }
@@ -128,22 +126,18 @@ where
 }
 
 #[derive(Clone)]
-struct MessageHandler<C, S> {
-    tx: mpsc::SyncSender<Message<C>>,
+struct MessageHandler<S> {
+    tx: mpsc::SyncSender<Message>,
     sender: S,
 }
 
-impl<C, S> MessageHandler<C, S>
-where
-    C: Clone + JsepStore,
-    S: Sender<C>,
-{
-    pub fn new(tx: mpsc::SyncSender<Message<C>>, sender: S) -> Self {
+impl<S: Sender> MessageHandler<S> {
+    pub fn new(tx: mpsc::SyncSender<Message>, sender: S) -> Self {
         Self { tx, sender }
     }
 
     /// Handles JSEP if needed, calls the operation and schedules its response.
-    fn handle_request(&self, operation: Box<dyn Operation<C>>, request: Request<C>) {
+    fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
         janus_info!("[CONFERENCE] Handling request");
 
         let jsep_answer_result = match operation.is_handle_jsep() {
@@ -173,7 +167,7 @@ where
     }
 
     /// Serializes the response and pushes it to Janus for sending to the client.
-    fn handle_response(&self, response: Response<C>) {
+    fn handle_response(&self, response: Response) {
         janus_info!("[CONFERENCE] Handling response");
 
         let jsep_answer = match response.jsep_answer() {
@@ -192,7 +186,7 @@ where
         JanssonValue::try_from(response.payload())
             .and_then(|payload| {
                 self.sender.send(
-                    response.context(),
+                    response.session_id(),
                     response.transaction(),
                     Some(payload),
                     jsep_answer,
@@ -204,7 +198,7 @@ where
     /// Builds a response object for the reuqest and pushes it to the message handling queue.
     fn schedule_response(
         &self,
-        request: Request<C>,
+        request: Request,
         payload: ResponsePayload,
         jsep_answer: Option<JsonValue>,
     ) {
@@ -225,9 +219,8 @@ where
             .unwrap_or_else(|err| janus_err!("[CONFERENCE] Failed to schedule response: {}", err));
     }
 
-    /// Parses SDP offer, gets the answer, sets the offer to the request's context.
-    /// Returns the answer which is intended to send in the response.
-    fn handle_jsep(request: &Request<C>) -> Result<Option<JsonValue>, SvcError> {
+    /// Parses SDP offer, returns the answer which is intended to send in the response.
+    fn handle_jsep(request: &Request) -> Result<Option<JsonValue>, SvcError> {
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
                 .status(status)
@@ -242,21 +235,15 @@ where
 
         match negotiation_result {
             Ok(None) => Ok(None),
-            Ok(Some((offer, answer))) => {
-                if let Err(err) = request.context().set_jsep(offer) {
-                    return Err(error(StatusCode::INTERNAL_SERVER_ERROR, err));
+            Ok(Some(answer)) => match serde_json::to_value(answer) {
+                Ok(jsep) => Ok(Some(jsep)),
+                Err(err) => {
+                    return Err(error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format_err!("Failed to serialize JSEP answer: {}", err),
+                    ));
                 }
-
-                match serde_json::to_value(answer) {
-                    Ok(jsep) => Ok(Some(jsep)),
-                    Err(err) => {
-                        return Err(error(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format_err!("Failed to serialize JSEP answer: {}", err),
-                        ));
-                    }
-                }
-            }
+            },
             Err(err) => {
                 return Err(error(
                     StatusCode::BAD_REQUEST,
@@ -277,10 +264,10 @@ where
     }
 }
 
-pub trait Sender<C> {
+pub trait Sender {
     fn send(
         &self,
-        context: &C,
+        session_id: SessionId,
         transaction: &str,
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
@@ -289,27 +276,18 @@ pub trait Sender<C> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    use std::sync::mpsc;
+
+    use serde_json::json;
 
     use super::MessageHandlingLoop;
     use super::Router;
     use super::{Operation, OperationResult, Request};
     use crate::failure::Error;
     use crate::janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
-    use crate::jsep::{Jsep, JsepStore};
-
-    #[derive(Clone)]
-    struct TestContext {
-        response_message: String,
-    }
-
-    impl JsepStore for TestContext {
-        fn set_jsep(&self, _jsep: Jsep) -> Result<(), Error> {
-            Ok(())
-        }
-    }
+    use crate::switchboard::SessionId;
 
     #[derive(Clone, Debug, Deserialize)]
     struct PingRequest {}
@@ -317,12 +295,16 @@ mod tests {
     #[derive(Serialize)]
     struct PingResponse {
         message: String,
+        session_id: String,
     }
 
-    impl Operation<TestContext> for PingRequest {
-        fn call(&self, request: &Request<TestContext>) -> OperationResult {
-            let message = request.context().response_message.to_owned();
-            Ok(PingResponse { message }.into())
+    impl Operation for PingRequest {
+        fn call(&self, request: &Request) -> OperationResult {
+            Ok(PingResponse {
+                message: String::from("pong"),
+                session_id: request.session_id().to_string(),
+            }
+            .into())
         }
 
         fn is_handle_jsep(&self) -> bool {
@@ -337,18 +319,18 @@ mod tests {
         Ping(PingRequest),
     }
 
-    impl Into<Box<dyn Operation<TestContext>>> for TestRouter {
-        fn into(self) -> Box<dyn Operation<TestContext>> {
+    impl Into<Box<dyn Operation>> for TestRouter {
+        fn into(self) -> Box<dyn Operation> {
             match self {
                 TestRouter::Ping(op) => Box::new(op),
             }
         }
     }
 
-    impl Router<TestContext> for TestRouter {}
+    impl Router for TestRouter {}
 
     struct TestResponse {
-        context: TestContext,
+        session_id: SessionId,
         transaction: String,
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
@@ -366,17 +348,17 @@ mod tests {
         }
     }
 
-    impl super::Sender<TestContext> for TestSender {
+    impl super::Sender for TestSender {
         fn send(
             &self,
-            context: &TestContext,
+            session_id: SessionId,
             transaction: &str,
             payload: Option<JanssonValue>,
             jsep_answer: Option<JanssonValue>,
         ) -> Result<(), Error> {
             self.tx
                 .send(TestResponse {
-                    context: context.to_owned(),
+                    session_id,
                     transaction: transaction.to_owned(),
                     payload,
                     jsep_answer,
@@ -388,40 +370,42 @@ mod tests {
     #[test]
     fn handle_message() -> Result<(), Error> {
         let (sender, rx) = TestSender::new();
+        let session_id = SessionId::new();
 
         thread::spawn(move || {
-            let message_handling_loop: MessageHandlingLoop<TestContext, TestRouter, TestSender> =
+            let message_handling_loop: MessageHandlingLoop<TestRouter, TestSender> =
                 MessageHandlingLoop::new(sender);
 
             let json =
                 JanssonValue::from_str("{\"method\": \"ping\"}", JanssonDecodingFlags::empty())
                     .unwrap();
 
-            let ctx = TestContext {
-                response_message: String::from("pong"),
-            };
-
             message_handling_loop
-                .schedule_request(ctx, "txn", &json, None)
+                .schedule_request(session_id, "txn", &json, None)
                 .unwrap();
 
             message_handling_loop.start();
         });
 
         let response = rx.recv_timeout(Duration::from_secs(1))?;
-        assert_eq!(response.context.response_message, "pong");
+        assert_eq!(response.session_id, session_id);
         assert_eq!(response.transaction, "txn");
         assert!(response.jsep_answer.is_none());
 
         match response.payload {
             None => bail!("Missing payload"),
             Some(jansson_value) => {
-                let json_str = jansson_value.to_libcstring(JanssonEncodingFlags::empty());
-
-                assert_eq!(
-                    json_str.to_string_lossy(),
-                    "{\"message\": \"pong\", \"status\": \"200\"}"
+                let json_str = jansson_value.to_libcstring(
+                    JanssonEncodingFlags::JSON_COMPACT | JanssonEncodingFlags::JSON_PRESERVE_ORDER,
                 );
+
+                let expected_json = json!({
+                    "message": "pong",
+                    "session_id": session_id.to_string(),
+                    "status": "200"
+                });
+
+                assert_eq!(json_str.to_string_lossy(), expected_json.to_string());
             }
         }
 

@@ -1,28 +1,24 @@
-use std::sync::Arc;
-
 use failure::Error;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::recorder::Recorder;
-use crate::session::Session;
+use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: String,
+    id: StreamId,
 }
 
 #[derive(Serialize)]
 struct Response {}
 
-impl super::Operation<Arc<Session>> for Request {
-    fn call(&self, request: &super::Request<Arc<Session>>) -> super::OperationResult {
+impl super::Operation for Request {
+    fn call(&self, request: &super::Request) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.create operation with id {}",
             self.id
         );
-
-        let session = request.context();
 
         let internal_error = |err: Error| {
             SvcError::builder()
@@ -35,13 +31,14 @@ impl super::Operation<Arc<Session>> for Request {
         let app = app!().map_err(internal_error)?;
 
         app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.create_stream(&self.id, session.clone());
+            switchboard.create_stream(self.id, request.session_id())?;
 
             let mut start_recording = || {
                 if app.config.recordings.enabled {
-                    let mut recorder = Recorder::new(&app.config.recordings, &self.id);
+                    let mut recorder = Recorder::new(&app.config.recordings, self.id);
                     recorder.start_recording()?;
-                    switchboard.attach_recorder(session.clone(), recorder);
+                    janus_verb!("[CONFERENCE] Attaching recorder for {}", request.session_id());
+                    switchboard.state_mut(request.session_id())?.set_recorder(recorder);
                 }
 
                 Ok(())
@@ -49,7 +46,7 @@ impl super::Operation<Arc<Session>> for Request {
 
             start_recording().or_else(|err: Error| {
                 switchboard
-                    .remove_stream(&self.id)
+                    .remove_stream(self.id)
                     .map_err(|remove_err| {
                         format_err!(
                             "Failed to remove stream {}: {} while recovering from another error: {}",

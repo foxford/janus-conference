@@ -1,16 +1,18 @@
 use serde_json::Value as JsonValue;
 
+use crate::switchboard::SessionId;
+
 #[derive(Debug)]
-pub struct Request<C> {
-    context: C,
+pub struct Request {
+    session_id: SessionId,
     transaction: String,
     jsep_offer: Option<JsonValue>,
 }
 
-impl<C> Request<C> {
-    pub fn new(context: C, transaction: &str) -> Self {
+impl Request {
+    pub fn new(session_id: SessionId, transaction: &str) -> Self {
         Self {
-            context,
+            session_id,
             transaction: transaction.to_owned(),
             jsep_offer: None,
         }
@@ -23,8 +25,8 @@ impl<C> Request<C> {
         }
     }
 
-    pub fn context(&self) -> &C {
-        &self.context
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
     }
 
     pub fn transaction(&self) -> &str {

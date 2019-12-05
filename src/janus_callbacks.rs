@@ -3,7 +3,7 @@ use std::os::raw::{c_char, c_int};
 use janus::{JanssonValue, JanusError, JanusResult, PluginCallbacks, RawJanssonValue};
 
 use super::PLUGIN;
-use crate::session::Session;
+use crate::switchboard::Session;
 
 static mut CALLBACKS: Option<&PluginCallbacks> = None;
 
@@ -49,6 +49,6 @@ fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue 
         .unwrap_or(std::ptr::null_mut())
 }
 
-pub fn close_pc(session: &Session) {
-    (acquire_callbacks().close_pc)(session.as_ptr());
+pub fn end_session(session: &Session) {
+    (acquire_callbacks().end_session)(session.as_ptr());
 }

@@ -5,9 +5,10 @@ services:
       context: ..
       dockerfile: ./docker/develop.dockerfile
     ports:
-      - "7088:7088"
-      - "8188:8188"
-      - "30000-30020:30000-30020"
+      - "2000:2000"               # gdbserver
+      - "7088:7088"               # HTTP transport
+      - "8188:8188"               # WebSocket transport
+      - "30000-30020:30000-30020" # WebRTC UDP
     volumes:
       - ..:/build
       - ../recordings:/recordings
@@ -20,7 +21,7 @@ services:
     stdin_open: true
     tty: true
   vernemq:
-    image: netologygroup/mqtt-gateway:v0.12.0
+    image: netologygroup/mqtt-gateway:v0.12.2
     ports:
       - "1883:1883"
       - "8080:8080"
@@ -30,7 +31,5 @@ services:
       APP_STAT_ENABLED: 0
       APP_AGENT_LABEL: alpha
       APP_ACCOUNT_ID: mqtt-gateway.dev.svc.example.org
-    logging:
-      driver: none
 volumes:
   janus-conference-cargo: {}

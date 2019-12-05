@@ -1,11 +1,6 @@
 [general]
-vacuum_interval = 5
+vacuum_interval = 60
 
 [recordings]
 directory = "/recordings"
 enabled = true
-
-[sentry]
-dsn = "https://4b72fe1b5c45404eb252157a86785ac0@sentry.io/1541646"
-environment = "dev"
-server_name = "alpha"

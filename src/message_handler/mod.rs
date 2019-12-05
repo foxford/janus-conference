@@ -2,18 +2,15 @@ mod generic;
 mod operations;
 
 use std::ffi::CString;
-use std::sync::Arc;
 
 use failure::Error;
 use janus::JanssonValue;
 
 use self::generic::{MessageHandlingLoop as GenericLoop, Router, Sender};
 use crate::janus_callbacks;
-use crate::session::Session;
+use crate::switchboard::SessionId;
 
 pub use self::generic::{Operation, OperationResult, Request};
-
-pub type Context = Arc<Session>;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "method")]
@@ -26,8 +23,8 @@ pub enum Method {
     StreamUpload(operations::stream_upload::Request),
 }
 
-impl Into<Box<dyn Operation<Context>>> for Method {
-    fn into(self) -> Box<dyn Operation<Context>> {
+impl Into<Box<dyn Operation>> for Method {
+    fn into(self) -> Box<dyn Operation> {
         match self {
             Method::StreamCreate(op) => Box::new(op),
             Method::StreamRead(op) => Box::new(op),
@@ -36,7 +33,7 @@ impl Into<Box<dyn Operation<Context>>> for Method {
     }
 }
 
-impl Router<Context> for Method {}
+impl Router for Method {}
 
 #[derive(Clone)]
 pub struct JanusSender;
@@ -47,21 +44,29 @@ impl JanusSender {
     }
 }
 
-impl Sender<Context> for JanusSender {
+impl Sender for JanusSender {
     fn send(
         &self,
-        session: &Context,
+        session_id: SessionId,
         transaction: &str,
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
     ) -> Result<(), Error> {
-        CString::new(transaction.to_owned())
-            .map_err(Error::from)
-            .and_then(|transaction| {
-                janus_callbacks::push_event(&session, transaction.into_raw(), payload, jsep_answer)
-                    .map_err(Error::from)
-            })
+        app!()?.switchboard.with_read_lock(move |switchboard| {
+            let session = switchboard.session(session_id)?.lock().map_err(|err| {
+                format_err!(
+                    "Failed to acquire mutex for session {}: {}",
+                    session_id,
+                    err
+                )
+            })?;
+
+            let txn = CString::new(transaction.to_owned()).map_err(Error::from)?;
+
+            janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
+                .map_err(Error::from)
+        })
     }
 }
 
-pub type MessageHandlingLoop = GenericLoop<Context, Method, JanusSender>;
+pub type MessageHandlingLoop = GenericLoop<Method, JanusSender>;
