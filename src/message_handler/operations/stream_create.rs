@@ -3,12 +3,11 @@ use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::recorder::Recorder;
-use crate::switchboard::{AgentId, StreamId};
+use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
     id: StreamId,
-    agent_id: AgentId,
 }
 
 #[derive(Serialize)]
@@ -32,7 +31,7 @@ impl super::Operation for Request {
         let app = app!().map_err(internal_error)?;
 
         app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.create_stream(self.id, request.session_id(), self.agent_id.clone())?;
+            switchboard.create_stream(self.id, request.session_id())?;
 
             let mut start_recording = || {
                 if app.config.recordings.enabled {

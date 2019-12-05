@@ -75,10 +75,6 @@ fn init_config(config_path: *const c_char) -> Result<Config, Error> {
     Ok(Config::from_path(config_path)?)
 }
 
-extern "C" fn destroy() {
-    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
-}
-
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     if let Err(err) = create_session_impl(handle) {
         janus_err!("[CONFERENCE] {}", err);
@@ -102,19 +98,6 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
         switchboard.connect(session)?;
         Ok(())
     })
-}
-
-extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
-    report_error(destroy_session_impl(handle, error));
-}
-
-fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<(), Error> {
-    let session_id = session_id(handle)?;
-    janus_verb!("[CONFERENCE] Destroying Conference session {}", session_id);
-
-    app!()?
-        .switchboard
-        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
@@ -169,6 +152,10 @@ extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJa
         .into_raw()
 }
 
+extern "C" fn setup_media(handle: *mut PluginSession) {
+    report_error(setup_media_impl(handle));
+}
+
 fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
@@ -183,18 +170,8 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
     })
 }
 
-extern "C" fn setup_media(handle: *mut PluginSession) {
-    report_error(setup_media_impl(handle));
-}
-
-fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    let session_id = session_id(handle)?;
-    janus_info!("[CONFERENCE] Hanging up WebRTC media on {}.", session_id);
-    Ok(())
-}
-
-extern "C" fn hangup_media(handle: *mut PluginSession) {
-    report_error(hangup_media_impl(handle));
+extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
+    report_error(incoming_rtp_impl(handle, video, buf, len));
 }
 
 fn incoming_rtp_impl(
@@ -221,7 +198,7 @@ fn incoming_rtp_impl(
                     )
                 })?;
 
-            janus_callbacks::relay_rtp(&*subscriber_session, video, buf_slice);
+            janus_callbacks::relay_rtp(&subscriber_session, video, buf_slice);
         }
 
         if let Some(recorder) = state.recorder() {
@@ -238,8 +215,13 @@ fn incoming_rtp_impl(
     })
 }
 
-extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    report_error(incoming_rtp_impl(handle, video, buf, len));
+extern "C" fn incoming_rtcp(
+    handle: *mut PluginSession,
+    video: c_int,
+    buf: *mut c_char,
+    len: c_int,
+) {
+    report_error(incoming_rtcp_impl(handle, video, buf, len));
 }
 
 fn incoming_rtcp_impl(
@@ -270,22 +252,13 @@ fn incoming_rtcp_impl(
                             )
                         })?;
 
-                    janus_callbacks::relay_rtcp(&*subscriber_session, video, packet);
+                    janus_callbacks::relay_rtcp(&subscriber_session, video, packet);
                 }
             }
         }
 
         Ok(())
     })
-}
-
-extern "C" fn incoming_rtcp(
-    handle: *mut PluginSession,
-    video: c_int,
-    buf: *mut c_char,
-    len: c_int,
-) {
-    report_error(incoming_rtcp_impl(handle, video, buf, len));
 }
 
 extern "C" fn incoming_data(
@@ -298,7 +271,46 @@ extern "C" fn incoming_data(
 }
 
 extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_int) {
-    janus_info!("[CONFERENCE] slow link callback")
+    janus_info!("[CONFERENCE] Slow link")
+}
+
+extern "C" fn hangup_media(handle: *mut PluginSession) {
+    report_error(hangup_media_impl(handle));
+}
+
+fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let session_id = session_id(handle)?;
+        janus_info!("[CONFERENCE] Hanging up WebRTC media on {}.", session_id);
+
+        let session = switchboard.session(session_id)?.lock().map_err(|err| {
+            format_err!(
+                "Failed to acquire session mutex for id = {}: {}",
+                session_id,
+                err
+            )
+        })?;
+
+        janus_callbacks::end_session(&session);
+        Ok(())
+    })
+}
+
+extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
+    report_error(destroy_session_impl(handle, error));
+}
+
+fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<(), Error> {
+    let session_id = session_id(handle)?;
+    janus_verb!("[CONFERENCE] Destroying Conference session {}", session_id);
+
+    app!()?
+        .switchboard
+        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
+}
+
+extern "C" fn destroy() {
+    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
 }
 
 ///////////////////////////////////////////////////////////////////////////////

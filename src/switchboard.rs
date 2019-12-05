@@ -15,7 +15,6 @@ use crate::recorder::Recorder;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-pub type AgentId = String;
 pub type StreamId = Uuid;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
 pub type LockedSession = Arc<Mutex<Session>>;
@@ -43,7 +42,6 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     fir_seq: AtomicI32,
     last_rtp_packet_timestamp: AtomicU64,
-    agent_id: Option<AgentId>,
     recorder: Option<Recorder>,
 }
 
@@ -52,7 +50,6 @@ impl SessionState {
         Self {
             fir_seq: AtomicI32::new(0),
             last_rtp_packet_timestamp: AtomicU64::new(0),
-            agent_id: None,
             recorder: None,
         }
     }
@@ -84,11 +81,6 @@ impl SessionState {
 
         self.last_rtp_packet_timestamp.store(now, Ordering::Relaxed);
         Ok(())
-    }
-
-    fn set_agent_id(&mut self, agent_id: AgentId) -> &mut Self {
-        self.agent_id = Some(agent_id);
-        self
     }
 
     pub fn recorder(&self) -> Option<&Recorder> {
@@ -183,19 +175,12 @@ impl Switchboard {
             .map(|id| id.to_owned())
     }
 
-    pub fn create_stream(
-        &mut self,
-        id: StreamId,
-        publisher: SessionId,
-        agent_id: AgentId,
-    ) -> Result<(), Error> {
+    pub fn create_stream(&mut self, id: StreamId, publisher: SessionId) -> Result<(), Error> {
         janus_verb!(
             "[CONFERENCE] Creating stream {}. Publisher: {}",
             id,
             publisher
         );
-
-        self.state_mut(publisher)?.set_agent_id(agent_id);
 
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher.clone());
@@ -212,12 +197,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn join_stream(
-        &mut self,
-        id: StreamId,
-        subscriber: SessionId,
-        agent_id: AgentId,
-    ) -> Result<(), Error> {
+    pub fn join_stream(&mut self, id: StreamId, subscriber: SessionId) -> Result<(), Error> {
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -229,10 +209,7 @@ impl Switchboard {
                     subscriber
                 );
 
-                self.state_mut(subscriber)?.set_agent_id(agent_id);
-
                 self.publishers_subscribers.associate(publisher, subscriber);
-
                 Ok(())
             }
         }

@@ -2,12 +2,11 @@ use failure::Error;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::switchboard::{AgentId, StreamId};
+use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
     id: StreamId,
-    agent_id: AgentId,
 }
 
 #[derive(Serialize)]
@@ -32,7 +31,7 @@ impl super::Operation for Request {
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
             .with_write_lock(|mut switchboard| {
-                switchboard.join_stream(self.id, request.session_id(), self.agent_id.clone())
+                switchboard.join_stream(self.id, request.session_id())
             })
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
