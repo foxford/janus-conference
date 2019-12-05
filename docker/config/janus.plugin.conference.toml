@@ -3,4 +3,4 @@ vacuum_interval = 60
 
 [recordings]
 directory = "/recordings"
-enabled = false
+enabled = true

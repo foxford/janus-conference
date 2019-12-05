@@ -17,11 +17,11 @@ services:
     links:
       - vernemq
     working_dir: /build
-    entrypoint: /bin/bash # /build/docker/entrypoint.sh
+    entrypoint: /build/docker/entrypoint.sh
     stdin_open: true
     tty: true
   vernemq:
-    image: netologygroup/mqtt-gateway:v0.12.0
+    image: netologygroup/mqtt-gateway:v0.12.2
     ports:
       - "1883:1883"
       - "8080:8080"
@@ -31,7 +31,5 @@ services:
       APP_STAT_ENABLED: 0
       APP_AGENT_LABEL: alpha
       APP_ACCOUNT_ID: mqtt-gateway.dev.svc.example.org
-    logging:
-      driver: none
 volumes:
   janus-conference-cargo: {}
