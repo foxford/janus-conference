@@ -2,11 +2,11 @@ use failure::Error;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::switchboard::{AgentId, StreamId};
+use crate::janus_callbacks;
+use crate::switchboard::AgentId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: StreamId,
     agent_id: AgentId,
 }
 
@@ -15,14 +15,11 @@ struct Response {}
 
 impl super::Operation for Request {
     fn call(&self, request: &super::Request) -> super::OperationResult {
-        janus_info!(
-            "[CONFERENCE] Calling stream.read operation with id {}",
-            self.id
-        );
+        janus_info!("[CONFERENCE] Calling agent.leave operation");
 
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
-                .kind("stream_read_error", "Error reading a stream")
+                .kind("agent_leave_error", "Error handling left agent")
                 .status(status)
                 .detail(&err.to_string())
                 .build()
@@ -31,8 +28,19 @@ impl super::Operation for Request {
         app!()
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
-            .with_write_lock(|mut switchboard| {
-                switchboard.join_stream(self.id, request.session_id(), self.agent_id.to_owned())
+            .with_read_lock(|switchboard| {
+                let session_id = switchboard.agent(self.agent_id.to_owned())?;
+
+                let session = switchboard.session(session_id)?.lock().map_err(|err| {
+                    format_err!(
+                        "Failed to acquire session mutex for id = {}: {}",
+                        request.session_id(),
+                        err
+                    )
+                })?;
+
+                janus_callbacks::end_session(&session);
+                Ok(())
             })
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
@@ -40,6 +48,6 @@ impl super::Operation for Request {
     }
 
     fn is_handle_jsep(&self) -> bool {
-        true
+        false
     }
 }

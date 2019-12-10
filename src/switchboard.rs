@@ -16,6 +16,7 @@ use crate::recorder::Recorder;
 ///////////////////////////////////////////////////////////////////////////////
 
 pub type StreamId = Uuid;
+pub type AgentId = String;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
 pub type LockedSession = Arc<Mutex<Session>>;
 
@@ -104,6 +105,7 @@ impl SessionState {
 pub struct Switchboard {
     sessions: HashMap<SessionId, LockedSession>,
     states: HashMap<SessionId, SessionState>,
+    agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: HashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
 }
@@ -113,6 +115,7 @@ impl Switchboard {
         Self {
             sessions: HashMap::new(),
             states: HashMap::new(),
+            agents: BidirectionalMultimap::new(),
             publishers: HashMap::new(),
             publishers_subscribers: BidirectionalMultimap::new(),
         }
@@ -143,6 +146,7 @@ impl Switchboard {
 
         self.sessions.remove(&id);
         self.states.remove(&id);
+        self.agents.remove_value(&id);
         self.publishers_subscribers.remove_value(&id);
         Ok(())
     }
@@ -165,6 +169,14 @@ impl Switchboard {
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
+    pub fn agent(&self, id: AgentId) -> Result<SessionId, Error> {
+        self.agents
+            .get_values(&id)
+            .first()
+            .map(|id| id.to_owned())
+            .ok_or_else(|| format_err!("Agent not found for id = {}", id))
+    }
+
     pub fn subscribers_to(&self, publisher: SessionId) -> &[SessionId] {
         self.publishers_subscribers.get_values(&publisher)
     }
@@ -175,7 +187,12 @@ impl Switchboard {
             .map(|id| id.to_owned())
     }
 
-    pub fn create_stream(&mut self, id: StreamId, publisher: SessionId) -> Result<(), Error> {
+    pub fn create_stream(
+        &mut self,
+        id: StreamId,
+        publisher: SessionId,
+        agent_id: AgentId,
+    ) -> Result<(), Error> {
         janus_verb!(
             "[CONFERENCE] Creating stream {}. Publisher: {}",
             id,
@@ -194,10 +211,16 @@ impl Switchboard {
             }
         }
 
+        self.agents.associate(agent_id, publisher);
         Ok(())
     }
 
-    pub fn join_stream(&mut self, id: StreamId, subscriber: SessionId) -> Result<(), Error> {
+    pub fn join_stream(
+        &mut self,
+        id: StreamId,
+        subscriber: SessionId,
+        agent_id: AgentId,
+    ) -> Result<(), Error> {
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -210,6 +233,7 @@ impl Switchboard {
                 );
 
                 self.publishers_subscribers.associate(publisher, subscriber);
+                self.agents.associate(agent_id, subscriber);
                 Ok(())
             }
         }
@@ -223,6 +247,7 @@ impl Switchboard {
             self.stop_recording(publisher)?;
             self.publishers.remove(&id);
             self.publishers_subscribers.remove_key(&publisher);
+            self.agents.remove_value(&publisher);
         }
 
         Ok(())
