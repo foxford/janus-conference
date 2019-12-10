@@ -3,7 +3,9 @@ general: {
   json = "compact"
   url = "tcp://vernemq:1883"
   mqtt_version = "5"
-  client_id = "v1/service-agents/alpha.janus-gateway.dev.svc.example.org"
+  username = "v2::service"
+  password = ""
+  client_id = "alpha.janus-gateway.dev.svc.example.org"
   subscribe_topic = "agents/alpha.janus-gateway.dev.svc.example.org/api/v1/in/conference.dev.svc.example.org"
   subscribe_qos = 0
   publish_topic = "apps/janus-gateway.dev.svc.example.org/api/v1/responses"
