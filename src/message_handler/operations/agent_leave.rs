@@ -29,17 +29,18 @@ impl super::Operation for Request {
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
             .with_read_lock(|switchboard| {
-                let session_id = switchboard.agent(self.agent_id.to_owned())?;
+                for session_id in switchboard.agent_sessions(&self.agent_id) {
+                    let session = switchboard.session(*session_id)?.lock().map_err(|err| {
+                        format_err!(
+                            "Failed to acquire session mutex for id = {}: {}",
+                            request.session_id(),
+                            err
+                        )
+                    })?;
 
-                let session = switchboard.session(session_id)?.lock().map_err(|err| {
-                    format_err!(
-                        "Failed to acquire session mutex for id = {}: {}",
-                        request.session_id(),
-                        err
-                    )
-                })?;
+                    janus_callbacks::end_session(&session);
+                }
 
-                janus_callbacks::end_session(&session);
                 Ok(())
             })
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;

@@ -169,12 +169,8 @@ impl Switchboard {
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
-    pub fn agent(&self, id: AgentId) -> Result<SessionId, Error> {
-        self.agents
-            .get_values(&id)
-            .first()
-            .map(|id| id.to_owned())
-            .ok_or_else(|| format_err!("Agent not found for id = {}", id))
+    pub fn agent_sessions(&self, id: &AgentId) -> &[SessionId] {
+        self.agents.get_values(id)
     }
 
     pub fn subscribers_to(&self, publisher: SessionId) -> &[SessionId] {
@@ -194,9 +190,10 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<(), Error> {
         janus_verb!(
-            "[CONFERENCE] Creating stream {}. Publisher: {}",
+            "[CONFERENCE] Creating stream {}, publisher = {}, agent_id = {}",
             id,
-            publisher
+            publisher,
+            agent_id,
         );
 
         let maybe_old_publisher = self.publishers.remove(&id);
@@ -227,9 +224,10 @@ impl Switchboard {
             None => bail!("Stream {} does not exist", id),
             Some(publisher) => {
                 janus_verb!(
-                    "[CONFERENCE] Joining to stream {}. Subscriber: {}",
+                    "[CONFERENCE] Joining to stream {}, subscriber = {}, agent_id = {}",
                     id,
-                    subscriber
+                    subscriber,
+                    agent_id,
                 );
 
                 self.publishers_subscribers.associate(publisher, subscriber);
