@@ -274,26 +274,8 @@ extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_i
     janus_info!("[CONFERENCE] Slow link")
 }
 
-extern "C" fn hangup_media(handle: *mut PluginSession) {
-    report_error(hangup_media_impl(handle));
-}
-
-fn hangup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-        janus_info!("[CONFERENCE] Hanging up WebRTC media on {}.", session_id);
-
-        let session = switchboard.session(session_id)?.lock().map_err(|err| {
-            format_err!(
-                "Failed to acquire session mutex for id = {}: {}",
-                session_id,
-                err
-            )
-        })?;
-
-        janus_callbacks::end_session(&session);
-        Ok(())
-    })
+extern "C" fn hangup_media(_handle: *mut PluginSession) {
+    janus_verb!("[CONFERENCE] Hang up")
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {

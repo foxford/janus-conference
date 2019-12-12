@@ -8,12 +8,13 @@ You can send a request over [any configured Janus transport](https://janus.conf.
 
 ### Parameters
 
-Name         | Type   | Default    | Description
------------- | ------ | ---------- | -----------
-body.method  | string | _required_ | Always `stream.create`
-body.id      | string | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
-jsep.type    | string | _required_ | Always `offer`
-jsep.sdp     | string | _required_ | An SDP offer
+Name          | Type   | Default    | Description
+------------- | ------ | ---------- | -----------
+body.method   | string | _required_ | Always `stream.create`
+body.id       | string | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
+body.agent_id | string | _required_ | Agent id of the publisher.
+jsep.type     | string | _required_ | Always `offer`
+jsep.sdp      | string | _required_ | An SDP offer
 
 ## Response
 
