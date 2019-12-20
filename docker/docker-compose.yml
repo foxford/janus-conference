@@ -21,7 +21,7 @@ services:
     stdin_open: true
     tty: true
   vernemq:
-    image: netologygroup/mqtt-gateway:497d7fe
+    image: netologygroup/mqtt-gateway:9560493
     ports:
       - "1883:1883"
       - "8080:8080"

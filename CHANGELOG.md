@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.5.0 (December 20, 2019)
+
+### Features
+
+- Delete recording source after uploading ([1b9028c](https://github.com/netology-group/janus-conference/commit/1b9028cd127140b56d958bd64c3049b599ce5151))
+- End handle on WebRTC hangup ([c4f9967](https://github.com/netology-group/janus-conference/commit/c4f99674f4e98d68fa26f91df3249296bab55fce))
+- Add `agent.leave` endpoint ([ddb1b8f](https://github.com/netology-group/janus-conference/commit/ddb1b8f2467b4a029b52fa2a424bc2166598fe52))
+- Switch to v2 connection ([dd4a558](https://github.com/netology-group/janus-conference/commit/dd4a558c158acc5a45576571922219ae51e31885))
+
+### Changes
+
+- Thread safety overhaul ([be96874](https://github.com/netology-group/janus-conference/commit/be968741ae15907068f16d0f81f4bf6a6191b2b6))
+- Rewrite example client ([37f8dd6](https://github.com/netology-group/janus-conference/commit/37f8dd647b9915b450b5d1620b8ae89114eea023))
+
+### Fixes
+
+- Remove all agent handles on `agent.leave` ([b54ff0e](https://github.com/netology-group/janus-conference/commit/b54ff0ebf92244e61b535fa5d3293c8bb5141338))
+
+
+### Dependencies
+
+- Upgrade to futures 0.3 ([d25cc3b](https://github.com/netology-group/janus-conference/commit/d25cc3bcbdb33e9cfd4be15c91f86c901d7d469b))
+
+
 ## v0.4.0 (September 3, 2019)
 
 ### Changes
@@ -8,13 +32,14 @@
 - Return 404 on missing recording ([99a081e](https://github.com/netology-group/janus-conference/commit/99a081eb306ff0fed962968c0a21fe8cba11d947))
 - Add Sentry error tracking ([35df5dc](https://github.com/netology-group/janus-conference/commit/35df5dc210b960ab5ba1f46581cec494535e26d7))
 
-### Bugfixes
+### Fixes
 
 -  Upgrade Janus to a version with MQTT transport automatic reconnection fix ([b7ec792](https://github.com/netology-group/janus-conference/commit/b7ec792f85851a8f79c881603255e3b438f35d93))
 
+
 ## v0.3.1 (August 7, 2019)
 
-### Bugfixes
+### Fixes
 
 - Switch back to Debian due to segfault in libnice ([7ae406b](https://github.com/netology-group/janus-conference/commit/7ae406b69b75378879993798f49970e60b46e9a2))
 
@@ -28,6 +53,7 @@
 
 - Switch to Alpine Linux
 
+
 ## v0.2.1 (June 13, 2019)
 
 ### Changes
@@ -40,9 +66,10 @@
 
 - Add videoconvert element to the pipeline to align the framerate ([2fca86e](https://github.com/netology-group/janus-conference/commit/2fca86e58da377e5c4652f986326a41f41fb74c3))
 
-### Bugfixes
+### Fixes
 
 - Fix bad Janus upgrade ([3d51732](https://github.com/netology-group/janus-conference/commit/3d5173298b5f145d8c2967de350b793e2ab246c7))
+
 
 ## v0.2.0 (June 7, 2019)
 
@@ -64,16 +91,17 @@
 - Make errors to be in accordance with spec ([e1fb6ea](https://github.com/netology-group/janus-conference/commit/e1fb6ea6bc282a672ff2a83e301780e90697556f))
 - Cast videos to common format on concat ([f37f340](https://github.com/netology-group/janus-conference/commit/f37f340eefddf97be7862e9cf09701a8e4e7717f))
 
-### Bugfixes
+### Fixes
 
 - Fix phantom streams ([db80594](https://github.com/netology-group/janus-conference/commit/db80594ce334f80d9493e3212f8a586561fc33d7))
-- Fix memory leak ([f6f143](https://github.com/netology-group/janus-conference/commit/f6f143fa46435bbdfb593b124b16c17767014338))
+- Fix memory leak ([f6f143f](https://github.com/netology-group/janus-conference/commit/f6f143fa46435bbdfb593b124b16c17767014338))
 
 ### Dependencies
 
 - Upgrade Janus ([2d3ed8a](https://github.com/netology-group/janus-conference/commit/2d3ed8a3068a9c5f374623f2df63ada2f35498da))
 - Upgrade PAHO MQTT client ([aee1557](https://github.com/netology-group/janus-conference/commit/aee1557e1d884eb132634540a5286bac24b51b59))
 - Update crates ([14ade6b](https://github.com/netology-group/janus-conference/commit/14ade6b9e1403fcebd662430b5539b23699b9e5d))
+
 
 ## v0.1.0 (Dec 8, 2018)
 
