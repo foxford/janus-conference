@@ -55,12 +55,12 @@ COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
 # TODO: Before the next upgrade consider thsi task:
 #       https://burning-heart.atlassian.net/browse/ULMS-855
-ARG JANUS_GATEWAY_COMMIT='cd4607a59582e0c2b3214eacf9cf3102d2c962b4'
+ARG JANUS_GATEWAY_COMMIT='8ff57ce8283b550add2f1c3ac932723a89aaec24'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
-    && git clone 'https://github.com/meetecho/janus-gateway' . \
+    && git clone 'https://github.com/netology-group/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus \
