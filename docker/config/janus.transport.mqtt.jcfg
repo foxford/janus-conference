@@ -8,7 +8,7 @@ general: {
   client_id = "alpha.janus-gateway.dev.svc.example.org"
   subscribe_topic = "agents/alpha.janus-gateway.dev.svc.example.org/api/v1/in/conference.dev.svc.example.org"
   subscribe_qos = 0
-  publish_topic = "apps/janus-gateway.dev.svc.example.org/api/v1/responses"
+  publish_topic = "apps/janus-gateway.dev.svc.example.org/api/v1/events"
   publish_qos = 1
   cleansession = 0
   keep_alive_interval = 30
