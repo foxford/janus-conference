@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.0 (January 15, 2020)
+
+### Features
+
+- Use request/response pattern ([bd19966](https://github.com/netology-group/janus-conference/commit/bd19966d2b8eac0c3f539aeb1f2d2bcd8e17f9fe))
+
+
 ## v0.5.0 (December 20, 2019)
 
 ### Features
