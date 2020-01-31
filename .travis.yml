@@ -6,7 +6,7 @@ addons:
   apt:
     packages:
       - libjansson-dev
-      - lftp
+      - awscli
       - libgstreamer1.0-dev
       - libgstreamer-plugins-base1.0-dev
       - gstreamer1.0-plugins-base
@@ -38,7 +38,7 @@ jobs:
     - stage: deploy
       name: Docs
       install: cargo install mdbook --vers 0.2.3 --force
-      script: mdbook build docs && ./deploy.init.sh && PROJECT='janus-conference' ./deploy/docs.sh
+      script: mdbook build docs && ./deploy.init.sh && PROJECT='janus-conference' ./deploy/s3-docs.sh
 stages:
   - name: check
   - name: deploy

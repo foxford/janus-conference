@@ -28,7 +28,7 @@ function FILE_FROM_GITHUB() {
 
 set -ex
 
-FILE_FROM_GITHUB "deploy" "${SOURCE}/deploy/docs.sh"
+FILE_FROM_GITHUB "deploy" "${SOURCE}/deploy/s3-docs.sh"
 
-chmod u+x deploy/docs.sh
+chmod u+x deploy/s3-docs.sh
 
