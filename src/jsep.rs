@@ -30,7 +30,7 @@ impl Jsep {
             OfferAnswerParameters::AudioCodec,
             AudioCodec::Opus.to_cstr().as_ptr(),
             OfferAnswerParameters::VideoCodec,
-            VideoCodec::H264.to_cstr().as_ptr(),
+            VideoCodec::Vp8.to_cstr().as_ptr(),
         );
 
         // Set video bitrate

@@ -39,23 +39,21 @@ impl Config {
     }
 }
 
-const MKV_EXTENSION: &str = "mkv";
-const MP4_EXTENSION: &str = "mp4";
+const WEBM_EXTENSION: &str = "webm";
 const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
 
 const RECORDING_PIPELINE: &str = r#"
     appsrc name=video_src stream-type=stream format=time is-live=true do-timestamp=true !
-        application/x-rtp, media=video, encoding-name=H264, payload=(int)126, clock-rate=(int)90000 !
+        application/x-rtp, media=video, encoding-name=VP8, payload=(int)126, clock-rate=(int)90000 !
         rtpjitterbuffer !
-        rtph264depay !
-        h264parse !
-        avdec_h264 !
+        rtpvp8depay !
+        vp8dec !
         videoscale !
         videorate !
         videoconvert !
         video/x-raw, width=1280, height=720, pixel-aspect-ratio=1/1, framerate=30/1, format=I420, profile=high !
-        x264enc key-int-max=60 tune=zerolatency speed-preset=ultrafast !
+        vp8enc !
         queue !
         mux.video_0
 
@@ -156,7 +154,7 @@ impl Recorder {
             let mut files_list_writer = BufWriter::new(&files_list);
 
             for part in parts {
-                // file '/recordings/123/1234567890.mkv'
+                // file '/recordings/123/1234567890.webm'
                 let filename = part.path.as_path().to_string_lossy().into_owned();
                 writeln!(&mut files_list_writer, "file '{}'", filename)?;
 
@@ -176,7 +174,7 @@ impl Recorder {
         // Use ffmpeg for concatenation instead of gstreamer because it doesn't hang on corrupted videos.
         // No transcoding is made here because it would create a peak load on the server.
         //
-        // ffmpeg -f concat -safe 0 -i /recordings/123/parts.txt -c copy -y /recordings/123/full.mp4
+        // ffmpeg -f concat -safe 0 -i /recordings/123/parts.txt -c copy -y /recordings/123/full.webm
         let mut command = Command::new("ffmpeg");
 
         command.args(&[
@@ -255,11 +253,11 @@ impl Recorder {
             .get_by_name("out")
             .ok_or_else(|| format_err!("Failed to get filesink element named `out`"))?;
 
-        // Set output filename to `./recordings/{STREAM_ID}/{CURRENT_TIMESTAMP}.mkv`.
+        // Set output filename to `./recordings/{STREAM_ID}/{CURRENT_TIMESTAMP}.webm`.
         let start = Utc::now().timestamp_millis();
         let basename = start.to_string();
 
-        let path = self.generate_record_path(&basename, MKV_EXTENSION);
+        let path = self.generate_record_path(&basename, WEBM_EXTENSION);
         let path = path.to_string_lossy().into_owned();
 
         filesink.set_property("location", &path)?;
@@ -337,8 +335,7 @@ impl Recorder {
     }
 
     pub fn get_full_record_path(&self) -> PathBuf {
-        // Use MP4 container instead of MKV because the video editor doesn't support MKV
-        self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
+        self.generate_record_path(FULL_RECORD_FILENAME, WEBM_EXTENSION)
     }
 
     fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer> {
@@ -484,7 +481,7 @@ impl RecordPart {
             None => return false,
         };
 
-        if extension != MKV_EXTENSION {
+        if extension != WEBM_EXTENSION {
             return false;
         }
 
