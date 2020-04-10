@@ -99,6 +99,9 @@ class JanusClient {
       properties: {
         responseTopic: SUBSCRIBE_TOPIC,
         correlationData: payload.transaction,
+        userProperties: {
+          local_timestamp: new Date().getTime().toString(),
+        },
       }
     });
 
