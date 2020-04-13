@@ -28,9 +28,28 @@ impl super::Operation for Request {
         );
 
         let app = app!().map_err(internal_error)?;
-        let mut recorder = Recorder::new(&app.config.recordings, self.id);
 
-        janus_info!("[CONFERENCE] Upload task started. Finishing record");
+        app.switchboard
+            .with_write_lock(|mut switchboard| {
+                // The stream still may be ongoing and we must stop it gracefully.
+                if let Some(publisher) = switchboard.publisher_of(self.id) {
+                    // At first we synchronously stop the stream and hence the recording
+                    // ensuring that it finishes correctly.
+                    switchboard.remove_stream(self.id)?;
+
+                    // Then we disconnect the publisher to close its PeerConnection and notify
+                    // the frontend. Disconnection also implies stream removal but it's being
+                    // performed asynchronously through a janus callback and to avoid race condition
+                    // we have preliminary removed the stream in a synchronous way.
+                    switchboard.disconnect(publisher)?;
+                }
+
+                Ok(())
+            })
+            .map_err(internal_error)?;
+
+        janus_info!("[CONFERENCE] Finishing record");
+        let mut recorder = Recorder::new(&app.config.recordings, self.id);
         let (started_at, time) = recorder.finish_record().map_err(recorder_error)?;
 
         janus_info!("[CONFERENCE] Uploading record");

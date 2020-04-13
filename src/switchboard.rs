@@ -88,6 +88,10 @@ impl SessionState {
         self.recorder.as_ref()
     }
 
+    pub fn recorder_mut(&mut self) -> Option<&mut Recorder> {
+        self.recorder.as_mut()
+    }
+
     pub fn set_recorder(&mut self, recorder: Recorder) -> &mut Self {
         self.recorder = Some(recorder);
         self
@@ -131,6 +135,18 @@ impl Switchboard {
     }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<(), Error> {
+        janus_info!("[CONFERENCE] Disconnecting publisher asynchronously");
+
+        let session = self
+            .session(id)?
+            .lock()
+            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+
+        janus_callbacks::end_session(&session);
+        Ok(())
+    }
+
+    pub fn handle_disconnect(&mut self, id: SessionId) -> Result<(), Error> {
         janus_verb!("[CONFERENCE] Disconnecting session {}", id);
 
         let stream_ids: Vec<StreamId> = self
@@ -181,6 +197,10 @@ impl Switchboard {
         self.publishers_subscribers
             .get_key(&subscriber)
             .map(|id| id.to_owned())
+    }
+
+    pub fn publisher_of(&self, stream_id: StreamId) -> Option<SessionId> {
+        self.publishers.get(&stream_id).map(|p| p.to_owned())
     }
 
     pub fn create_stream(
@@ -254,7 +274,7 @@ impl Switchboard {
     fn stop_recording(&mut self, publisher: SessionId) -> Result<(), Error> {
         let state = self.state_mut(publisher)?;
 
-        if let Some(recorder) = state.recorder() {
+        if let Some(recorder) = state.recorder_mut() {
             janus_verb!("[CONFERENCE] Stopping recording {}", publisher);
 
             recorder
@@ -302,11 +322,7 @@ impl Switchboard {
         };
 
         if is_timed_out {
-            let session = self.session(publisher)?.lock().map_err(|err| {
-                format_err!("Failed to acquire session mutex {}: {}", publisher, err)
-            })?;
-
-            janus_callbacks::end_session(&session);
+            self.disconnect(publisher)?;
         }
 
         Ok(is_timed_out)

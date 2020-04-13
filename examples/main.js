@@ -13,6 +13,7 @@ const SUBSCRIBE_TOPIC = `apps/${JANUS_ACCOUNT_ID}/api/v1/responses`;
 const PLUGIN = 'janus.plugin.conference';
 const STREAM_ID = '3fdef418-15d3-11ea-9005-60f81db6d53e';
 const CONSTRAINTS = { audio: true, video: { width: 1280, height: 720 } };
+const BUCKET = 'origin.webinar.beta.example.org';
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -211,6 +212,16 @@ class Peer {
     this._resetPeerConnection();
   }
 
+  async upload() {
+    let response = await this.janusClient.callMethod('stream.upload', this.handleId, {
+      id: STREAM_ID,
+      bucket: BUCKET,
+      object: `${STREAM_ID}.source.mp4`,
+    });
+
+    console.debug('Upload response', response.plugindata.data);
+  }
+
   _setHandleId(handleId) {
     this.handleId = handleId;
     if (this.onHandleIdChange) this.onHandleIdChange(handleId);
@@ -241,6 +252,7 @@ document.addEventListener('DOMContentLoaded', async function () {
   let startBtn = document.getElementById('startBtn');
   let joinBtn = document.getElementById('joinBtn');
   let hangUpBtn = document.getElementById('hangUpBtn');
+  let uploadBtn = document.getElementById('uploadBtn');
   let mqttStateIndicator = document.getElementById('mqttStateIndicator');
   let sessionIdIndicator = document.getElementById('sessionIdIndicator');
   let clientHandleIdIndicator = document.getElementById('clientHandleIdIndicator');
@@ -270,6 +282,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     startBtn.disabled = false;
     joinBtn.disabled = false;
+    uploadBtn.disabled = false;
   });
 
   // Start button click
@@ -310,5 +323,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     connectionStateIndicator.innerHTML = 'null';
     signalingStateIndicator.innerHTML = 'null';
     iceGatheringStateIndicator.innerHTML = 'null';
+  });
+
+  uploadBtn.addEventListener('click', async function () {
+    await peer.upload();
   });
 });

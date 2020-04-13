@@ -124,19 +124,6 @@ impl Recorder {
     }
 
     pub fn finish_record(&mut self) -> Result<(u64, Vec<(u64, u64)>), RecorderError> {
-        if let Err(err) = self.stop_recording() {
-            janus_err!("[CONFERENCE] Error during recording stop: {}", err);
-        }
-
-        if let Some(handle) = self.recorder_thread_handle.take() {
-            if let Err(err) = handle.join() {
-                janus_err!(
-                    "Error during finalization of current record part: {:?}",
-                    err
-                );
-            }
-        }
-
         let records_dir = self.get_records_dir();
 
         if !records_dir.is_dir() {
@@ -329,8 +316,18 @@ impl Recorder {
         Ok(())
     }
 
-    pub fn stop_recording(&self) -> Result<(), Error> {
+    pub fn stop_recording(&mut self) -> Result<(), Error> {
         self.sender.send(RecorderMsg::Stop)?;
+
+        if let Some(handle) = self.recorder_thread_handle.take() {
+            if let Err(err) = handle.join() {
+                janus_err!(
+                    "Error during finalization of current record part: {:?}",
+                    err
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -433,8 +430,6 @@ impl Recorder {
         })
     }
 }
-
-unsafe impl Sync for Recorder {}
 
 fn unix_time_ms() -> u64 {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();

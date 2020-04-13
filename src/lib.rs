@@ -288,7 +288,7 @@ fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Resul
 
     app!()?
         .switchboard
-        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
+        .with_write_lock(|mut switchboard| switchboard.handle_disconnect(session_id))
 }
 
 extern "C" fn destroy() {
