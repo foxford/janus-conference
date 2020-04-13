@@ -55,7 +55,7 @@ impl App {
     }
 
     pub fn new(config: Config) -> Result<Self, Error> {
-        let uploader = Uploader::new(config.uploading.clone())?;
+        let uploader = Uploader::build(config.uploading.clone())?;
 
         Ok(Self {
             config,

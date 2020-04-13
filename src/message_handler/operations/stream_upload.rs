@@ -53,7 +53,7 @@ impl super::Operation for Request {
         let (started_at, time) = recorder.finish_record().map_err(recorder_error)?;
 
         janus_info!("[CONFERENCE] Uploading record");
-        let uploader = Uploader::new(app.config.uploading.clone())
+        let uploader = Uploader::build(app.config.uploading.clone())
             .map_err(|err| internal_error(format_err!("Failed to init uploader: {}", err)))?;
 
         let path = recorder.get_full_record_path();
