@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.1 (April 14, 2020)
+
+### Changes
+– Upgrade Janus fork ([e12db02](https://github.com/netology-group/janus-conference/commit/e12db020738fe51ce5dccd246e9f6428b64683c6))
+
+### Fixes
+- Fix uploading ongoing stream ([2fd5d3b](https://github.com/netology-group/janus-conference/commit/2fd5d3b6b021998df80b31cf181cfd8f3583bd09))
+- Fix S3 uploading to Yandex ([80e4106](https://github.com/netology-group/janus-conference/commit/80e4106dfcf21b4ee425eabb18650edb13dcf1d3))
+
 ## v0.6.0 (January 15, 2020)
 
 ### Features
