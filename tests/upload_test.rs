@@ -13,8 +13,8 @@ include!("./janus_client.rs");
 
 extern crate gstreamer;
 extern crate gstreamer_pbutils;
-extern crate rusoto_core;
 extern crate rusoto_s3;
+extern crate rustoto_signature;
 extern crate s4;
 extern crate tempfile;
 
@@ -23,12 +23,12 @@ use std::{env, fs};
 
 use gstreamer as gst;
 use gstreamer_pbutils::prelude::*;
-use rusoto_core::Region;
 use rusoto_s3::{DeleteObjectRequest, GetObjectRequest, S3Client, S3};
+use rusoto_signature::Region;
 use s4::S4;
 use tempfile::TempDir;
 
-const BUCKET: &str = "origin.webinar.beta.netology.ru";
+const BUCKET: &str = "origin.webinar.example.org";
 const TEST_RECORDING_PATH: &str = "./tests/files/recording";
 const RECORDINGS_DIR: &str = "./recordings";
 const DISCOVERER_TIMEOUT: u64 = 15;

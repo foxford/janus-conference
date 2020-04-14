@@ -22,9 +22,10 @@ gstreamer-app = "0.12"
 gstreamer-base = "0.12"
 gstreamer-pbutils="0.12"
 glib = "0.6"
-rusoto_core = "0.40"
-rusoto_s3 = "0.40"
-s4 = { version = "0.0.*", default_features = false }
+rusoto_core = "0.42"
+rusoto_credential = "0.42"
+rusoto_s3 = "0.42"
+rusoto_signature = "0.42"
 http = "0.1"
 futures = { version = "0.3", features = ["thread-pool"] }
 futures-channel = "0.3"
@@ -38,9 +39,6 @@ rumqtt = "0.30"
 svc-agent = "0.7"
 tempfile = "3.0"
 janus-plugin-sys = "0.6"
-
-[features]
-default = ["s4/native-tls"]
 
 [patch.crates-io]
 janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs" }
