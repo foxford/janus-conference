@@ -55,7 +55,7 @@ COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
 
 # TODO: Before the next upgrade consider thsi task:
 #       https://burning-heart.atlassian.net/browse/ULMS-855
-ARG JANUS_GATEWAY_COMMIT='51987d066188bc88338aa69720d1f0f176cd4424'
+ARG JANUS_GATEWAY_COMMIT='cc59ef4bd9df52ba5c21e25ffd34352f84fdbf2c'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
