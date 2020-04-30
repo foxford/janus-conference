@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.2 (April 30, 2020)
+
+### Changes
+– Upgrade Janus fork ([667476a](https://github.com/netology-group/janus-conference/commit/667476a49dbd4bbeefccd531a9621149bec2776d))
+
+
 ## v0.6.1 (April 14, 2020)
 
 ### Changes
