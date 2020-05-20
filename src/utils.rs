@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::{format_err, Context, Result};
 use janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -11,15 +11,13 @@ macro_rules! c_str {
     };
 }
 
-pub fn serde_to_jansson(json: &Value) -> Result<JanssonValue, Error> {
+pub fn serde_to_jansson(json: &Value) -> Result<JanssonValue> {
     JanssonValue::from_str(&json.to_string(), JanssonDecodingFlags::empty())
         .map_err(|err| format_err!("{}", err))
 }
 
-pub fn jansson_to_serde<T: DeserializeOwned>(json: &JanssonValue) -> Result<T, Error> {
+pub fn jansson_to_serde<T: DeserializeOwned>(json: &JanssonValue) -> Result<T> {
     let json = json.to_libcstring(JanssonEncodingFlags::empty());
     let json = json.to_string_lossy();
-    let res = serde_json::from_str(&json);
-
-    res.map_err(Error::from)
+    serde_json::from_str(&json).context("Failed to parse JSON")
 }

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use failure::{err_msg, Error};
+use anyhow::{bail, format_err, Context, Result};
 use janus::session::SessionWrapper;
 use uuid::Uuid;
 
@@ -59,25 +59,23 @@ impl SessionState {
         self.fir_seq.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn since_last_rtp_packet_timestamp(&self) -> Result<Option<Duration>, Error> {
+    fn since_last_rtp_packet_timestamp(&self) -> Result<Option<Duration>> {
         match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
             0 => Ok(None),
             secs => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .map_err(|err| {
-                        format_err!("Failed to set last RTP packet timestamp: {}", err)
-                    })?;
+                    .context("Failed to set last RTP packet timestamp")?;
 
                 Ok(Some(now - Duration::from_secs(secs)))
             }
         }
     }
 
-    pub fn touch_last_rtp_packet_timestamp(&self) -> Result<(), Error> {
+    pub fn touch_last_rtp_packet_timestamp(&self) -> Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|err| format_err!("Failed to set last RTP packet timestamp: {}", err))?
+            .context("Failed to set last RTP packet timestamp")?
             .as_secs();
 
         self.last_rtp_packet_timestamp.store(now, Ordering::Relaxed);
@@ -125,7 +123,7 @@ impl Switchboard {
         }
     }
 
-    pub fn connect(&mut self, session: Session) -> Result<(), Error> {
+    pub fn connect(&mut self, session: Session) -> Result<()> {
         let session_id = ***session;
         janus_verb!("[CONFERENCE] Connecting session {}", session_id);
         let locked_session = Arc::new(Mutex::new(session));
@@ -134,7 +132,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<(), Error> {
+    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
         janus_info!("[CONFERENCE] Disconnecting publisher asynchronously");
 
         let session = self
@@ -146,7 +144,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn handle_disconnect(&mut self, id: SessionId) -> Result<(), Error> {
+    pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
         janus_verb!("[CONFERENCE] Disconnecting session {}", id);
 
         let stream_ids: Vec<StreamId> = self
@@ -167,19 +165,19 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn session(&self, id: SessionId) -> Result<&LockedSession, Error> {
+    pub fn session(&self, id: SessionId) -> Result<&LockedSession> {
         self.sessions
             .get(&id)
             .ok_or_else(|| format_err!("Session not found for id = {}", id))
     }
 
-    pub fn state(&self, id: SessionId) -> Result<&SessionState, Error> {
+    pub fn state(&self, id: SessionId) -> Result<&SessionState> {
         self.states
             .get(&id)
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
-    pub fn state_mut(&mut self, id: SessionId) -> Result<&mut SessionState, Error> {
+    pub fn state_mut(&mut self, id: SessionId) -> Result<&mut SessionState> {
         self.states
             .get_mut(&id)
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
@@ -208,7 +206,7 @@ impl Switchboard {
         id: StreamId,
         publisher: SessionId,
         agent_id: AgentId,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         janus_verb!(
             "[CONFERENCE] Creating stream {}, publisher = {}, agent_id = {}",
             id,
@@ -237,7 +235,7 @@ impl Switchboard {
         id: StreamId,
         subscriber: SessionId,
         agent_id: AgentId,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -257,7 +255,7 @@ impl Switchboard {
         }
     }
 
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<(), Error> {
+    pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
         janus_verb!("[CONFERENCE] Removing stream {}", id);
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
@@ -271,7 +269,7 @@ impl Switchboard {
         Ok(())
     }
 
-    fn stop_recording(&mut self, publisher: SessionId) -> Result<(), Error> {
+    fn stop_recording(&mut self, publisher: SessionId) -> Result<()> {
         let state = self.state_mut(publisher)?;
 
         if let Some(recorder) = state.recorder_mut() {
@@ -286,7 +284,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<(), Error> {
+    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
         for (stream_id, publisher) in self.publishers.clone().into_iter() {
             match self.vacuum_publisher(publisher, timeout) {
                 Ok(false) => (),
@@ -308,11 +306,7 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(
-        &mut self,
-        publisher: SessionId,
-        timeout: &Duration,
-    ) -> Result<bool, Error> {
+    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
@@ -338,23 +332,23 @@ impl LockedSwitchboard {
         Self(RwLock::new(Switchboard::new()))
     }
 
-    pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R>
     where
-        F: FnOnce(RwLockReadGuard<Switchboard>) -> Result<R, Error>,
+        F: FnOnce(RwLockReadGuard<Switchboard>) -> Result<R>,
     {
         match self.0.read() {
             Ok(switchboard) => callback(switchboard),
-            Err(_) => Err(err_msg("Failed to acquire switchboard read lock")),
+            Err(_) => bail!("Failed to acquire switchboard read lock"),
         }
     }
 
-    pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R, Error>
+    pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R>
     where
-        F: FnOnce(RwLockWriteGuard<Switchboard>) -> Result<R, Error>,
+        F: FnOnce(RwLockWriteGuard<Switchboard>) -> Result<R>,
     {
         match self.0.write() {
             Ok(switchboard) => callback(switchboard),
-            Err(_) => Err(err_msg("Failed to acquire switchboard write lock")),
+            Err(_) => bail!("Failed to acquire switchboard write lock"),
         }
     }
 

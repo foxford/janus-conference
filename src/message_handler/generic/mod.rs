@@ -6,7 +6,7 @@ use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::sync::mpsc;
 
-use failure::{err_msg, Error};
+use anyhow::{format_err, Error};
 use futures::{executor::ThreadPool, future::lazy};
 use http::StatusCode;
 use janus::JanssonValue;
@@ -86,7 +86,7 @@ where
         transaction: &str,
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         janus_info!("[CONFERENCE] Scheduling request");
         let request = Request::new(session_id, &transaction);
 
@@ -230,7 +230,7 @@ impl<S: Sender> MessageHandler<S> {
 
         let negotiation_result = match &request.jsep_offer() {
             Some(jsep_offer) => Jsep::negotiate(jsep_offer),
-            None => Err(err_msg("JSEP is empty")),
+            None => Err(format_err!("JSEP is empty")),
         };
 
         match negotiation_result {
@@ -271,7 +271,7 @@ pub trait Sender {
         transaction: &str,
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
-    ) -> Result<(), Error>;
+    ) -> anyhow::Result<()>;
 }
 
 #[cfg(test)]
@@ -280,12 +280,12 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    use anyhow::{bail, format_err, Result};
     use serde_json::json;
 
     use super::MessageHandlingLoop;
     use super::Router;
     use super::{Operation, OperationResult, Request};
-    use crate::failure::Error;
     use crate::janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
     use crate::switchboard::SessionId;
 
@@ -355,7 +355,7 @@ mod tests {
             transaction: &str,
             payload: Option<JanssonValue>,
             jsep_answer: Option<JanssonValue>,
-        ) -> Result<(), Error> {
+        ) -> Result<()> {
             self.tx
                 .send(TestResponse {
                     session_id,
@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_message() -> Result<(), Error> {
+    fn handle_message() -> Result<()> {
         let (sender, rx) = TestSender::new();
         let session_id = SessionId::new();
 

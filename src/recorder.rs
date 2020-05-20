@@ -1,11 +1,14 @@
+use std::error::Error as StdError;
+use std::fmt;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::result::Result as StdResult;
 use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io, thread};
 
-use failure::{err_msg, Error, Fail};
+use anyhow::{bail, format_err, Context, Error, Result};
 use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -21,7 +24,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn check(&mut self) -> Result<(), Error> {
+    pub fn check(&mut self) -> Result<()> {
         if !self.enabled {
             return Ok(());
         }
@@ -80,7 +83,7 @@ enum RecorderMsg {
 pub struct Recorder {
     sender: mpsc::Sender<RecorderMsg>,
     receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
-    recorder_thread_handle: Option<thread::JoinHandle<Result<(), Error>>>,
+    recorder_thread_handle: Option<thread::JoinHandle<Result<()>>>,
     stream_id: StreamId,
     filename: Option<String>,
     save_root_dir: String,
@@ -116,14 +119,13 @@ impl Recorder {
         }
     }
 
-    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<(), Error> {
+    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<()> {
         let buf = Self::wrap_buf(buf)?;
         let msg = RecorderMsg::Packet { buf, is_video };
-
-        self.sender.send(msg).map_err(Error::from)
+        self.sender.send(msg).context("Failed to send packet")
     }
 
-    pub fn finish_record(&mut self) -> Result<(u64, Vec<(u64, u64)>), RecorderError> {
+    pub fn finish_record(&mut self) -> StdResult<(u64, Vec<(u64, u64)>), RecorderError> {
         let records_dir = self.get_records_dir();
 
         if !records_dir.is_dir() {
@@ -212,41 +214,45 @@ impl Recorder {
         }
     }
 
-    pub fn start_recording(&mut self) -> Result<(), Error> {
+    pub fn start_recording(&mut self) -> Result<()> {
         janus_info!("[CONFERENCE] Initialize recording pipeline");
 
         // Build pipeline by description and get necessary elements' and pads' handles.
         let pipeline = gst::parse_launch(RECORDING_PIPELINE)?
             .downcast::<gst::Pipeline>()
-            .map_err(|_| err_msg("Failed to downcast gst::Element to gst::Pipeline"))?;
+            .map_err(|_| format_err!("Failed to downcast gst::Element to gst::Pipeline"))?;
 
         let video_src = pipeline
             .get_by_name("video_src")
-            .ok_or_else(|| err_msg("Failed to get appsrc element named `video_src`"))?
+            .ok_or_else(|| format_err!("Failed to get appsrc element named `video_src`"))?
             .downcast::<gst_app::AppSrc>()
-            .map_err(|_| err_msg("Failed to downcast `video_src` element  to gst_app::AppSrc"))?;
+            .map_err(|_| {
+                format_err!("Failed to downcast `video_src` element  to gst_app::AppSrc")
+            })?;
 
         let audio_src = pipeline
             .get_by_name("audio_src")
-            .ok_or_else(|| err_msg("Failed to get appsrc element named `audio_src`"))?
+            .ok_or_else(|| format_err!("Failed to get appsrc element named `audio_src`"))?
             .downcast::<gst_app::AppSrc>()
-            .map_err(|_| err_msg("Failed to downcast `audio_src` element to gst_app::AppSrc"))?;
+            .map_err(|_| {
+                format_err!("Failed to downcast `audio_src` element to gst_app::AppSrc")
+            })?;
 
         let mux = pipeline
             .get_by_name("mux")
-            .ok_or_else(|| err_msg("Failed to get matroskamux element named `mux`"))?;
+            .ok_or_else(|| format_err!("Failed to get matroskamux element named `mux`"))?;
 
         let video_sink_pad = mux
             .get_static_pad("video_0")
-            .ok_or_else(|| err_msg("Failed to request `video_0` pad from `mux` element"))?;
+            .ok_or_else(|| format_err!("Failed to request `video_0` pad from `mux` element"))?;
 
         let audio_sink_pad = mux
             .get_static_pad("audio_0")
-            .ok_or_else(|| err_msg("Failed to request `audio_0` pad from `mux` element"))?;
+            .ok_or_else(|| format_err!("Failed to request `audio_0` pad from `mux` element"))?;
 
         let filesink = pipeline
             .get_by_name("out")
-            .ok_or_else(|| err_msg("Failed to get filesink element named `out`"))?;
+            .ok_or_else(|| format_err!("Failed to get filesink element named `out`"))?;
 
         // Set output filename to `./recordings/{STREAM_ID}/{CURRENT_TIMESTAMP}.mkv`.
         let start = unix_time_ms();
@@ -266,7 +272,7 @@ impl Recorder {
         let recv = self
             .receiver_for_recorder_thread
             .take()
-            .ok_or_else(|| err_msg("Empty receiver in recorder"))?;
+            .ok_or_else(|| format_err!("Empty receiver in recorder"))?;
 
         let handle = thread::spawn(move || {
             janus_info!("[CONFERENCE] Start recording to {}", path);
@@ -316,7 +322,7 @@ impl Recorder {
         Ok(())
     }
 
-    pub fn stop_recording(&mut self) -> Result<(), Error> {
+    pub fn stop_recording(&mut self) -> Result<()> {
         self.sender.send(RecorderMsg::Stop)?;
 
         if let Some(handle) = self.recorder_thread_handle.take() {
@@ -336,9 +342,9 @@ impl Recorder {
         self.generate_record_path(FULL_RECORD_FILENAME, MP4_EXTENSION)
     }
 
-    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer, Error> {
+    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer> {
         let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
-            .ok_or_else(|| err_msg("Failed to init GBuffer"))?;
+            .ok_or_else(|| format_err!("Failed to init GBuffer"))?;
 
         {
             let gbuf = gbuf.get_mut().unwrap();
@@ -380,7 +386,7 @@ impl Recorder {
         path
     }
 
-    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) -> Result<(), Error> {
+    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) -> Result<()> {
         let (tx, rx) = mpsc::channel();
         let main_loop = glib::MainLoop::new(None, false);
         let main_loop_clone = main_loop.clone();
@@ -421,7 +427,7 @@ impl Recorder {
         }
     }
 
-    pub fn delete_record(&self) -> Result<(), RecorderError> {
+    pub fn delete_record(&self) -> StdResult<(), RecorderError> {
         let records_dir = self.get_records_dir();
 
         fs::remove_dir_all(records_dir).map_err(|err| match err.kind() {
@@ -514,23 +520,40 @@ impl RecordPart {
             .and_then(|stem| stem.to_string_lossy().parse::<u64>().ok())
     }
 
-    fn discover_duration(path: &PathBuf) -> Result<u64, Error> {
+    fn discover_duration(path: &PathBuf) -> Result<u64> {
         gstreamer_pbutils::Discoverer::new(gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT))?
             .discover_uri(&format!("file://{}", path.as_path().to_string_lossy()))?
             .get_duration()
             .mseconds()
-            .ok_or_else(|| err_msg("Empty duration"))
+            .ok_or_else(|| format_err!("Empty duration"))
     }
 }
 
-#[derive(Fail, Debug)]
+#[derive(Debug)]
 pub enum RecorderError {
-    #[fail(display = "{}", _0)]
-    InternalError(#[cause] Error),
-    #[fail(display = "{}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "Recording missing")]
+    InternalError(Error),
+    IoError(io::Error),
     RecordingMissing,
+}
+
+impl fmt::Display for RecorderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InternalError(source) => write!(f, "{}", source),
+            Self::IoError(source) => write!(f, "{}", source),
+            Self::RecordingMissing => write!(f, "Recording missing"),
+        }
+    }
+}
+
+impl StdError for RecorderError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::InternalError(source) => Some(source.as_ref()),
+            Self::IoError(source) => Some(source),
+            Self::RecordingMissing => None,
+        }
+    }
 }
 
 impl From<Error> for RecorderError {

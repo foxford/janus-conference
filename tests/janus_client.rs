@@ -1,9 +1,6 @@
-#[macro_use]
-extern crate failure;
-
 use std::time::Duration;
 
-use failure::{err_msg, Error};
+use anyhow::{bail, format_err, Context, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -48,7 +45,7 @@ impl JanusClient {
     /// Connects to the broker, subscribes to responses topic.
     /// Then obtains session id and handle id for `PLUGIN`.
     /// Returns the client that is set up for sending messages to the plugin handle.
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self> {
         let agent_config: AgentConfig = serde_json::from_value(json!({
             "uri": MQTT_BROKER_URL,
             "clean_session": true,
@@ -81,7 +78,7 @@ impl JanusClient {
         Ok(janus_client)
     }
 
-    fn init_session(&mut self) -> Result<SessionId, Error> {
+    fn init_session(&mut self) -> Result<SessionId> {
         let response: SessionOrHandleResponse = self.request(&json!({"janus": "create"}))?;
 
         if response.janus == "success" {
@@ -91,7 +88,7 @@ impl JanusClient {
         }
     }
 
-    fn init_handle(&mut self) -> Result<HandleId, Error> {
+    fn init_handle(&mut self) -> Result<HandleId> {
         let session_id = self.session_id()?;
 
         let response: SessionOrHandleResponse = self.request(&json!({
@@ -108,21 +105,21 @@ impl JanusClient {
     }
 
     /// Returns session id if present.
-    pub fn session_id(&self) -> Result<SessionId, Error> {
+    pub fn session_id(&self) -> Result<SessionId> {
         self.session_id
             .clone()
-            .ok_or_else(|| err_msg("Session is not initialized"))
+            .ok_or_else(|| format_err!("Session is not initialized"))
     }
 
     /// Returns handle id for the `PLUGIN` if present.
-    pub fn handle_id(&self) -> Result<HandleId, Error> {
+    pub fn handle_id(&self) -> Result<HandleId> {
         self.handle_id
             .clone()
-            .ok_or_else(|| err_msg("Handle is not initialized"))
+            .ok_or_else(|| format_err!("Handle is not initialized"))
     }
 
     /// Publish a message to Janus.
-    pub fn publish<T: Serialize>(&mut self, payload: &T) -> Result<(), Error> {
+    pub fn publish<T: Serialize>(&mut self, payload: &T) -> Result<()> {
         let outgoing_request = OutgoingRequest::unicast(
             payload,
             OutgoingRequestProperties::new(IGNORE, IGNORE, IGNORE),
@@ -131,13 +128,13 @@ impl JanusClient {
 
         self.agent
             .publish(&outgoing_request.into_envelope()?)
-            .map_err(|err| format_err!("Failed to publish: {}", err))
+            .context("Failed to publish")
     }
 
     /// Publish a message to Janus and wait for response on it.
     /// It adds `transaction` field to the `payload` with random number to match the response.
     /// Returns the response deserialized to `R` type.
-    pub fn request<T, R>(&mut self, payload: &T) -> Result<R, Error>
+    pub fn request<T, R>(&mut self, payload: &T) -> Result<R>
     where
         T: Serialize,
         for<'de> R: Deserialize<'de>,
@@ -149,7 +146,7 @@ impl JanusClient {
 
         payload
             .as_object_mut()
-            .ok_or_else(|| err_msg("Payload is not a JSON object"))?
+            .ok_or_else(|| format_err!("Payload is not a JSON object"))?
             .insert(String::from("transaction"), json!(transaction));
 
         self.publish(&payload)?;
@@ -160,11 +157,7 @@ impl JanusClient {
     /// Skips intermediate messages that are unrelated to the `transaction`.
     /// Returns deserialized response on success.
     /// Returns error on timeout or intermediate messagees limit excess – `RESPONSE_SKIP_MAX`.
-    pub fn wait_for_response<R>(
-        &self,
-        transaction: &Transaction,
-        timeout: Duration,
-    ) -> Result<R, Error>
+    pub fn wait_for_response<R>(&self, transaction: &Transaction, timeout: Duration) -> Result<R>
     where
         for<'de> R: Deserialize<'de>,
     {
@@ -172,13 +165,11 @@ impl JanusClient {
 
         loop {
             if skip_counter == RESPONSE_SKIP_MAX {
-                let err = format_err!(
+                bail!(
                     "Skipped {} messages, but no one is a response on {:?}",
                     RESPONSE_SKIP_MAX,
                     transaction,
                 );
-
-                return Err(err);
             }
 
             match self.receiver.recv_timeout(timeout) {
@@ -186,34 +177,28 @@ impl JanusClient {
                     let payload = Self::parse_response(&publish.payload.as_slice())?;
 
                     if Self::is_expected_transaction(&payload, transaction) {
-                        return serde_json::from_value::<R>(payload.to_owned())
-                            .map_err(|err| format_err!("Failed to typify message: {}", err));
+                        let err = serde_json::from_value::<R>(payload.to_owned());
+                        return err.context("Failed to typify message");
                     } else {
                         skip_counter += 1;
                     }
                 }
                 Ok(_) => (),
-                Err(_) => {
-                    let err =
-                        format_err!("Timed out waiting for the response on {:?}", transaction);
-
-                    return Err(err);
-                }
+                Err(_) => bail!("Timed out waiting for the response on {:?}", transaction),
             }
         }
     }
 
-    fn parse_response(payload: &[u8]) -> Result<serde_json::Value, Error> {
+    fn parse_response(payload: &[u8]) -> Result<serde_json::Value> {
         let json = serde_json::from_slice::<serde_json::Value>(payload)?;
 
         let payload_str = json
             .get("payload")
-            .ok_or_else(|| err_msg("Missing payload in response"))?
+            .ok_or_else(|| format_err!("Missing payload in response"))?
             .as_str()
-            .ok_or_else(|| err_msg("Response payload is not a string"))?;
+            .ok_or_else(|| format_err!("Response payload is not a string"))?;
 
-        serde_json::from_str::<serde_json::Value>(payload_str)
-            .map_err(|err| format_err!("Failed to parse message: {}", err))
+        serde_json::from_str::<serde_json::Value>(payload_str).context("Failed to parse message")
     }
 
     fn is_expected_transaction(payload: &serde_json::Value, transaction: &Transaction) -> bool {
@@ -226,7 +211,7 @@ impl JanusClient {
     }
 
     /// Convenience wrapper around `request` to send send a message to the plugin handle.
-    pub fn request_message<T, R>(&mut self, body: T) -> Result<R, Error>
+    pub fn request_message<T, R>(&mut self, body: T) -> Result<R>
     where
         T: Serialize,
         for<'de> R: Deserialize<'de>,
@@ -242,7 +227,7 @@ impl JanusClient {
         }))
     }
 
-    fn graceful_disconnect(&mut self) -> Result<(), Error> {
+    fn graceful_disconnect(&mut self) -> Result<()> {
         if let Some(session_id) = self.session_id.clone() {
             if let Some(handle_id) = self.handle_id.clone() {
                 let _response: IgnoredResponse = self.request(&json!({

@@ -1,8 +1,8 @@
 use std::thread;
 use std::time::Duration;
 
+use anyhow::Result;
 use atom::AtomSetOnce;
-use failure::Error;
 
 use crate::conf::Config;
 use crate::message_handler::{JanusSender, MessageHandlingLoop};
@@ -17,7 +17,7 @@ macro_rules! app {
     () => {
         crate::app::APP
             .get()
-            .ok_or_else(|| failure::err_msg("App is not initialized"))
+            .ok_or_else(|| anyhow::format_err!("App is not initialized"))
     };
 }
 
@@ -29,7 +29,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn init(config: Config) -> Result<(), Error> {
+    pub fn init(config: Config) -> Result<()> {
         config.sentry.as_ref().map(|sentry_config| {
             janus_info!("[CONFERENCE] Initializing Sentry");
             svc_error::extension::sentry::init(sentry_config)
@@ -54,7 +54,7 @@ impl App {
         Ok(())
     }
 
-    pub fn new(config: Config) -> Result<Self, Error> {
+    pub fn new(config: Config) -> Result<Self> {
         let uploader = Uploader::build(config.uploading.clone())?;
 
         Ok(Self {

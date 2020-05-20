@@ -2,8 +2,9 @@ use std::fmt;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::result::Result as StdResult;
 
-use failure::{bail, err_msg, format_err, Error};
+use anyhow::{bail, format_err, Context, Result};
 use rusoto_core::request::HttpClient;
 use rusoto_credential::StaticProvider;
 use rusoto_s3::{
@@ -25,7 +26,7 @@ pub struct Uploader {
 }
 
 impl fmt::Debug for Uploader {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> StdResult<(), fmt::Error> {
         write!(formatter, "<<Uploader>>")?;
         Ok(())
     }
@@ -34,7 +35,7 @@ impl fmt::Debug for Uploader {
 const PART_SIZE: usize = 1024 * 1024 * 100;
 
 impl Uploader {
-    pub fn build(config: Config) -> Result<Self, Error> {
+    pub fn build(config: Config) -> Result<Self> {
         let region = Region::Custom {
             name: config.region,
             endpoint: config.endpoint,
@@ -49,9 +50,8 @@ impl Uploader {
         Ok(Self { client })
     }
 
-    pub fn upload_file(&self, path: &Path, bucket: &str, object: &str) -> Result<(), Error> {
-        let mut file = File::open(&path)
-            .map_err(|err| format_err!("Failed to open source file for upload: {}", err))?;
+    pub fn upload_file(&self, path: &Path, bucket: &str, object: &str) -> Result<()> {
+        let mut file = File::open(&path).context("Failed to open source file for upload")?;
 
         let create_req = CreateMultipartUploadRequest {
             bucket: bucket.to_owned(),
@@ -63,9 +63,9 @@ impl Uploader {
             .client
             .create_multipart_upload(create_req)
             .sync()
-            .map_err(|err| format_err!("S3 multipart upload creation error: {:?}", err))?
+            .context("S3 multipart upload creation error")?
             .upload_id
-            .ok_or_else(|| err_msg("S3 multipart creation response missing upload id"))?;
+            .ok_or_else(|| format_err!("S3 multipart creation response missing upload id"))?;
 
         match self.upload_parts(&mut file, bucket, object, &upload_id) {
             Ok(parts) => {
@@ -80,7 +80,7 @@ impl Uploader {
                 self.client
                     .complete_multipart_upload(complete_req)
                     .sync()
-                    .map_err(|err| format_err!("Failed to complete S3 uploading: {}", err))?;
+                    .context("Failed to complete S3 uploading")?;
 
                 Ok(())
             }
@@ -107,7 +107,7 @@ impl Uploader {
         bucket: &str,
         object: &str,
         upload_id: &str,
-    ) -> Result<Vec<CompletedPart>, Error> {
+    ) -> Result<Vec<CompletedPart>> {
         let mut parts = Vec::new();
 
         for part_number in 1.. {
@@ -115,7 +115,7 @@ impl Uploader {
 
             let size = file
                 .read(&mut buffer[..])
-                .map_err(|err| format_err!("Error reading source file for upload: {}", err))?;
+                .context("Error reading source file for upload")?;
 
             if size == 0 {
                 break;

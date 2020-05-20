@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use failure::Error;
+use anyhow::{Context, Error, Result};
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
@@ -103,19 +103,21 @@ impl TryFrom<&Payload> for JanssonValue {
         serde_json::to_value(payload)
             .map_err(Error::from)
             .and_then(|ref json_value| utils::serde_to_jansson(json_value))
-            .map_err(|err| format_err!("Failed to serialize response: {}", err))
+            .context("Failed to serialize response")
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use anyhow::Result;
     use janus::JanssonEncodingFlags;
     use serde_json::json;
     use svc_error::Error as SvcError;
 
+    use super::*;
+
     #[test]
-    fn serialize_ok_payload() -> Result<(), Error> {
+    fn serialize_ok_payload() -> Result<()> {
         let payload = Payload::from(json!({"result": "ok"}));
         let jansson_value = JanssonValue::try_from(&payload)?;
         let json_str = jansson_value.to_libcstring(JanssonEncodingFlags::empty());
@@ -127,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn serialize_error_payload() -> Result<(), Error> {
+    fn serialize_error_payload() -> Result<()> {
         let error = SvcError::builder()
             .status(StatusCode::NOT_FOUND)
             .detail("Not Found")
