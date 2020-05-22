@@ -6,15 +6,13 @@ extern crate janus_plugin as janus;
 extern crate serde_derive;
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
-extern crate failure;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
 
-use failure::Error;
+use anyhow::{bail, format_err, Context, Result};
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
     PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
@@ -67,7 +65,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     0
 }
 
-fn init_config(config_path: *const c_char) -> Result<Config, Error> {
+fn init_config(config_path: *const c_char) -> Result<Config> {
     let config_path = unsafe { CStr::from_ptr(config_path) };
     let config_path = config_path.to_str()?;
     let config_path = Path::new(config_path);
@@ -82,7 +80,7 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     }
 }
 
-fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
+fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_write_lock(|mut switchboard| {
         let session_id = SessionId::new();
         janus_verb!("[CONFERENCE] Initializing session {}", session_id);
@@ -93,7 +91,7 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<(), Error> {
         //          To prevent this we have to store this variable as is and make sure it won't
         //          be dropped until there're no callbacks are possible to call for this handle.
         let session = unsafe { SessionWrapper::associate(handle, session_id) }
-            .map_err(|err| format_err!("Session associate error: {}", err))?;
+            .context("Session associate error")?;
 
         switchboard.connect(session)?;
         Ok(())
@@ -125,7 +123,7 @@ fn handle_message_impl(
     transaction: *mut c_char,
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
-) -> Result<(), Error> {
+) -> Result<()> {
     let session_id = session_id(handle)?;
     janus_verb!("[CONFERENCE] Handling message on {}.", session_id);
 
@@ -140,7 +138,7 @@ fn handle_message_impl(
         app!()?
             .message_handling_loop
             .schedule_request(session_id, &transaction, &json, jsep_offer)
-            .map_err(|err| format_err!("Failed to schedule message handling: {}", err))?;
+            .context("Failed to schedule message handling")?;
     }
 
     Ok(())
@@ -156,7 +154,7 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
     report_error(setup_media_impl(handle));
 }
 
-fn setup_media_impl(handle: *mut PluginSession) -> Result<(), Error> {
+fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
         switchboard.publisher_to(session_id).map(send_fir);
@@ -179,7 +177,7 @@ fn incoming_rtp_impl(
     video: c_int,
     buf: *mut c_char,
     len: c_int,
-) -> Result<(), Error> {
+) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
 
@@ -229,7 +227,7 @@ fn incoming_rtcp_impl(
     video: c_int,
     buf: *mut c_char,
     len: c_int,
-) -> Result<(), Error> {
+) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
         let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
@@ -282,7 +280,7 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
     report_error(destroy_session_impl(handle, error));
 }
 
-fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<(), Error> {
+fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<()> {
     let session_id = session_id(handle)?;
     janus_verb!("[CONFERENCE] Destroying Conference session {}", session_id);
 
@@ -297,7 +295,7 @@ extern "C" fn destroy() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-fn session_id(handle: *mut PluginSession) -> Result<SessionId, Error> {
+fn session_id(handle: *mut PluginSession) -> Result<SessionId> {
     match unsafe { SessionWrapper::from_ptr(handle) } {
         Ok(session) => Ok(**session),
         Err(err) => bail!("Failed to get session: {}", err),
@@ -308,7 +306,7 @@ fn send_pli(publisher: SessionId) {
     report_error(send_pli_impl(publisher));
 }
 
-fn send_pli_impl(publisher: SessionId) -> Result<(), Error> {
+fn send_pli_impl(publisher: SessionId) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
         let session = switchboard.session(publisher)?.lock().map_err(|err| {
             format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
@@ -324,7 +322,7 @@ fn send_fir(publisher: SessionId) {
     report_error(send_fir_impl(publisher));
 }
 
-fn send_fir_impl(publisher: SessionId) -> Result<(), Error> {
+fn send_fir_impl(publisher: SessionId) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
         let session = switchboard.session(publisher)?.lock().map_err(|err| {
             format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
@@ -338,7 +336,7 @@ fn send_fir_impl(publisher: SessionId) -> Result<(), Error> {
     })
 }
 
-fn report_error(res: Result<(), Error>) {
+fn report_error(res: Result<()>) {
     match res {
         Ok(_) => {}
         Err(err) => {

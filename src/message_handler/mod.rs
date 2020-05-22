@@ -3,7 +3,7 @@ mod operations;
 
 use std::ffi::CString;
 
-use failure::Error;
+use anyhow::{format_err, Context, Result};
 use janus::JanssonValue;
 
 use self::generic::{MessageHandlingLoop as GenericLoop, Router, Sender};
@@ -54,7 +54,7 @@ impl Sender for JanusSender {
         transaction: &str,
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         app!()?.switchboard.with_read_lock(move |switchboard| {
             let session = switchboard.session(session_id)?.lock().map_err(|err| {
                 format_err!(
@@ -64,10 +64,11 @@ impl Sender for JanusSender {
                 )
             })?;
 
-            let txn = CString::new(transaction.to_owned()).map_err(Error::from)?;
+            let txn = CString::new(transaction.to_owned())
+                .context("Failed to cast transaction to CString")?;
 
             janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
-                .map_err(Error::from)
+                .context("Failed to push event")
         })
     }
 }

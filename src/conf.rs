@@ -1,7 +1,7 @@
 use std::path::Path;
 
+use anyhow::Result;
 use config;
-use failure::Error;
 
 use crate::recorder;
 use crate::uploader;
@@ -17,7 +17,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_path(p: &Path) -> Result<Self, Error> {
+    pub fn from_path(p: &Path) -> Result<Self> {
         let mut p = p.to_path_buf();
         p.push(CONFIG_FILE_NAME);
 

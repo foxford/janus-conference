@@ -14,18 +14,18 @@ include!("./janus_client.rs");
 extern crate gstreamer;
 extern crate gstreamer_pbutils;
 extern crate rusoto_s3;
-extern crate rustoto_signature;
-extern crate s4;
+extern crate rusoto_signature;
 extern crate tempfile;
 
 use std::path::{Path, PathBuf};
-use std::{env, fs};
+use std::{env, fs, io};
 
 use gstreamer as gst;
 use gstreamer_pbutils::prelude::*;
+use rusoto_core::request::HttpClient;
+use rusoto_credential::StaticProvider;
 use rusoto_s3::{DeleteObjectRequest, GetObjectRequest, S3Client, S3};
 use rusoto_signature::Region;
-use s4::S4;
 use tempfile::TempDir;
 
 const BUCKET: &str = "origin.webinar.example.org";
@@ -97,7 +97,7 @@ struct TestRecording {
 }
 
 impl TestRecording {
-    fn new() -> Result<Self, Error> {
+    fn new() -> Result<Self> {
         let mut rng = rand::thread_rng();
         let id = rng.gen::<u64>().to_string();
         let path = Path::new(RECORDINGS_DIR).join(&id);
@@ -106,7 +106,7 @@ impl TestRecording {
         Ok(Self { id, path })
     }
 
-    fn copy_test_files(destination_path: &PathBuf) -> Result<(), Error> {
+    fn copy_test_files(destination_path: &PathBuf) -> Result<()> {
         for entry in fs::read_dir(TEST_RECORDING_PATH)? {
             let entry = entry?;
             let path = entry.path();
@@ -114,7 +114,7 @@ impl TestRecording {
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mkv") {
                 let name = path
                     .file_name()
-                    .ok_or_else(|| err_msg("Failed to get file name"))?;
+                    .ok_or_else(|| format_err!("Failed to get file name"))?;
 
                 fs::copy(&path, &destination_path.join(&name))?;
             }
@@ -138,7 +138,7 @@ struct S3ClientWrapper {
 }
 
 impl S3ClientWrapper {
-    fn new() -> Result<Self, Error> {
+    fn new() -> Result<Self> {
         let region = Region::Custom {
             name: env::var("APP_UPLOADING__REGION")?,
             endpoint: env::var("APP_UPLOADING__ENDPOINT")?,
@@ -146,11 +146,17 @@ impl S3ClientWrapper {
 
         let access_key_id = env::var("APP_UPLOADING__ACCESS_KEY_ID")?;
         let secret_access_key = env::var("APP_UPLOADING__SECRET_ACCESS_KEY")?;
-        let client = s4::new_s3client_with_credentials(region, access_key_id, secret_access_key)?;
+
+        let client = S3Client::new_with(
+            HttpClient::new()?,
+            StaticProvider::new_minimal(access_key_id, secret_access_key),
+            region,
+        );
+
         Ok(Self { client })
     }
 
-    fn get_object<P>(&self, bucket: &str, object: &str, destination: P) -> Result<(), Error>
+    fn get_object<P>(&self, bucket: &str, object: &str, destination: P) -> Result<()>
     where
         P: AsRef<Path>,
     {
@@ -160,11 +166,22 @@ impl S3ClientWrapper {
             ..Default::default()
         };
 
-        self.client.download_to_file(request, destination)?;
+        let mut resp = self.client.get_object(request).sync()?;
+        let body = resp.body.take().context("Missing response body")?;
+
+        let mut target = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .context("Failed to open destination file")?;
+
+        io::copy(&mut body.into_blocking_read(), &mut target)
+            .context("Failed to write downloaded file")?;
+
         Ok(())
     }
 
-    fn delete_object(&self, bucket: &str, object: &str) -> Result<(), Error> {
+    fn delete_object(&self, bucket: &str, object: &str) -> Result<()> {
         let request = DeleteObjectRequest {
             bucket: bucket.to_owned(),
             key: object.to_owned(),
@@ -177,12 +194,12 @@ impl S3ClientWrapper {
 }
 
 // Helper function for discovering video file duration using gstreamer discoverer.
-fn discover_duration(path: &PathBuf) -> Result<u64, Error> {
+fn discover_duration(path: &PathBuf) -> Result<u64> {
     gstreamer_pbutils::Discoverer::new(gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT))?
         .discover_uri(&format!("file://{}", path.as_path().to_string_lossy()))?
         .get_duration()
         .mseconds()
-        .ok_or_else(|| err_msg("Empty duration"))
+        .ok_or_else(|| format_err!("Empty duration"))
 }
 
 // JSON responses

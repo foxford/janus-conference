@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::{format_err, Error};
 use http::StatusCode;
 use svc_error::Error as SvcError;
 

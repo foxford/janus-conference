@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::{bail, Context, Result};
 use janus::sdp::{AudioCodec, OfferAnswerParameters, Sdp, VideoCodec};
 use serde_json::Value as JsonValue;
 
@@ -11,9 +11,9 @@ pub enum Jsep {
 
 impl Jsep {
     /// Parses JSEP SDP offer and returns the answer.
-    pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<Self>, Error> {
+    pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<Self>> {
         let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
-            .map_err(|err| format_err!("Failed to deserialize JSEP: {}", err))?;
+            .context("Failed to deserialize JSEP")?;
 
         let offer_sdp = match offer {
             Jsep::Offer { ref sdp } => sdp,

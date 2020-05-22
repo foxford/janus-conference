@@ -1,4 +1,4 @@
-use failure::{err_msg, Error};
+use anyhow::{format_err, Error};
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
@@ -100,7 +100,7 @@ fn recorder_error(err: RecorderError) -> SvcError {
             internal_error(format_err!("Recorder IO error: {}", cause))
         }
         RecorderError::RecordingMissing => {
-            error(StatusCode::NOT_FOUND, err_msg("Record not found"))
+            error(StatusCode::NOT_FOUND, format_err!("Record not found"))
         }
     }
 }
