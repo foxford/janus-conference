@@ -47,7 +47,8 @@ const FULL_RECORD_FILENAME: &str = "full";
 
 const RECORDING_PIPELINE: &str = r#"
     appsrc name=video_src stream-type=stream format=time is-live=true do-timestamp=true !
-        application/x-rtp, media=video, encoding-name=H264, payload=(int)96, clock-rate=(int)90000 !
+        application/x-rtp, media=video, encoding-name=H264, payload=(int)126, clock-rate=(int)90000 !
+        rtpjitterbuffer !
         rtph264depay !
         h264parse !
         avdec_h264 !
@@ -60,7 +61,8 @@ const RECORDING_PIPELINE: &str = r#"
         mux.video_0
 
     appsrc name=audio_src stream-type=stream format=time is-live=true do-timestamp=true !
-        application/x-rtp, media=audio, encoding-name=OPUS, payload=(int)111, clock-rate=(int)48000 !
+        application/x-rtp, media=audio, encoding-name=OPUS, payload=(int)109, clock-rate=(int)48000 !
+        rtpjitterbuffer !
         rtpopusdepay !
         opusparse !
         queue !
