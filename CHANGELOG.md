@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.3 (June 4, 2020)
+
+### Changes
+- Switch to anyhow from failure ([f4e33a5](https://github.com/netology-group/janus-conference/commit/f4e33a51dc7b3a75be4fef2b5116bc4221396f08))
+- Add rtpjitterbuffer to recording pipeline ([f23df50](https://github.com/netology-group/janus-conference/commit/f23df50aad6f69e05bbdb0d6775b9743d1176cf7))
+
+
 ## v0.6.2 (April 30, 2020)
 
 ### Changes
