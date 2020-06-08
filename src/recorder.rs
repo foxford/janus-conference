@@ -13,7 +13,6 @@ use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
-use gstreamer_pbutils::prelude::*;
 
 use crate::switchboard::StreamId;
 
@@ -266,8 +265,8 @@ impl Recorder {
         filesink.set_property("location", &path)?;
 
         // Start the pipeline.
-        if pipeline.set_state(gst::State::Playing) == gst::StateChangeReturn::Failure {
-            bail!("Failed to put pipeline to the `playing` state");
+        if let Err(err) = pipeline.set_state(gst::State::Playing) {
+            bail!("Failed to put pipeline to the `playing` state: {}", err);
         }
 
         // Handle the pipeline in a separate thread.
@@ -290,22 +289,20 @@ impl Recorder {
                             audio_src.push_buffer(buf)
                         };
 
-                        if res != gst::FlowReturn::Ok {
-                            bail!("Error pushing buffer to AppSrc: {:?}", res);
+                        if let Err(err) = res {
+                            bail!("Error pushing buffer to AppSrc: {}", err);
                         };
                     }
                 }
             }
 
             // Notify the pipeline that there will be no more RTP packets and finish it.
-            let res = video_src.end_of_stream();
-            if res != gst::FlowReturn::Ok {
-                bail!("Failed to finish video stream: {:?}", res);
+            if let Err(err) = video_src.end_of_stream() {
+                bail!("Failed to finish video stream: {}", err);
             }
 
-            let res = audio_src.end_of_stream();
-            if res != gst::FlowReturn::Ok {
-                bail!("Failed to finish audio stream: {:?}", res);
+            if let Err(err) = audio_src.end_of_stream() {
+                bail!("Failed to finish audio stream: {}", err);
             }
 
             let eos_ev = gst::Event::new_eos().build();
@@ -411,6 +408,7 @@ impl Recorder {
             if let Some(result) = maybe_result {
                 tx.send(result)
                     .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
+
                 main_loop_clone.quit();
             }
 
@@ -419,13 +417,20 @@ impl Recorder {
 
         main_loop.run();
         Self::shutdown_pipeline(pipeline);
-        bus.remove_watch();
+
+        if let Err(err) = bus.remove_watch() {
+            janus_err!(
+                "[CONFERENCE] Failed to remove recording pipeline watch: {}",
+                err
+            );
+        }
+
         rx.recv().unwrap_or_else(|err| Err(format_err!("{}", err)))
     }
 
     fn shutdown_pipeline(pipeline: &gst::Pipeline) {
-        if pipeline.set_state(gst::State::Null) == gst::StateChangeReturn::Failure {
-            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL");
+        if let Err(err) = pipeline.set_state(gst::State::Null) {
+            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL: {}", err);
         }
     }
 

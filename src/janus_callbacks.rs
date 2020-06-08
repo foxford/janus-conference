@@ -1,6 +1,9 @@
-use std::os::raw::{c_char, c_int};
+use std::os::raw::c_char;
 
-use janus::{JanssonValue, JanusError, JanusResult, PluginCallbacks, RawJanssonValue};
+use janus::{
+    JanssonValue, JanusError, JanusResult, PluginCallbacks, PluginRtcpPacket, PluginRtpPacket,
+    RawJanssonValue,
+};
 
 use super::PLUGIN;
 use crate::switchboard::Session;
@@ -20,12 +23,12 @@ fn acquire_callbacks() -> &'static PluginCallbacks {
     unsafe { CALLBACKS }.expect("Gateway is not set")
 }
 
-pub fn relay_rtp(session: &Session, video: c_int, buf: &mut [i8]) {
-    (acquire_callbacks().relay_rtp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+pub fn relay_rtp(session: &Session, packet: &mut PluginRtpPacket) {
+    (acquire_callbacks().relay_rtp)(session.as_ptr(), packet);
 }
 
-pub fn relay_rtcp(session: &Session, video: c_int, buf: &mut [i8]) {
-    (acquire_callbacks().relay_rtcp)(session.as_ptr(), video, buf.as_mut_ptr(), buf.len() as i32);
+pub fn relay_rtcp(session: &Session, packet: &mut PluginRtcpPacket) {
+    (acquire_callbacks().relay_rtcp)(session.as_ptr(), packet);
 }
 
 pub fn push_event(

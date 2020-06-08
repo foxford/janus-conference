@@ -10,16 +10,16 @@ general: {
   opaqueid_in_api = true
 }
 media: {
-  max_nack_queue = 0
-  rtp_port_range = "30000-30099"
+  rtp_port_range = "30000-30020"
   no_media_timer = 10
 }
 plugins: {
-  disable = "libjanus_audiobridge.so,libjanus_echotest.so,libjanus_nosip.so,libjanus_recordplay.so,libjanus_streaming.so,libjanus_textroom.so,libjanus_videocall.so,libjanus_videoroom.so,libjanus_voicemail.so"
+  disable = "libjanus_audiobridge.so,libjanus_echotest.so,libjanus_nosip.so,libjanus_recordplay.so,libjanus_sip.so,libjanus_streaming.so,libjanus_textroom.so,libjanus_videocall.so,libjanus_videoroom.so,libjanus_voicemail.so"
 }
 transports: {
+  disable = "libjanus_pfunix.so,libjanus_websockets.so"
 }
 events: {
   broadcast = true
-  disable = "libjanus_sampleevh.so"
+  disable = "libjanus_sampleevh.so,libjanus_gelfevh.so,libjanus_wsevh.so"
 }

@@ -15,7 +15,8 @@ use std::slice;
 use anyhow::{bail, format_err, Context, Result};
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
-    PluginCallbacks, PluginResult, PluginSession, RawJanssonValue, RawPluginResult,
+    PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
+    PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 #[macro_use]
@@ -168,23 +169,19 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
     })
 }
 
-extern "C" fn incoming_rtp(handle: *mut PluginSession, video: c_int, buf: *mut c_char, len: c_int) {
-    report_error(incoming_rtp_impl(handle, video, buf, len));
+extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPacket) {
+    report_error(incoming_rtp_impl(handle, packet));
 }
 
-fn incoming_rtp_impl(
-    handle: *mut PluginSession,
-    video: c_int,
-    buf: *mut c_char,
-    len: c_int,
-) -> Result<()> {
+fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
 
         let state = switchboard.state(session_id)?;
         state.touch_last_rtp_packet_timestamp()?;
 
-        let buf_slice = unsafe { std::slice::from_raw_parts_mut(buf, len as usize) };
+        let mut packet = unsafe { &mut *packet };
+        let video = packet.video;
 
         for subscriber_id in switchboard.subscribers_to(session_id) {
             let subscriber_session =
@@ -196,7 +193,7 @@ fn incoming_rtp_impl(
                     )
                 })?;
 
-            janus_callbacks::relay_rtp(&subscriber_session, video, buf_slice);
+            janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
         }
 
         if let Some(recorder) = state.recorder() {
@@ -205,7 +202,10 @@ fn incoming_rtp_impl(
                 _ => true,
             };
 
-            let buf = unsafe { std::slice::from_raw_parts(buf as *const u8, len as usize) };
+            let buf = unsafe {
+                std::slice::from_raw_parts(packet.buffer as *const u8, packet.length as usize)
+            };
+
             recorder.record_packet(buf, is_video)?;
         }
 
@@ -213,30 +213,21 @@ fn incoming_rtp_impl(
     })
 }
 
-extern "C" fn incoming_rtcp(
-    handle: *mut PluginSession,
-    video: c_int,
-    buf: *mut c_char,
-    len: c_int,
-) {
-    report_error(incoming_rtcp_impl(handle, video, buf, len));
+extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) {
+    report_error(incoming_rtcp_impl(handle, packet));
 }
 
-fn incoming_rtcp_impl(
-    handle: *mut PluginSession,
-    video: c_int,
-    buf: *mut c_char,
-    len: c_int,
-) -> Result<()> {
+fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
-        let packet = unsafe { slice::from_raw_parts_mut(buf, len as usize) };
+        let mut packet = unsafe { &mut *packet };
+        let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
-        match video {
-            1 if janus::rtcp::has_pli(packet) => {
+        match packet.video {
+            1 if janus::rtcp::has_pli(data) => {
                 switchboard.publisher_to(session_id).map(send_pli);
             }
-            1 if janus::rtcp::has_fir(packet) => {
+            1 if janus::rtcp::has_fir(data) => {
                 switchboard.publisher_to(session_id).map(send_fir);
             }
             _ => {
@@ -250,7 +241,7 @@ fn incoming_rtcp_impl(
                             )
                         })?;
 
-                    janus_callbacks::relay_rtcp(&subscriber_session, video, packet);
+                    janus_callbacks::relay_rtcp(&subscriber_session, &mut packet);
                 }
             }
         }
@@ -259,12 +250,7 @@ fn incoming_rtcp_impl(
     })
 }
 
-extern "C" fn incoming_data(
-    _handle: *mut PluginSession,
-    _label: *mut c_char,
-    _buf: *mut c_char,
-    _len: c_int,
-) {
+extern "C" fn incoming_data(_handle: *mut PluginSession, _packet: *mut PluginDataPacket) {
     // Dropping incoming data.
 }
 
@@ -313,7 +299,14 @@ fn send_pli_impl(publisher: SessionId) -> Result<()> {
         })?;
 
         let mut pli = janus::rtcp::gen_pli();
-        janus_callbacks::relay_rtcp(&session, 1, &mut pli);
+
+        let mut packet = PluginRtcpPacket {
+            video: 1,
+            buffer: pli.as_mut_ptr(),
+            length: pli.len() as i16,
+        };
+
+        janus_callbacks::relay_rtcp(&session, &mut packet);
         Ok(())
     })
 }
@@ -331,7 +324,14 @@ fn send_fir_impl(publisher: SessionId) -> Result<()> {
         let state = switchboard.state(publisher)?;
         let mut seq = state.increment_fir_seq();
         let mut fir = janus::rtcp::gen_fir(&mut seq);
-        janus_callbacks::relay_rtcp(&session, 1, &mut fir);
+
+        let mut packet = PluginRtcpPacket {
+            video: 1,
+            buffer: fir.as_mut_ptr(),
+            length: fir.len() as i16,
+        };
+
+        janus_callbacks::relay_rtcp(&session, &mut packet);
         Ok(())
     })
 }
@@ -349,7 +349,7 @@ fn report_error(res: Result<()>) {
 
 const PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
-        api_version: 13,
+        api_version: 15,
         version: 1,
         name: c_str!("Janus Conference plugin"),
         package: c_str!("janus.plugin.conference"),
