@@ -19,15 +19,17 @@ export COMPOSE_FILE=docker/docker-compose.yml
 docker-compose up
 ```
 
-### How to run conference example
+### How to run example
 
 ```bash
-# Open example page in browser
-open examples/index.html
+cd examples
+npm install
+npm run build
+open index.html
 ```
 
-Click `Start translation` button (page should ask for permission
-to use web camera) then open page again in another tab and click
+Click `Connect` & `Start translation` button (page should ask for permission
+to use web camera) then open page again in another tab and click `Connect` &
 `Join translation`. On publisher page you should see local stream
 on the left and on listener page you should see remote stream on
 the right.
