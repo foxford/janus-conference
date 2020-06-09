@@ -1,5 +1,10 @@
 'use strict';
 
+import mqtt from 'mqtt';
+import { transformOfferSDP } from './sdp';
+
+///////////////////////////////////////////////////////////////////////////////
+
 const MQTT_URL = 'ws://0.0.0.0:8080/mqtt';
 const SVC_AUDIENCE = 'dev.svc.example.org';
 const JANUS_ACCOUNT_ID = `janus-gateway.${SVC_AUDIENCE}`;
@@ -228,18 +233,15 @@ class Peer {
   }
 
   async _createSdpOffer(isPublisher) {
-    return new Promise((resolve, reject) => {
-      this.peerConnection.createOffer(
-        sdpOffer => {
-          // Replace VP8/VP9 codecs with H264.
-          sdpOffer.sdp = sdpOffer.sdp.replace("a=rtpmap:96 VP8/90000", "a=rtpmap:96 H264/90000");
-          sdpOffer.sdp = sdpOffer.sdp.replace("a=rtpmap:98 VP9/90000", "a=rtpmap:98 H264/90000");
-          resolve(sdpOffer);
-        },
-        err => reject(err),
-        { offerToReceiveVideo: !isPublisher, offerToReceiveAudio: !isPublisher }
-      );
-    });
+    return this.peerConnection
+      .createOffer({
+        offerToReceiveVideo: !isPublisher,
+        offerToReceiveAudio: !isPublisher
+      })
+      .then(sdpOffer => {
+        sdpOffer.sdp = transformOfferSDP(sdpOffer.sdp);
+        return sdpOffer;
+      });
   }
 }
 
