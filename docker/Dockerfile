@@ -1,61 +1,88 @@
-# We need ffmpeg 4 to use OPUS in MP4 but Debian stretch has only ffmpeg 4.
-FROM netologygroup/ffmpeg-docker:n4.1.3 as ffmpeg
-
 # Using Debian here because official Rust image is based on Debian too.
-FROM debian:stretch as build-janus
+FROM debian:buster as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Install dependencies
 ## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.3.0
-
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
-        libconfig-dev \
-        libmicrohttpd-dev \
-        libjansson-dev \
-        libnice-dev \
-        libcurl4-openssl-dev \
-        libsofia-sip-ua-dev \
-        libopus-dev \
-        libogg-dev \
-        libwebsockets-dev \
-        libsrtp2-dev \
-        gengetopt \
-        ca-certificates \
-        git \
-        libtool \
-        m4 \
+        autoconf \
         automake \
-        make \
-        libgstreamer1.0-dev \
-        libgstreamer-plugins-base1.0-dev \
+        ca-certificates \
+        curl \
+        ffmpeg \
+        gengetopt \
+        git \
+        gstreamer1.0-libav \
+        gstreamer1.0-plugins-bad \
         gstreamer1.0-plugins-base \
         gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad \
         gstreamer1.0-plugins-ugly \
-        gstreamer1.0-libav \
+        libconfig-dev \
+        libcurl4-openssl-dev \
+        libglib2.0-dev \
+        libgstreamer1.0-dev \
+        libgstreamer-plugins-base1.0-dev \
         libgstrtspserver-1.0-dev \
-    && PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-        && cd "${PAHO_MQTT_BUILD_DIR}" \
-        && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-        && git checkout "v${PAHO_MQTT_VERSION}" \
-        && make \
-        && make install
+        libjansson-dev \
+        libmicrohttpd-dev \
+        libogg-dev \
+        libopus-dev \
+        libsofia-sip-ua-dev \
+        libssl-dev \
+        libtool \
+        libwebsockets-dev \
+        m4 \
+        make \
+        pkg-config \
+        wget
+
+RUN apt-get -y --no-install-recommends install \
+        ninja-build \
+        python3 \
+        python3-pip \
+        python3-setuptools \
+        python3-wheel
 
 ## -----------------------------------------------------------------------------
-## Install FFmpeg
+## Install latest libnice (recommended by Janus devs)
 ## -----------------------------------------------------------------------------
-COPY --from=ffmpeg /build/bin/ffmpeg /usr/local/bin/ffmpeg
+RUN pip3 install meson \
+    && git clone https://gitlab.freedesktop.org/libnice/libnice \
+    && cd libnice \
+    && meson --prefix=/usr build \
+    && ninja -C build \
+    && ninja -C build install
+
+## -----------------------------------------------------------------------------
+## Install libsrtp (with --enable-openssl option)
+## -----------------------------------------------------------------------------
+ARG LIBSRTP_VERSION=2.3.0
+
+RUN wget https://github.com/cisco/libsrtp/archive/v${LIBSRTP_VERSION}.tar.gz \
+    && tar xfv v${LIBSRTP_VERSION}.tar.gz \
+    && cd libsrtp-${LIBSRTP_VERSION} \
+    && ./configure --prefix=/usr --enable-openssl \
+    && make shared_library \
+    && make install
+
+## -----------------------------------------------------------------------------
+## Install Paho MQTT client
+## -----------------------------------------------------------------------------
+ARG PAHO_MQTT_VERSION=1.3.4
+
+RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
+    && cd "${PAHO_MQTT_BUILD_DIR}" \
+    && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
+    && git checkout "v${PAHO_MQTT_VERSION}" \
+    && make \
+    && make install
 
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-
-# TODO: Before the next upgrade consider thsi task:
-#       https://burning-heart.atlassian.net/browse/ULMS-855
-ARG JANUS_GATEWAY_COMMIT='cc59ef4bd9df52ba5c21e25ffd34352f84fdbf2c'
+ARG JANUS_GATEWAY_COMMIT='b8e8f6ea4b5bd750a5643bf894a8b085232fcf42'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
@@ -71,24 +98,30 @@ RUN set -xe \
 
 RUN set -xe \
     && apt-get remove -y \
+        autoconf \
+        automake \
         ca-certificates \
         git \
         libtool \
         m4 \
-        automake \
-        make
+        make \
+        ninja-build \
+        python3 \
+        python3-pip \
+        python3-setuptools \
+        python3-wheel \
+        wget
 
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
 ## -----------------------------------------------------------------------------
-FROM buildpack-deps:stretch as build-plugin-deploy
+FROM buildpack-deps:buster as build-plugin-deploy
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN set -eux; \
-    \
     url="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"; \
     wget "$url"; \
     chmod +x rustup-init; \
