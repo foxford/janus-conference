@@ -13,6 +13,7 @@ use std::path::Path;
 use std::slice;
 
 use anyhow::{bail, format_err, Context, Result};
+use chrono::{Duration, Utc};
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
     PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
@@ -38,6 +39,12 @@ mod uploader;
 use app::App;
 use conf::Config;
 use switchboard::SessionId;
+
+const INITIAL_REMBS: u64 = 4;
+
+lazy_static! {
+    static ref REMB_INTERVAL: Duration = Duration::seconds(5);
+}
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -174,12 +181,33 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 }
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
+    let app = app!()?;
+
+    app.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
-
         let state = switchboard.state(session_id)?;
-        state.touch_last_rtp_packet_timestamp()?;
 
+        // Touch last packet timestamp to drop timeout.
+        state.touch_last_rtp_packet_timestamp();
+
+        // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
+        if let Some(target_bitrate) = app.config.constraint.publisher.bitrate {
+            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
+
+            if initial_rembs_left > 0 {
+                let bitrate = target_bitrate / initial_rembs_left as u32;
+                send_remb(session_id, bitrate);
+                state.touch_last_remb_timestamp();
+                state.increment_initial_rembs_counter();
+            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
+                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                    send_remb(session_id, target_bitrate);
+                    state.touch_last_remb_timestamp();
+                }
+            }
+        }
+
+        // Retransmit packet to publishers as is.
         let mut packet = unsafe { &mut *packet };
         let video = packet.video;
 
@@ -196,6 +224,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
         }
 
+        // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
             let is_video = match video {
                 0 => false,
@@ -329,6 +358,29 @@ fn send_fir_impl(publisher: SessionId) -> Result<()> {
             video: 1,
             buffer: fir.as_mut_ptr(),
             length: fir.len() as i16,
+        };
+
+        janus_callbacks::relay_rtcp(&session, &mut packet);
+        Ok(())
+    })
+}
+
+fn send_remb(publisher: SessionId, bitrate: u32) {
+    report_error(send_remb_impl(publisher, bitrate));
+}
+
+fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
+    app!()?.switchboard.with_read_lock(move |switchboard| {
+        let session = switchboard.session(publisher)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        })?;
+
+        let mut remb = janus::rtcp::gen_remb(bitrate);
+
+        let mut packet = PluginRtcpPacket {
+            video: 1,
+            buffer: remb.as_mut_ptr(),
+            length: remb.len() as i16,
         };
 
         janus_callbacks::relay_rtcp(&session, &mut packet);

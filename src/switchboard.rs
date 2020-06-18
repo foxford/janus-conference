@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, format_err, Context, Result};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use janus::session::SessionWrapper;
 use uuid::Uuid;
 
@@ -42,7 +42,9 @@ impl fmt::Display for SessionId {
 #[derive(Debug)]
 pub struct SessionState {
     fir_seq: AtomicI32,
-    last_rtp_packet_timestamp: AtomicU64,
+    initial_rembs_counter: AtomicU64,
+    last_remb_timestamp: AtomicI64,
+    last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<Recorder>,
 }
 
@@ -50,7 +52,9 @@ impl SessionState {
     fn new() -> Self {
         Self {
             fir_seq: AtomicI32::new(0),
-            last_rtp_packet_timestamp: AtomicU64::new(0),
+            initial_rembs_counter: AtomicU64::new(0),
+            last_remb_timestamp: AtomicI64::new(0),
+            last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
         }
     }
@@ -59,27 +63,43 @@ impl SessionState {
         self.fir_seq.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn since_last_rtp_packet_timestamp(&self) -> Result<Option<Duration>> {
-        match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
-            0 => Ok(None),
-            secs => {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .context("Failed to set last RTP packet timestamp")?;
+    pub fn initial_rembs_counter(&self) -> u64 {
+        self.initial_rembs_counter.load(Ordering::Relaxed)
+    }
 
-                Ok(Some(now - Duration::from_secs(secs)))
+    pub fn increment_initial_rembs_counter(&self) -> u64 {
+        self.initial_rembs_counter.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn last_remb_timestamp(&self) -> Option<DateTime<Utc>> {
+        match self.last_remb_timestamp.load(Ordering::Relaxed) {
+            0 => None,
+            timestamp => {
+                let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
+                Some(DateTime::from_utc(naive_dt, Utc))
             }
         }
     }
 
-    pub fn touch_last_rtp_packet_timestamp(&self) -> Result<()> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("Failed to set last RTP packet timestamp")?
-            .as_secs();
+    pub fn touch_last_remb_timestamp(&self) {
+        self.last_remb_timestamp
+            .store(Utc::now().timestamp(), Ordering::Relaxed);
+    }
 
-        self.last_rtp_packet_timestamp.store(now, Ordering::Relaxed);
-        Ok(())
+    fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
+        match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
+            0 => None,
+            timestamp => {
+                let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
+                let dt = DateTime::from_utc(naive_dt, Utc);
+                Some(Utc::now() - dt)
+            }
+        }
+    }
+
+    pub fn touch_last_rtp_packet_timestamp(&self) {
+        self.last_rtp_packet_timestamp
+            .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
     pub fn recorder(&self) -> Option<&Recorder> {
@@ -292,7 +312,7 @@ impl Switchboard {
                     "[CONFERENCE] Publisher {} timed out on stream {}; No RTP packets from PeerConnection in {} seconds",
                     publisher,
                     stream_id,
-                    timeout.as_secs()
+                    timeout.num_seconds()
                 ),
                 Err(err) => janus_err!(
                     "[CONFERENCE] Failed to vacuum publisher {} on stream {}: {}",
@@ -310,9 +330,8 @@ impl Switchboard {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
-            Ok(None) => false,
-            Ok(Some(duration)) => duration >= *timeout,
-            Err(err) => bail!("Failed to vacuum publisher {}: {}", publisher, err),
+            None => false,
+            Some(duration) => duration >= *timeout,
         };
 
         if is_timed_out {
@@ -352,14 +371,18 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) {
+    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
         janus_info!("[CONFERENCE] Vacuum thread is alive.");
+
+        let std_interval = interval
+            .to_std()
+            .context("Failed to convert vacuum interval")?;
 
         loop {
             self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
                 .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
 
-            thread::sleep(interval);
+            thread::sleep(std_interval);
         }
     }
 }

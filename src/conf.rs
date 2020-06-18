@@ -13,6 +13,7 @@ pub struct Config {
     pub general: General,
     pub recordings: recorder::Config,
     pub uploading: uploader::Config,
+    pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
 }
 
@@ -39,5 +40,15 @@ impl Config {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct General {
-    pub vacuum_interval: u64,
+    pub vacuum_interval: i64,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct Constraint {
+    pub publisher: PublisherConstraint,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct PublisherConstraint {
+    pub bitrate: Option<u32>,
 }

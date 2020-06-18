@@ -1,8 +1,8 @@
 use std::thread;
-use std::time::Duration;
 
 use anyhow::Result;
 use atom::AtomSetOnce;
+use chrono::Duration;
 
 use crate::conf::Config;
 use crate::message_handler::{JanusSender, MessageHandlingLoop};
@@ -46,8 +46,11 @@ impl App {
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
-                let interval = Duration::new(app.config.general.vacuum_interval, 0);
-                app.switchboard.vacuum_publishers_loop(interval);
+                let interval = Duration::seconds(app.config.general.vacuum_interval);
+
+                if let Err(err) = app.switchboard.vacuum_publishers_loop(interval) {
+                    janus_err!("[CONFERENCE] {}", err);
+                }
             }
         });
 

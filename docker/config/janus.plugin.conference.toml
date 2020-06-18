@@ -4,3 +4,6 @@ vacuum_interval = 60
 [recordings]
 directory = "/recordings"
 enabled = true
+
+[constraint.publisher]
+bitrate = 300000
