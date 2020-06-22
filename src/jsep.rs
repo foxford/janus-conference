@@ -48,9 +48,11 @@ impl Jsep {
         answer_sdp: &Sdp,
         bitrate: u32,
     ) -> Result<()> {
-        let m_lines = match answer_sdp.get_mlines().get_mut(&MediaType::JANUS_SDP_VIDEO) {
+        let mut m_lines = answer_sdp.get_mlines();
+
+        let video_m_lines = match m_lines.get_mut(&MediaType::JANUS_SDP_VIDEO) {
             None => return Ok(()),
-            Some(m_lines) => m_lines,
+            Some(video_m_lines) => video_m_lines,
         };
 
         let is_firefox = {
@@ -67,7 +69,7 @@ impl Jsep {
             ("AS", bitrate / 1000)
         };
 
-        for m_line in m_lines {
+        for m_line in video_m_lines {
             if m_line.direction == MediaDirection::JANUS_SDP_SENDRECV
                 || m_line.direction == MediaDirection::JANUS_SDP_SENDONLY
             {
