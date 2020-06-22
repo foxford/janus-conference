@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::result::Result as StdResult;
 use std::sync::mpsc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io, thread};
 
 use anyhow::{bail, format_err, Context, Error, Result};
+use chrono::Utc;
 use glib;
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -256,7 +256,7 @@ impl Recorder {
             .ok_or_else(|| format_err!("Failed to get filesink element named `out`"))?;
 
         // Set output filename to `./recordings/{STREAM_ID}/{CURRENT_TIMESTAMP}.mkv`.
-        let start = unix_time_ms();
+        let start = Utc::now().timestamp_millis();
         let basename = start.to_string();
 
         let path = self.generate_record_path(&basename, MKV_EXTENSION);
@@ -442,12 +442,6 @@ impl Recorder {
             _ => RecorderError::IoError(err),
         })
     }
-}
-
-fn unix_time_ms() -> u64 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-
-    now.as_secs() * 1000 + now.subsec_millis() as u64
 }
 
 struct RecordPart {
