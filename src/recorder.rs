@@ -9,11 +9,9 @@ use std::{fs, io, thread};
 
 use anyhow::{bail, format_err, Context, Error, Result};
 use chrono::Utc;
-use glib;
 use gstreamer as gst;
-use gstreamer::prelude::*;
-use gstreamer_app as gst_app;
 
+use crate::janus_recorder::{Codec, JanusRecorder};
 use crate::switchboard::StreamId;
 
 #[derive(Clone, Deserialize, Debug)]
@@ -43,39 +41,10 @@ const WEBM_EXTENSION: &str = "webm";
 const DISCOVERER_TIMEOUT: u64 = 15;
 const FULL_RECORD_FILENAME: &str = "full";
 
-const RECORDING_PIPELINE: &str = r#"
-    appsrc name=video_src stream-type=stream format=time is-live=true do-timestamp=true !
-        application/x-rtp, media=video, encoding-name=VP8, payload=(int)126, clock-rate=(int)90000 !
-        rtpjitterbuffer !
-        rtpvp8depay !
-        vp8dec !
-        videoscale !
-        videorate !
-        videoconvert !
-        video/x-raw, width=1280, height=720, pixel-aspect-ratio=1/1, framerate=30/1, format=I420, profile=high !
-        vp8enc !
-        queue !
-        mux.video_0
-
-    appsrc name=audio_src stream-type=stream format=time is-live=true do-timestamp=true !
-        application/x-rtp, media=audio, encoding-name=OPUS, payload=(int)109, clock-rate=(int)48000 !
-        rtpjitterbuffer !
-        rtpopusdepay !
-        opusparse !
-        queue !
-        mux.audio_0
-
-    matroskamux name=mux !
-        filesink name=out
-"#;
-
 #[derive(Debug)]
 enum RecorderMsg {
     Stop,
-    Packet {
-        buf: gst::buffer::Buffer,
-        is_video: bool,
-    },
+    Packet { buf: Vec<i8>, is_video: bool },
 }
 
 #[derive(Debug)]
@@ -96,7 +65,7 @@ pub struct Recorder {
 /// in that directory. Filename for record part is generated
 /// by the following rule: `unix_timestamp.extension`.
 ///
-/// GStreamer recording pipeline runs in separate thread.
+/// Recorder runs in separate thread.
 /// You're able to write buffers using `record_packet` method.
 ///
 /// It's possible to make a full concatenated record
@@ -118,9 +87,12 @@ impl Recorder {
         }
     }
 
-    pub fn record_packet(&self, buf: &[u8], is_video: bool) -> Result<()> {
-        let buf = Self::wrap_buf(buf)?;
-        let msg = RecorderMsg::Packet { buf, is_video };
+    pub fn record_packet(&self, buf: &[i8], is_video: bool) -> Result<()> {
+        let msg = RecorderMsg::Packet {
+            buf: buf.to_vec(),
+            is_video,
+        };
+
         self.sender.send(msg).context("Failed to send packet")
     }
 
@@ -171,7 +143,7 @@ impl Recorder {
             full_record_path
         );
 
-        // Use ffmpeg for concatenation instead of gstreamer because it doesn't hang on corrupted videos.
+        // Use ffmpeg for concatenation because it doesn't hang on corrupted videos.
         // No transcoding is made here because it would create a peak load on the server.
         //
         // ffmpeg -f concat -safe 0 -i /recordings/123/parts.txt -c copy -y /recordings/123/full.webm
@@ -214,58 +186,8 @@ impl Recorder {
     }
 
     pub fn start_recording(&mut self) -> Result<()> {
-        janus_info!("[CONFERENCE] Initialize recording pipeline");
-
-        // Build pipeline by description and get necessary elements' and pads' handles.
-        let pipeline = gst::parse_launch(RECORDING_PIPELINE)?
-            .downcast::<gst::Pipeline>()
-            .map_err(|_| format_err!("Failed to downcast gst::Element to gst::Pipeline"))?;
-
-        let video_src = pipeline
-            .get_by_name("video_src")
-            .ok_or_else(|| format_err!("Failed to get appsrc element named `video_src`"))?
-            .downcast::<gst_app::AppSrc>()
-            .map_err(|_| {
-                format_err!("Failed to downcast `video_src` element  to gst_app::AppSrc")
-            })?;
-
-        let audio_src = pipeline
-            .get_by_name("audio_src")
-            .ok_or_else(|| format_err!("Failed to get appsrc element named `audio_src`"))?
-            .downcast::<gst_app::AppSrc>()
-            .map_err(|_| {
-                format_err!("Failed to downcast `audio_src` element to gst_app::AppSrc")
-            })?;
-
-        let mux = pipeline
-            .get_by_name("mux")
-            .ok_or_else(|| format_err!("Failed to get matroskamux element named `mux`"))?;
-
-        let video_sink_pad = mux
-            .get_static_pad("video_0")
-            .ok_or_else(|| format_err!("Failed to request `video_0` pad from `mux` element"))?;
-
-        let audio_sink_pad = mux
-            .get_static_pad("audio_0")
-            .ok_or_else(|| format_err!("Failed to request `audio_0` pad from `mux` element"))?;
-
-        let filesink = pipeline
-            .get_by_name("out")
-            .ok_or_else(|| format_err!("Failed to get filesink element named `out`"))?;
-
-        // Set output filename to `./recordings/{STREAM_ID}/{CURRENT_TIMESTAMP}.webm`.
-        let start = Utc::now().timestamp_millis();
-        let basename = start.to_string();
-
-        let path = self.generate_record_path(&basename, WEBM_EXTENSION);
-        let path = path.to_string_lossy().into_owned();
-
-        filesink.set_property("location", &path)?;
-
-        // Start the pipeline.
-        if let Err(err) = pipeline.set_state(gst::State::Playing) {
-            bail!("Failed to put pipeline to the `playing` state: {}", err);
-        }
+        janus_info!("[CONFERENCE] Start recording");
+        let dir = self.create_records_dir().to_string_lossy().into_owned();
 
         // Handle the pipeline in a separate thread.
         let recv = self
@@ -274,7 +196,18 @@ impl Recorder {
             .ok_or_else(|| format_err!("Empty receiver in recorder"))?;
 
         let handle = thread::spawn(move || {
-            janus_info!("[CONFERENCE] Start recording to {}", path);
+            janus_verb!("[CONFERENCE] Recorder thread started");
+
+            // Initialize recorders.
+            let now = Utc::now().timestamp_millis();
+
+            let video_filename = format!("{}.video", now);
+            let mut video_recorder = JanusRecorder::create(&dir, &video_filename, Codec::VP8)?;
+
+            let audio_filename = format!("{}.audio", now);
+            let mut audio_recorder = JanusRecorder::create(&dir, &audio_filename, Codec::OPUS)?;
+
+            janus_info!("[CONFERENCE] Recording to {}", dir);
 
             // Push RTP packets into the pipeline until stop message.
             for msg in recv.iter() {
@@ -282,36 +215,21 @@ impl Recorder {
                     RecorderMsg::Stop => break,
                     RecorderMsg::Packet { is_video, buf } => {
                         let res = if is_video {
-                            video_src.push_buffer(buf)
+                            video_recorder.save_frame(buf.as_slice())
                         } else {
-                            audio_src.push_buffer(buf)
+                            audio_recorder.save_frame(buf.as_slice())
                         };
 
                         if let Err(err) = res {
-                            bail!("Error pushing buffer to AppSrc: {}", err);
-                        };
+                            janus_err!("[CONFERENCE] Failed to record frame: {}", err);
+                        }
                     }
                 }
             }
 
-            // Notify the pipeline that there will be no more RTP packets and finish it.
-            if let Err(err) = video_src.end_of_stream() {
-                bail!("Failed to finish video stream: {}", err);
-            }
-
-            if let Err(err) = audio_src.end_of_stream() {
-                bail!("Failed to finish audio stream: {}", err);
-            }
-
-            let eos_ev = gst::Event::new_eos().build();
-            pipeline.send_event(eos_ev);
-
-            Self::run_pipeline_to_completion(&pipeline)?;
-
-            mux.release_request_pad(&audio_sink_pad);
-            mux.release_request_pad(&video_sink_pad);
-
-            janus_info!("[CONFERENCE] Stop recording");
+            video_recorder.close()?;
+            audio_recorder.close()?;
+            janus_info!("[CONFERENCE] Recording stopped");
             Ok(())
         });
 
@@ -335,100 +253,30 @@ impl Recorder {
     }
 
     pub fn get_full_record_path(&self) -> PathBuf {
-        self.generate_record_path(FULL_RECORD_FILENAME, WEBM_EXTENSION)
-    }
-
-    fn wrap_buf(buf: &[u8]) -> Result<gst::Buffer> {
-        let mut gbuf = gst::buffer::Buffer::with_size(buf.len())
-            .ok_or_else(|| format_err!("Failed to init GBuffer"))?;
-
-        {
-            let gbuf = gbuf.get_mut().unwrap();
-            gbuf.copy_from_slice(0, buf).map_err(|copied| {
-                format_err!(
-                    "Failed to copy buf into GBuffer: copied {} out of {} bytes",
-                    copied,
-                    buf.len()
-                )
-            })?;
-        }
-
-        Ok(gbuf)
+        let mut path = self.get_records_dir();
+        path.push(FULL_RECORD_FILENAME);
+        path.set_extension(WEBM_EXTENSION);
+        path
     }
 
     fn get_records_dir(&self) -> PathBuf {
         let mut path = PathBuf::new();
         path.push(&self.save_root_dir);
         path.push(&self.stream_id.to_string());
-
         path
     }
 
-    fn generate_record_path(&self, filename: &str, extension: &str) -> PathBuf {
-        let mut path = self.get_records_dir();
+    fn create_records_dir(&self) -> PathBuf {
+        let path = self.get_records_dir();
 
         if let Err(err) = fs::create_dir(&path) {
             match err.kind() {
                 ::std::io::ErrorKind::AlreadyExists => {}
-                err => {
-                    panic!("Failed to create directory for record: {:?}", err);
-                }
+                err => panic!("Failed to create directory for record: {:?}", err),
             }
         }
-
-        path.push(filename);
-        path.set_extension(extension);
 
         path
-    }
-
-    fn run_pipeline_to_completion(pipeline: &gst::Pipeline) -> Result<()> {
-        let (tx, rx) = mpsc::channel();
-        let main_loop = glib::MainLoop::new(None, false);
-        let main_loop_clone = main_loop.clone();
-
-        let bus = match pipeline.get_bus() {
-            Some(bus) => bus,
-            None => {
-                Self::shutdown_pipeline(pipeline);
-                bail!("Failed to get pipeline bus");
-            }
-        };
-
-        bus.add_watch(move |_bus, msg| {
-            let maybe_result = match msg.view() {
-                gst::MessageView::Eos(..) => Some(Ok(())),
-                gst::MessageView::Error(err) => Some(Err(format_err!("{}", err.get_error()))),
-                _ => None,
-            };
-
-            if let Some(result) = maybe_result {
-                tx.send(result)
-                    .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
-
-                main_loop_clone.quit();
-            }
-
-            glib::Continue(true)
-        });
-
-        main_loop.run();
-        Self::shutdown_pipeline(pipeline);
-
-        if let Err(err) = bus.remove_watch() {
-            janus_err!(
-                "[CONFERENCE] Failed to remove recording pipeline watch: {}",
-                err
-            );
-        }
-
-        rx.recv().unwrap_or_else(|err| Err(format_err!("{}", err)))
-    }
-
-    fn shutdown_pipeline(pipeline: &gst::Pipeline) {
-        if let Err(err) = pipeline.set_state(gst::State::Null) {
-            janus_err!("[CONFERENCE] Failed to set pipeline state to NULL: {}", err);
-        }
     }
 
     pub fn delete_record(&self) -> StdResult<(), RecorderError> {
