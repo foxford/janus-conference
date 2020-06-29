@@ -8,6 +8,7 @@ edition = "2018"
 crate-type = ["cdylib"]
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1.0"
 chrono = "0.4"
 janus-plugin-sys = "0.7"
@@ -20,21 +21,12 @@ lazy_static = "1.4"
 libc = "0.2"
 atom = "0.3"
 multimap = "0.8"
-glib-sys = "0.9"
-glib = "0.8"
-gstreamer = "0.14"
-gstreamer-app = "0.14" 
-gstreamer-base = "0.14"
-gstreamer-pbutils="0.14"
-rusoto_core = "0.42"
-rusoto_credential = "0.42"
-rusoto_s3 = "0.42"
-rusoto_signature = "0.42"
 http = "0.1"
 futures = { version = "0.3", features = ["thread-pool"] }
 futures-channel = "0.3"
 svc-error = { version = "0.1", features = ["sentry-extension"] }
 sentry = "0.18"
+tokio = { version = "0.2", features = ["process"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
 [dev-dependencies]
@@ -42,4 +34,4 @@ rand = "0.6"
 rumqtt = "0.30"
 svc-agent = "0.7"
 tempfile = "3.0"
-janus-plugin-sys = "0.6"
+janus-plugin-sys = "0.7"

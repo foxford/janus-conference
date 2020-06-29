@@ -1,4 +1,5 @@
 use anyhow::{format_err, Error};
+use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
@@ -14,8 +15,9 @@ pub struct Request {
 #[derive(Serialize)]
 struct Response {}
 
+#[async_trait]
 impl super::Operation for Request {
-    fn call(&self, request: &super::Request) -> super::OperationResult {
+    async fn call(&self, request: &super::Request) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.create operation with id {}",
             self.id

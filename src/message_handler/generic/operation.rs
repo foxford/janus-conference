@@ -1,12 +1,14 @@
 use std::fmt;
 
+use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
-pub trait Operation: fmt::Debug + Send {
+#[async_trait]
+pub trait Operation: fmt::Debug + Send + Sync {
     /// Operation implementation
-    fn call(&self, request: &super::Request) -> self::Result;
+    async fn call(&self, request: &super::Request) -> self::Result;
 
     /// Whether MessageHandler should process SDP offer/answer before calling this operation.
     fn is_handle_jsep(&self) -> bool;

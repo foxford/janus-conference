@@ -37,7 +37,7 @@ export function transformOfferSDP (sdp, opts) {
       modifiedPayload: 109,
     },
     video: {
-      codecName: 'H264',
+      codecName: 'VP8',
       modifiedPayload: 126,
     }
   }

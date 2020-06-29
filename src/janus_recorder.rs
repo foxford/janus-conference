@@ -4,7 +4,6 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 
 use anyhow::{bail, format_err, Context, Result};
-use glib_sys::gboolean;
 use janus_plugin_sys::janus_refcount;
 use libc::{pthread_mutex_t, FILE};
 
@@ -77,6 +76,7 @@ impl Drop for JanusRecorder<'_> {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+type gboolean = c_int;
 type gint = c_int;
 type gint64 = c_long;
 type janus_mutex = pthread_mutex_t;

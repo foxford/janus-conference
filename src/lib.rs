@@ -35,7 +35,6 @@ mod switchboard;
 mod utils;
 #[cfg(test)]
 mod test_stubs;
-mod uploader;
 
 use app::App;
 use conf::Config;

@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::sync::mpsc;
 
 use anyhow::{format_err, Error};
-use futures::{executor::ThreadPool, future::lazy};
+use futures::executor::ThreadPool;
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
@@ -41,7 +41,7 @@ pub struct MessageHandlingLoop<R, S> {
 impl<R, S> MessageHandlingLoop<R, S>
 where
     R: Router,
-    S: 'static + Clone + Send + Sender,
+    S: 'static + Clone + Send + Sync + Sender,
 {
     pub fn new(sender: S) -> Self {
         let (tx, rx) = mpsc::sync_channel(10);
@@ -67,9 +67,9 @@ where
                     janus_info!("[CONFERENCE] Scheduling request handling");
                     let handler = handler.clone();
 
-                    self.thread_pool.spawn_ok(lazy(move |_| {
-                        handler.handle_request(operation, request);
-                    }));
+                    self.thread_pool.spawn_ok(async move {
+                        handler.handle_request(operation, request).await;
+                    });
                 }
                 Some(Message::Response(response)) => {
                     handler.handle_response(response);
@@ -137,7 +137,7 @@ impl<S: Sender> MessageHandler<S> {
     }
 
     /// Handles JSEP if needed, calls the operation and schedules its response.
-    fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
+    async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
         janus_info!("[CONFERENCE] Handling request");
 
         let jsep_answer_result = match operation.is_handle_jsep() {
@@ -149,7 +149,7 @@ impl<S: Sender> MessageHandler<S> {
             Ok(jsep_answer) => {
                 janus_info!("[CONFERENCE] Calling operation");
 
-                let payload = match operation.call(&request) {
+                let payload = match operation.call(&request).await {
                     Ok(payload) => JsonValue::from(payload).into(),
                     Err(err) => {
                         self.notify_error(&err);
@@ -195,7 +195,7 @@ impl<S: Sender> MessageHandler<S> {
             .unwrap_or_else(|err| janus_err!("[CONFERENCE] Error sending response: {}", err));
     }
 
-    /// Builds a response object for the reuqest and pushes it to the message handling queue.
+    /// Builds a response object for the request and pushes it to the message handling queue.
     fn schedule_response(
         &self,
         request: Request,
@@ -276,12 +276,13 @@ pub trait Sender {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
     use anyhow::{bail, format_err, Result};
-    use serde_json::json;
+    use async_trait::async_trait;
+    use serde_json::{json, Value as JsonValue};
 
     use super::MessageHandlingLoop;
     use super::Router;
@@ -298,8 +299,9 @@ mod tests {
         session_id: String,
     }
 
+    #[async_trait]
     impl Operation for PingRequest {
-        fn call(&self, request: &Request) -> OperationResult {
+        async fn call(&self, request: &Request) -> OperationResult {
             Ok(PingResponse {
                 message: String::from("pong"),
                 session_id: request.session_id().to_string(),
@@ -332,19 +334,24 @@ mod tests {
     struct TestResponse {
         session_id: SessionId,
         transaction: String,
-        payload: Option<JanssonValue>,
-        jsep_answer: Option<JanssonValue>,
+        payload: Option<JsonValue>,
+        jsep_answer: Option<JsonValue>,
     }
 
     #[derive(Clone)]
     struct TestSender {
-        tx: mpsc::Sender<TestResponse>,
+        tx: Arc<Mutex<mpsc::Sender<TestResponse>>>,
     }
 
     impl TestSender {
         fn new() -> (Self, mpsc::Receiver<TestResponse>) {
             let (tx, rx) = mpsc::channel();
-            (Self { tx }, rx)
+
+            let object = Self {
+                tx: Arc::new(Mutex::new(tx)),
+            };
+
+            (object, rx)
         }
     }
 
@@ -356,14 +363,27 @@ mod tests {
             payload: Option<JanssonValue>,
             jsep_answer: Option<JanssonValue>,
         ) -> Result<()> {
-            self.tx
-                .send(TestResponse {
-                    session_id,
-                    transaction: transaction.to_owned(),
-                    payload,
-                    jsep_answer,
-                })
-                .map_err(|err| format_err!("Failed to send test response: {}", err))
+            let payload = payload.map(|json| {
+                let json = json.to_libcstring(JanssonEncodingFlags::empty());
+                let json = json.to_string_lossy();
+                serde_json::from_str(&json).unwrap()
+            });
+
+            let jsep_answer = jsep_answer.map(|json| {
+                let json = json.to_libcstring(JanssonEncodingFlags::empty());
+                let json = json.to_string_lossy();
+                serde_json::from_str(&json).unwrap()
+            });
+
+            let tx = self.tx.lock().unwrap();
+
+            tx.send(TestResponse {
+                session_id,
+                transaction: transaction.to_owned(),
+                payload,
+                jsep_answer,
+            })
+            .map_err(|err| format_err!("Failed to send test response: {}", err))
         }
     }
 
@@ -394,19 +414,14 @@ mod tests {
 
         match response.payload {
             None => bail!("Missing payload"),
-            Some(jansson_value) => {
-                let json_str = jansson_value.to_libcstring(
-                    JanssonEncodingFlags::JSON_COMPACT | JanssonEncodingFlags::JSON_PRESERVE_ORDER,
-                );
-
-                let expected_json = json!({
+            Some(json) => assert_eq!(
+                json,
+                json!({
                     "message": "pong",
                     "session_id": session_id.to_string(),
-                    "status": "200"
-                });
-
-                assert_eq!(json_str.to_string_lossy(), expected_json.to_string());
-            }
+                    "status": "200",
+                })
+            ),
         }
 
         Ok(())

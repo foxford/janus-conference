@@ -1,10 +1,14 @@
-use anyhow::{format_err, Error};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+
+use anyhow::{bail, format_err, Context, Error, Result};
+use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
+use tokio::process::Command; // No async-std equivalent yet.
 
-use crate::recorder::{Recorder, RecorderError};
+use crate::recorder::{Config as RecorderConfig, Recorder};
 use crate::switchboard::StreamId;
-use crate::uploader::Uploader;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -20,16 +24,17 @@ struct Response {
     time: Vec<(u64, u64)>,
 }
 
+#[async_trait]
 impl super::Operation for Request {
-    fn call(&self, _request: &super::Request) -> super::OperationResult {
+    async fn call(&self, _request: &super::Request) -> super::OperationResult {
         janus_info!(
             "[CONFERENCE] Calling stream.upload operation with id {}",
             self.id
         );
 
-        let app = app!().map_err(internal_error)?;
-
-        app.switchboard
+        app!()
+            .map_err(internal_error)?
+            .switchboard
             .with_write_lock(|mut switchboard| {
                 // The stream still may be ongoing and we must stop it gracefully.
                 if let Some(publisher) = switchboard.publisher_of(self.id) {
@@ -48,27 +53,15 @@ impl super::Operation for Request {
             })
             .map_err(internal_error)?;
 
-        janus_info!("[CONFERENCE] Finishing record");
-        let mut recorder = Recorder::new(&app.config.recordings, self.id);
-        let (started_at, time) = recorder.finish_record().map_err(recorder_error)?;
-
-        janus_info!("[CONFERENCE] Uploading record");
-        let uploader = Uploader::build(app.config.uploading.clone())
-            .map_err(|err| internal_error(format_err!("Failed to init uploader: {}", err)))?;
-
-        let path = recorder.get_full_record_path();
-
-        uploader
-            .upload_file(&path, &self.bucket, &self.object)
+        let (started_at, segments) = upload_record(&self)
+            .await
+            .and_then(|_| parse_segments(self.id, &app!()?.config.recordings))
             .map_err(internal_error)?;
-
-        janus_info!("[CONFERENCE] Uploading finished, deleting source files");
-        recorder.delete_record().map_err(recorder_error)?;
 
         Ok(Response {
             id: self.id,
             started_at,
-            time,
+            time: segments,
         }
         .into())
     }
@@ -93,14 +86,85 @@ fn internal_error(err: Error) -> SvcError {
     error(StatusCode::INTERNAL_SERVER_ERROR, err)
 }
 
-fn recorder_error(err: RecorderError) -> SvcError {
-    match err {
-        RecorderError::InternalError(cause) => internal_error(cause),
-        RecorderError::IoError(cause) => {
-            internal_error(format_err!("Recorder IO error: {}", cause))
-        }
-        RecorderError::RecordingMissing => {
-            error(StatusCode::NOT_FOUND, format_err!("Record not found"))
+///////////////////////////////////////////////////////////////////////////////
+
+async fn upload_record(request: &Request) -> Result<()> {
+    janus_info!("[CONFERENCE] Preparing & uploading record");
+
+    let mut command = Command::new("/opt/janus/bin/upload_record.sh");
+    let stream_id = request.id.to_string();
+    command.args(&[&stream_id, &request.bucket, &request.object]);
+    janus_verb!("[CONFERENCE] {:?}", command);
+
+    command
+        .status()
+        .await
+        .map_err(|err| format_err!("Failed to run upload_record.sh, return code = '{}'", err))
+        .and_then(|status| {
+            if status.success() {
+                janus_info!(
+                    "[CONFERENCE] Record {} successfully uploaded to {}/{}",
+                    request.id,
+                    request.bucket,
+                    request.object
+                );
+
+                Ok(())
+            } else {
+                Err(format_err!("Failed to prepare & upload record: {}", status))
+            }
+        })
+}
+
+fn parse_segments(
+    stream_id: StreamId,
+    recorder_config: &RecorderConfig,
+) -> Result<(u64, Vec<(u64, u64)>)> {
+    let recorder = Recorder::new(recorder_config, stream_id);
+
+    let mut path = recorder.get_records_dir();
+    path.push("segments.csv");
+
+    let file = File::open(&path)?;
+    let mut segments = vec![];
+
+    for read_result in BufReader::new(file).lines() {
+        let line = match read_result {
+            Ok(line) => line,
+            Err(err) => bail!(err),
+        };
+
+        // "123456789,123.45" => (123456789, 123.45)
+        match line.splitn(2, ',').collect::<Vec<&str>>().as_slice() {
+            [started_at, duration] => {
+                let parsed_started_at = started_at
+                    .parse::<u64>()
+                    .context("Failed to parse started_at")?;
+
+                let parsed_duration = duration
+                    .parse::<f32>()
+                    .context("Failed to parse duration")?;
+
+                segments.push((parsed_started_at, parsed_duration))
+            }
+            _ => bail!("Failed to split line: {}", line),
         }
     }
+
+    let absolute_started_at = match segments.first() {
+        None => bail!("No segments parsed"),
+        Some((started_at, _)) => started_at.to_owned(),
+    };
+
+    // [(123456789, 123.45), (123470134, 456.78)] => [(0, 12345), (13345, 59023)]
+    let relative_segments = segments
+        .into_iter()
+        .map(|(started_at, duration_sec)| {
+            let relative_started_at = started_at - absolute_started_at;
+            let duration_ms = (duration_sec * 1000.0) as u64;
+            (relative_started_at, relative_started_at + duration_ms)
+        })
+        .collect();
+
+    Ok((absolute_started_at, relative_segments))
 }

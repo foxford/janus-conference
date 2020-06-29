@@ -13,6 +13,7 @@ services:
       - ..:/build
       - ../recordings:/recordings
       - janus-conference-cargo:/usr/local/cargo
+      - ../scripts/upload_record.sh:/opt/janus/bin/upload_record.sh
     env_file: janus.plugin.conference.environment
     links:
       - vernemq
