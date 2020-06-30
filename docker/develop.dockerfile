@@ -9,22 +9,17 @@ RUN set -xe \
     && apt-get -y --no-install-recommends install \
         autoconf \
         automake \
+        awscli \
         ca-certificates \
         curl \
         ffmpeg \
         gengetopt \
         git \
-        gstreamer1.0-libav \
-        gstreamer1.0-plugins-bad \
-        gstreamer1.0-plugins-base \
-        gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-ugly \
+        libavformat-dev \
+        libavcodec-dev \
         libconfig-dev \
         libcurl4-openssl-dev \
         libglib2.0-dev \
-        libgstreamer1.0-dev \
-        libgstreamer-plugins-base1.0-dev \
-        libgstrtspserver-1.0-dev \
         libjansson-dev \
         libmicrohttpd-dev \
         libogg-dev \
@@ -110,7 +105,7 @@ RUN set -xe \
     && git clone 'https://github.com/netology-group/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
-    && ./configure --prefix=/opt/janus \
+    && ./configure --prefix=/opt/janus --enable-post-processing \
     && make -j $(nproc) \
     && make install \
     && make configs \

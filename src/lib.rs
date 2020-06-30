@@ -25,6 +25,7 @@ mod app;
 mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
+mod janus_recorder;
 mod jsep;
 mod message_handler;
 mod recorder;
@@ -34,7 +35,6 @@ mod switchboard;
 mod utils;
 #[cfg(test)]
 mod test_stubs;
-mod uploader;
 
 use app::App;
 use conf::Config;
@@ -62,13 +62,7 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
         return -1;
     };
 
-    if let Err(err) = gstreamer::init() {
-        janus_fatal!("[CONFERENCE] Failed to init GStreamer: {}", err);
-        return -1;
-    }
-
     janus_callbacks::init(callbacks);
-
     janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
     0
 }
@@ -232,7 +226,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             };
 
             let buf = unsafe {
-                std::slice::from_raw_parts(packet.buffer as *const u8, packet.length as usize)
+                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
             };
 
             recorder.record_packet(buf, is_video)?;

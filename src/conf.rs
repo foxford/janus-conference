@@ -4,7 +4,6 @@ use anyhow::Result;
 use config;
 
 use crate::recorder;
-use crate::uploader;
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 
@@ -12,7 +11,6 @@ const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 pub struct Config {
     pub general: General,
     pub recordings: recorder::Config,
-    pub uploading: uploader::Config,
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
 }
