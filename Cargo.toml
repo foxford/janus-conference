@@ -22,7 +22,7 @@ libc = "0.2"
 atom = "0.3"
 multimap = "0.8"
 http = "0.1"
-futures = { version = "0.3", features = ["thread-pool"] }
+futures = "0.3"
 futures-channel = "0.3"
 svc-error = { version = "0.1", features = ["sentry-extension"] }
 sentry = "0.18"

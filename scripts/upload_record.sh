@@ -65,7 +65,3 @@ ffmpeg -i concat.webm -i concat.opus -c copy -y full.webm
 
 # Upload record.
 aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION} s3 cp full.webm s3://${BUCKET}/${OBJECT}
-
-# Clean up.
-cd ..
-rm -rf ./${RTC_ID}
