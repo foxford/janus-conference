@@ -2,6 +2,11 @@
 
 function REPORT_ERROR() { >&2 echo ${@}; }
 
+SCRIPT_ABS_PATH=$(realpath $0)
+SCRIPT_ABS_DIR=$(dirname ${SCRIPT_ABS_PATH})
+
+###############################################################################
+
 # Arguments.
 RTC_ID=$1
 BUCKET=$2
@@ -10,6 +15,8 @@ OBJECT=$3
 if [[ ! ${RTC_ID} ]]; then $(REPORT_ERROR "RTC_ID isn't specified"); exit 1; fi
 if [[ ! ${BUCKET} ]]; then $(REPORT_ERROR "BUCKET isn't specified"); exit 1; fi
 if [[ ! ${OBJECT} ]]; then $(REPORT_ERROR "OBJECT isn't specified"); exit 1; fi
+
+###############################################################################
 
 # Environment.
 if [[ ! ${APP_UPLOADING__ACCESS_KEY_ID} ]]; then $(REPORT_ERROR "APP_UPLOADING__ACCESS_KEY_ID isn't specified"); exit 1; fi
@@ -22,12 +29,16 @@ export AWS_SECRET_ACCESS_KEY=${APP_UPLOADING__SECRET_ACCESS_KEY}
 export AWS_ENDPOINT=${APP_UPLOADING__ENDPOINT}
 export AWS_REGION=${APP_UPLOADING__REGION}
 
+RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
+
+###############################################################################
+
 # Working directory.
-cd /recordings/${RTC_ID}
+cd ${RECORDINGS_DIR}/${RTC_ID}
 
 # Convert video .mjr dumps into .webm files.
 for FILE in *.video.mjr; do
-  /opt/janus/bin/janus-pp-rec $FILE ${FILE%.*}.webm
+  ${SCRIPT_ABS_DIR}/janus-pp-rec $FILE ${FILE%.*}.webm
   echo "file '${FILE%.*}.webm'" >> video_sources.txt
 done
 
@@ -42,7 +53,7 @@ ffmpeg -f concat -i video_sources.txt -c copy -y concat.webm
 
 # Convert audio .mjr dumps into .opus files.
 for FILE in *.audio.mjr; do
-  /opt/janus/bin/janus-pp-rec $FILE ${FILE%.*}.opus
+  ${SCRIPT_ABS_DIR}/janus-pp-rec $FILE ${FILE%.*}.opus
   echo "file '${FILE%.*}.opus'" >> audio_sources.txt
 done
 
@@ -50,11 +61,7 @@ done
 ffmpeg -f concat -i audio_sources.txt -c copy -y concat.opus
 
 # Mux video & audio into a single .webm file.
-ffmpeg -i concat.webm -i concat.opus -c copy full.webm
+ffmpeg -i concat.webm -i concat.opus -c copy -y full.webm
 
 # Upload record.
 aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION} s3 cp full.webm s3://${BUCKET}/${OBJECT}
-
-# Clean up.
-cd ..
-rm -rf ./${RTC_ID}

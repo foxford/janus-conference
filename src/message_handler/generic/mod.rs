@@ -7,11 +7,11 @@ use std::marker::PhantomData;
 use std::sync::mpsc;
 
 use anyhow::{format_err, Error};
-use futures::executor::ThreadPool;
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
+use tokio::runtime::Runtime;
 
 use self::response::{Payload as ResponsePayload, Response};
 use crate::jsep::Jsep;
@@ -29,7 +29,7 @@ enum Message {
 }
 
 pub struct MessageHandlingLoop<R, S> {
-    thread_pool: ThreadPool,
+    runtime: Runtime,
     tx: mpsc::SyncSender<Message>,
     rx: mpsc::Receiver<Message>,
     router: PhantomData<R>,
@@ -47,7 +47,7 @@ where
         let (tx, rx) = mpsc::sync_channel(10);
 
         Self {
-            thread_pool: ThreadPool::new().expect("Failed to created thread pool"),
+            runtime: Runtime::new().expect("Failed to start async runtime"),
             tx,
             rx,
             router: PhantomData,
@@ -67,7 +67,7 @@ where
                     janus_info!("[CONFERENCE] Scheduling request handling");
                     let handler = handler.clone();
 
-                    self.thread_pool.spawn_ok(async move {
+                    self.runtime.spawn(async move {
                         handler.handle_request(operation, request).await;
                     });
                 }

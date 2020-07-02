@@ -7,7 +7,7 @@ use http::StatusCode;
 use svc_error::Error as SvcError;
 use tokio::process::Command; // No async-std equivalent yet.
 
-use crate::recorder::{Config as RecorderConfig, Recorder};
+use crate::recorder::Recorder;
 use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -53,10 +53,13 @@ impl super::Operation for Request {
             })
             .map_err(internal_error)?;
 
-        let (started_at, segments) = upload_record(&self)
-            .await
-            .and_then(|_| parse_segments(self.id, &app!()?.config.recordings))
-            .map_err(internal_error)?;
+        upload_record(&self).await.map_err(internal_error)?;
+
+        let recorder_config = app!().map_err(internal_error)?.config.recordings.clone();
+        let recorder = Recorder::new(&recorder_config, self.id);
+        let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
+
+        recorder.delete_record().map_err(internal_error)?;
 
         Ok(Response {
             id: self.id,
@@ -91,7 +94,14 @@ fn internal_error(err: Error) -> SvcError {
 async fn upload_record(request: &Request) -> Result<()> {
     janus_info!("[CONFERENCE] Preparing & uploading record");
 
-    let mut command = Command::new("/opt/janus/bin/upload_record.sh");
+    let mut script_path = std::env::current_exe()
+        .context("Failed to get current executable path")?
+        .parent()
+        .ok_or_else(|| format_err!("Missing current executable dir"))?
+        .to_path_buf();
+
+    script_path.push("upload_record.sh");
+    let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
     command.args(&[&stream_id, &request.bucket, &request.object]);
     janus_verb!("[CONFERENCE] {:?}", command);
@@ -116,12 +126,7 @@ async fn upload_record(request: &Request) -> Result<()> {
         })
 }
 
-fn parse_segments(
-    stream_id: StreamId,
-    recorder_config: &RecorderConfig,
-) -> Result<(u64, Vec<(u64, u64)>)> {
-    let recorder = Recorder::new(recorder_config, stream_id);
-
+fn parse_segments(recorder: &Recorder) -> Result<(u64, Vec<(u64, u64)>)> {
     let mut path = recorder.get_records_dir();
     path.push("segments.csv");
 

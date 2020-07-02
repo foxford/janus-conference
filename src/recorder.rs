@@ -168,6 +168,10 @@ impl Recorder {
 
         path
     }
+
+    pub fn delete_record(&self) -> Result<()> {
+        fs::remove_dir_all(&self.get_records_dir()).context("Failed to delete record")
+    }
 }
 
 #[derive(Debug)]
