@@ -61,7 +61,7 @@ done
 ffmpeg -f concat -i audio_sources.txt -c copy -y concat.opus
 
 # Mux video & audio into a single .webm file.
-ffmpeg -i concat.webm -i concat.opus -c copy full.webm
+ffmpeg -i concat.webm -i concat.opus -c copy -y full.webm
 
 # Upload record.
 aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION} s3 cp full.webm s3://${BUCKET}/${OBJECT}
