@@ -91,7 +91,14 @@ fn internal_error(err: Error) -> SvcError {
 async fn upload_record(request: &Request) -> Result<()> {
     janus_info!("[CONFERENCE] Preparing & uploading record");
 
-    let mut command = Command::new("/opt/janus/bin/upload_record.sh");
+    let mut script_path = std::env::current_exe()
+        .context("Failed to get current executable path")?
+        .parent()
+        .ok_or_else(|| format_err!("Missing current executable dir"))?
+        .to_path_buf();
+
+    script_path.push("upload_record.sh");
+    let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
     command.args(&[&stream_id, &request.bucket, &request.object]);
     janus_verb!("[CONFERENCE] {:?}", command);
