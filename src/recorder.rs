@@ -169,6 +169,20 @@ impl Recorder {
         path
     }
 
+    pub fn check_existence(&self) -> Result<()> {
+        let path = self.get_records_dir();
+        let metadata = fs::metadata(&path).context("Record doesn't exist")?;
+
+        if metadata.is_dir() {
+            Ok(())
+        } else {
+            bail!(
+                "Recording path {} is not a directory",
+                path.to_string_lossy()
+            );
+        }
+    }
+
     pub fn delete_record(&self) -> Result<()> {
         fs::remove_dir_all(&self.get_records_dir()).context("Failed to delete record")
     }
