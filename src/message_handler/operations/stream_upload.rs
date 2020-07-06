@@ -53,10 +53,14 @@ impl super::Operation for Request {
             })
             .map_err(internal_error)?;
 
-        upload_record(&self).await.map_err(internal_error)?;
-
         let recorder_config = app!().map_err(internal_error)?.config.recordings.clone();
         let recorder = Recorder::new(&recorder_config, self.id);
+
+        recorder
+            .check_existence()
+            .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+
+        upload_record(&self).await.map_err(internal_error)?;
         let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
 
         recorder.delete_record().map_err(internal_error)?;
