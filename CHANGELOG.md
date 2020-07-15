@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.0 (July 15, 2020)
+
+### Changes
+- Upgrade debian, janus & deps ([a580d1c](https://github.com/netology-group/janus-conference/commit/a580d1c8b02081b5aff78fbdd546c8a590ffabe2))
+- Limit publisher bitrate with REMB & SDP ([e781235](https://github.com/netology-group/janus-conference/commit/e781235b67522e93d06ae348c0d4ed07b0217120))
+- Switch to VP8 ([28b650f](https://github.com/netology-group/janus-conference/commit/28b650f18d2f30fe854aca17d951a44bc963b66f))
+- Replace gstreamer with janus recorder ([5ae59e5](https://github.com/netology-group/janus-conference/commit/5ae59e527f74486b67e415552bf97d035568d734), [9d97054](https://github.com/netology-group/janus-conference/commit/9d970546a11b7094468d8f4f5698cb1912f4f6b1))
+- Upgrade janus & increase MQTT client limits ([abf155d](https://github.com/netology-group/janus-conference/commit/abf155d2c4af31b07b35a73c5b0b52cd48a099bb))
+
+
 ## v0.6.3 (June 4, 2020)
 
 ### Changes
