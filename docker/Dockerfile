@@ -77,7 +77,7 @@ RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='b8e8f6ea4b5bd750a5643bf894a8b085232fcf42'
+ARG JANUS_GATEWAY_COMMIT='1bb21c633d869a885d4844e1f0168c678eccaa96'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \

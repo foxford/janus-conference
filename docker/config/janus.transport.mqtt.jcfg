@@ -12,7 +12,11 @@ general: {
   publish_qos = 1
   cleansession = 0
   keep_alive_interval = 30
+  max_inflight = 1000
+  max_buffered = 1000
   disconnect_timeout = 1000
+  proxy_transaction_user_properties = ["local_initial_timediff", "initial_timediff", "cumulative_authorization_time", "cumulative_processing_time"]
+  add_transaction_user_properties = (["type", "response"], ["status", "200"])
 }
 admin: {
   subscribe_topic = "to-janus-admin"
