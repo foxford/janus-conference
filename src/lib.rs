@@ -175,9 +175,18 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 }
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
-    let app = app!()?;
+    let callback_start = Utc::now().timestamp_nanos();
 
-    app.switchboard.with_read_lock(|switchboard| {
+    let app = app!()?;
+    app.rtp_stats.increment_packets_count();
+    let lock_acquire_start = Utc::now().timestamp_nanos();
+
+    let result = app.switchboard.with_read_lock(|switchboard| {
+        let lock_acquire_time = Utc::now().timestamp_nanos() - lock_acquire_start;
+
+        app.rtp_stats
+            .add_lock_acquire_time(lock_acquire_time as u64);
+
         let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
 
@@ -204,8 +213,14 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Retransmit packet to publishers as is.
         let mut packet = unsafe { &mut *packet };
         let video = packet.video;
+        let relay_start = Utc::now().timestamp_nanos();
 
-        for subscriber_id in switchboard.subscribers_to(session_id) {
+        let subscribers = switchboard.subscribers_to(session_id);
+
+        app.rtp_stats
+            .set_subscribers_count(subscribers.len() as u64);
+
+        for subscriber_id in subscribers {
             let subscriber_session =
                 switchboard.session(*subscriber_id)?.lock().map_err(|err| {
                     format_err!(
@@ -218,8 +233,13 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
         }
 
+        let relay_time = Utc::now().timestamp_nanos() - relay_start;
+        app.rtp_stats.add_relay_time(relay_time as u64);
+
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
+            let recording_start = Utc::now().timestamp_nanos();
+
             let is_video = match video {
                 0 => false,
                 _ => true,
@@ -230,10 +250,17 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             };
 
             recorder.record_packet(buf, is_video)?;
+
+            let recording_time = Utc::now().timestamp_nanos() - recording_start;
+            app.rtp_stats.add_recording_time(recording_time as u64);
         }
 
         Ok(())
-    })
+    });
+
+    let callback_time = Utc::now().timestamp_nanos() - callback_start;
+    app.rtp_stats.add_callback_time(callback_time as u64);
+    result
 }
 
 extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) {
