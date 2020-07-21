@@ -95,14 +95,14 @@ RUN set -eux; \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='1bb21c633d869a885d4844e1f0168c678eccaa96'
+ARG JANUS_GATEWAY_COMMIT='7c41b0ea769b5ada945fa73434003005f99ac5b9'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
     && CFLAGS="-g -fsanitize=thread -fsanitize=address -fno-omit-frame-pointer" \
     && LDFLAGS="-lasan" \
     && cd "${JANUS_GATEWAY_BUILD_DIR}" \
-    && git clone 'https://github.com/netology-group/janus-gateway' . \
+    && git clone 'https://github.com/meetecho/janus-gateway' . \
     && git checkout "${JANUS_GATEWAY_COMMIT}" \
     && ./autogen.sh \
     && ./configure --prefix=/opt/janus --enable-post-processing \
