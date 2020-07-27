@@ -83,9 +83,9 @@ impl App {
 pub struct RtpStats {
     subscribers_count: AtomicU64,
     packets_count: AtomicU64,
-    total_lock_acquire_time: AtomicU64,
+    total_session_lock_acquire_time: AtomicU64,
+    total_iter_relay_time: AtomicU64,
     total_relay_time: AtomicU64,
-    total_recording_time: AtomicU64,
     total_callback_time: AtomicU64,
 }
 
@@ -94,9 +94,9 @@ impl RtpStats {
         Self {
             subscribers_count: AtomicU64::new(0),
             packets_count: AtomicU64::new(0),
-            total_lock_acquire_time: AtomicU64::new(0),
+            total_session_lock_acquire_time: AtomicU64::new(0),
+            total_iter_relay_time: AtomicU64::new(0),
             total_relay_time: AtomicU64::new(0),
-            total_recording_time: AtomicU64::new(0),
             total_callback_time: AtomicU64::new(0),
         }
     }
@@ -109,18 +109,18 @@ impl RtpStats {
         self.packets_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn add_lock_acquire_time(&self, value: u64) {
-        self.total_lock_acquire_time
+    pub fn add_session_lock_acquire_time(&self, value: u64) {
+        self.total_session_lock_acquire_time
+            .fetch_add(value, Ordering::Relaxed);
+    }
+
+    pub fn add_iter_relay_time(&self, value: u64) {
+        self.total_iter_relay_time
             .fetch_add(value, Ordering::Relaxed);
     }
 
     pub fn add_relay_time(&self, value: u64) {
         self.total_relay_time.fetch_add(value, Ordering::Relaxed);
-    }
-
-    pub fn add_recording_time(&self, value: u64) {
-        self.total_recording_time
-            .fetch_add(value, Ordering::Relaxed);
     }
 
     pub fn add_callback_time(&self, value: u64) {
@@ -129,24 +129,26 @@ impl RtpStats {
 
     fn flush(&self) {
         let packets_count = self.packets_count.load(Ordering::Relaxed);
+        let subscribers_count = self.subscribers_count.load(Ordering::Relaxed);
 
         if packets_count != 0 {
             janus_info!(
                 "[CONFERENCE][RTP_STATS] {} {} {} {} {} {}",
-                self.subscribers_count.load(Ordering::Relaxed),
+                subscribers_count,
                 packets_count,
-                self.total_lock_acquire_time.load(Ordering::Relaxed) as f32 / packets_count as f32,
+                self.total_session_lock_acquire_time.load(Ordering::Relaxed) as f32
+                    / packets_count as f32,
+                self.total_iter_relay_time.load(Ordering::Relaxed) as f32 / packets_count as f32,
                 self.total_relay_time.load(Ordering::Relaxed) as f32 / packets_count as f32,
-                self.total_recording_time.load(Ordering::Relaxed) as f32 / packets_count as f32,
                 self.total_callback_time.load(Ordering::Relaxed) as f32 / packets_count as f32,
             );
         }
 
         self.subscribers_count.store(0, Ordering::Relaxed);
         self.packets_count.store(0, Ordering::Relaxed);
-        self.total_lock_acquire_time.store(0, Ordering::Relaxed);
+        self.total_session_lock_acquire_time.store(0, Ordering::Relaxed);
+        self.total_iter_relay_time.store(0, Ordering::Relaxed);
         self.total_relay_time.store(0, Ordering::Relaxed);
-        self.total_recording_time.store(0, Ordering::Relaxed);
         self.total_callback_time.store(0, Ordering::Relaxed);
     }
 }

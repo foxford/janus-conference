@@ -179,14 +179,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
     let app = app!()?;
     app.rtp_stats.increment_packets_count();
-    let lock_acquire_start = Utc::now().timestamp_nanos();
 
     let result = app.switchboard.with_read_lock(|switchboard| {
-        let lock_acquire_time = Utc::now().timestamp_nanos() - lock_acquire_start;
-
-        app.rtp_stats
-            .add_lock_acquire_time(lock_acquire_time as u64);
-
         let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
 
@@ -213,14 +207,16 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Retransmit packet to publishers as is.
         let mut packet = unsafe { &mut *packet };
         let video = packet.video;
-        let relay_start = Utc::now().timestamp_nanos();
-
         let subscribers = switchboard.subscribers_to(session_id);
 
         app.rtp_stats
             .set_subscribers_count(subscribers.len() as u64);
 
+        let relay_start = Utc::now().timestamp_nanos();
+
         for subscriber_id in subscribers {
+            let session_lock_acquire_start = Utc::now().timestamp_nanos();
+
             let subscriber_session =
                 switchboard.session(*subscriber_id)?.lock().map_err(|err| {
                     format_err!(
@@ -230,7 +226,18 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                     )
                 })?;
 
+            let session_lock_acquire_time =
+                Utc::now().timestamp_nanos() - session_lock_acquire_start;
+
+            app.rtp_stats
+                .add_session_lock_acquire_time(session_lock_acquire_time as u64);
+
+            let iter_relay_start = Utc::now().timestamp_nanos();
+
             janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
+
+            let iter_relay_time = Utc::now().timestamp_nanos() - iter_relay_start;
+            app.rtp_stats.add_iter_relay_time(iter_relay_time as u64);
         }
 
         let relay_time = Utc::now().timestamp_nanos() - relay_start;
@@ -238,8 +245,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
-            let recording_start = Utc::now().timestamp_nanos();
-
             let is_video = match video {
                 0 => false,
                 _ => true,
@@ -250,9 +255,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             };
 
             recorder.record_packet(buf, is_video)?;
-
-            let recording_time = Utc::now().timestamp_nanos() - recording_start;
-            app.rtp_stats.add_recording_time(recording_time as u64);
         }
 
         Ok(())
