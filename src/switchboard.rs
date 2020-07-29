@@ -29,6 +29,10 @@ impl SessionId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    pub fn as_u128(self) -> u128 {
+        self.0.as_u128()
+    }
 }
 
 impl fmt::Display for SessionId {

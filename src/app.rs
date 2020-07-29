@@ -6,6 +6,7 @@ use chrono::Duration;
 
 use crate::conf::Config;
 use crate::message_handler::{JanusSender, MessageHandlingLoop};
+use crate::relay::Relay;
 use crate::switchboard::LockedSwitchboard as Switchboard;
 
 lazy_static! {
@@ -24,6 +25,7 @@ pub struct App {
     pub config: Config,
     pub switchboard: Switchboard,
     pub message_handling_loop: MessageHandlingLoop,
+    pub relay: Relay,
 }
 
 impl App {
@@ -56,10 +58,13 @@ impl App {
     }
 
     pub fn new(config: Config) -> Result<Self> {
+        let relay = Relay::new(config.relay.threads);
+
         Ok(Self {
             config,
             switchboard: Switchboard::new(),
             message_handling_loop: MessageHandlingLoop::new(JanusSender::new()),
+            relay,
         })
     }
 }

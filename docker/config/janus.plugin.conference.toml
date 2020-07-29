@@ -1,6 +1,9 @@
 [general]
 vacuum_interval = 60
 
+[relay]
+threads = 8
+
 [recordings]
 directory = "/recordings"
 enabled = true

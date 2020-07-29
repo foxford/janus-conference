@@ -10,6 +10,7 @@ const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
     pub general: General,
+    pub relay: Relay,
     pub recordings: recorder::Config,
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
@@ -39,6 +40,11 @@ impl Config {
 #[derive(Clone, Deserialize, Debug)]
 pub struct General {
     pub vacuum_interval: i64,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct Relay {
+    pub threads: usize,
 }
 
 #[derive(Clone, Deserialize, Debug)]
