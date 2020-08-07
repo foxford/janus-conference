@@ -14,6 +14,7 @@ use crate::switchboard::StreamId;
 pub struct Config {
     pub directory: String,
     pub enabled: bool,
+    pub delete_records: bool,
 }
 
 impl Config {
@@ -47,6 +48,7 @@ pub struct Recorder {
     stream_id: StreamId,
     filename: Option<String>,
     save_root_dir: String,
+    is_deletion_enabled: bool,
 }
 
 /// Records video from RTP stream identified by `stream_id`.
@@ -70,6 +72,7 @@ impl Recorder {
             stream_id,
             save_root_dir: config.directory.clone(),
             filename: None,
+            is_deletion_enabled: config.delete_records,
         }
     }
 
@@ -184,7 +187,11 @@ impl Recorder {
     }
 
     pub fn delete_record(&self) -> Result<()> {
-        fs::remove_dir_all(&self.get_records_dir()).context("Failed to delete record")
+        if self.is_deletion_enabled {
+            fs::remove_dir_all(&self.get_records_dir()).context("Failed to delete record")
+        } else {
+            Ok(())
+        }
     }
 }
 
