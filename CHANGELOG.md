@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.1 (August 7, 2020)
+
+### Features
+- Add recordings deletion config option ([029bbe3](https://github.com/netology-group/janus-conference/commit/029bbe36e1ec29dccbd130745ceb80035c0775c6))
+
+### Changes
+- Upgrade janus from the main repo ([27e0d3e](https://github.com/netology-group/janus-conference/commit/27e0d3e284f292ceed06e59fa61dcca3bc0d6292))
+
+
 ## v0.7.0 (July 15, 2020)
 
 ### Changes
