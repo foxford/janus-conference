@@ -38,6 +38,8 @@ impl super::Operation for Request {
             .with_write_lock(|mut switchboard| {
                 // The stream still may be ongoing and we must stop it gracefully.
                 if let Some(publisher) = switchboard.publisher_of(self.id) {
+                    let subscribers = switchboard.subscribers_to(publisher).to_owned();
+
                     // At first we synchronously stop the stream and hence the recording
                     // ensuring that it finishes correctly.
                     switchboard.remove_stream(self.id)?;
@@ -47,6 +49,11 @@ impl super::Operation for Request {
                     // performed asynchronously through a janus callback and to avoid race condition
                     // we have preliminary removed the stream in a synchronous way.
                     switchboard.disconnect(publisher)?;
+
+                    // Disconnect subscribers also to avoid memory leak.
+                    for subscriber in subscribers {
+                        switchboard.disconnect(subscriber)?;
+                    }
                 }
 
                 Ok(())
