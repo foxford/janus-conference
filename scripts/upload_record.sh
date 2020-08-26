@@ -38,8 +38,14 @@ cd ${RECORDINGS_DIR}/${RTC_ID}
 
 # Convert video .mjr dumps into .webm files.
 for FILE in *.video.mjr; do
-  ${SCRIPT_ABS_DIR}/janus-pp-rec $FILE ${FILE%.*}.webm
-  echo "file '${FILE%.*}.webm'" >> video_sources.txt
+  OUTPUT_FILE="${FILE%.*}.webm"
+  ${SCRIPT_ABS_DIR}/janus-pp-rec ${FILE} ${OUTPUT_FILE}
+
+  if [[ -f ${OUTPUT_FILE} ]]; then
+    echo "file '${OUTPUT_FILE}'" >> video_sources.txt
+  else
+    >&2 echo "[ERROR] ${OUTPUT_FILE} not created; skipping segment"
+  fi
 done
 
 # Get video segments durations and write to segments.csv file.
@@ -53,8 +59,14 @@ ffmpeg -f concat -i video_sources.txt -c copy -y concat.webm
 
 # Convert audio .mjr dumps into .opus files.
 for FILE in *.audio.mjr; do
-  ${SCRIPT_ABS_DIR}/janus-pp-rec $FILE ${FILE%.*}.opus
-  echo "file '${FILE%.*}.opus'" >> audio_sources.txt
+  OUTPUT_FILE="${FILE%.*}.opus"
+  ${SCRIPT_ABS_DIR}/janus-pp-rec ${FILE} ${OUTPUT_FILE}
+
+  if [[ -f ${OUTPUT_FILE} ]]; then
+    echo "file '${OUTPUT_FILE}'" >> audio_sources.txt
+  else
+    >&2 echo "[ERROR] ${OUTPUT_FILE} not created; skipping segment"
+  fi
 done
 
 # Concat audio segments into a single .opus file.
