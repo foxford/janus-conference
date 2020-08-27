@@ -203,6 +203,7 @@ impl Switchboard {
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
+    #[allow(clippy::ptr_arg)]
     pub fn agent_sessions(&self, id: &AgentId) -> &[SessionId] {
         self.agents.get_values(id)
     }
@@ -235,13 +236,12 @@ impl Switchboard {
         );
 
         let maybe_old_publisher = self.publishers.remove(&id);
-        self.publishers.insert(id, publisher.clone());
+        self.publishers.insert(id, publisher);
 
         if let Some(old_publisher) = maybe_old_publisher {
             if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
                 for subscriber in subscribers {
-                    self.publishers_subscribers
-                        .associate(publisher.clone(), subscriber.clone());
+                    self.publishers_subscribers.associate(publisher, subscriber);
                 }
             }
         }

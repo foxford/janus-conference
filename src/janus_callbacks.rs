@@ -48,7 +48,7 @@ pub fn push_event(
 }
 
 fn unwrap_jansson_option_mut(val: Option<JanssonValue>) -> *mut RawJanssonValue {
-    val.and_then(|val| Some(val.into_raw()))
+    val.map(|val| val.into_raw())
         .unwrap_or(std::ptr::null_mut())
 }
 

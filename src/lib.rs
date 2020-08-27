@@ -159,7 +159,10 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
-        switchboard.publisher_to(session_id).map(send_fir);
+
+        if let Some(publisher) = switchboard.publisher_to(session_id) {
+            send_fir(publisher);
+        }
 
         janus_info!(
             "[CONFERENCE] WebRTC media is now available for {}.",
@@ -220,10 +223,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
-            let is_video = match video {
-                0 => false,
-                _ => true,
-            };
+            let is_video = matches!(video, 1);
 
             let buf = unsafe {
                 std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
@@ -248,10 +248,14 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
 
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
-                switchboard.publisher_to(session_id).map(send_pli);
+                if let Some(publisher) = switchboard.publisher_to(session_id) {
+                    send_pli(publisher);
+                }
             }
             1 if janus::rtcp::has_fir(data) => {
-                switchboard.publisher_to(session_id).map(send_fir);
+                if let Some(publisher) = switchboard.publisher_to(session_id) {
+                    send_fir(publisher);
+                }
             }
             _ => {
                 for subscriber in switchboard.subscribers_to(session_id) {
