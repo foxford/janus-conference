@@ -36,6 +36,9 @@ RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
 # Working directory.
 cd ${RECORDINGS_DIR}/${RTC_ID}
 
+# Remove artifacts from possible previous run to avoid concat duplication.
+rm -f video_sources.txt audio_sources.txt segments.csv
+
 # Convert video .mjr dumps into .webm files.
 for FILE in *.video.mjr; do
   OUTPUT_FILE="${FILE%.*}.webm"
