@@ -54,7 +54,10 @@ done
 # Get video segments durations and write to segments.csv file.
 for FILE in *.video.webm; do
   DURATION=$(ffprobe -i ${FILE} -show_entries format=duration -v quiet -of csv="p=0")
-  echo "${FILE%%.*},${DURATION}" >> segments.csv
+
+  if [[ "${DURATION}" != "N/A" ]]; then
+    echo "${FILE%%.*},${DURATION}" >> segments.csv
+  fi
 done
 
 # Concat video segments into a single .webm file.
