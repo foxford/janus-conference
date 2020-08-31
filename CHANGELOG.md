@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.2 (August 31, 2020)
+
+### Fixes
+- Add subscribers disconnection on stream.upload ([8dc66b1](https://github.com/netology-group/janus-conference/commit/8dc66b1823cdf9279500ff4808748a7f3f6d16cc))
+- Skip empty segments on concat ([cf82fab](https://github.com/netology-group/janus-conference/commit/cf82fab833e4b4c4c0767deed69a52d0921ce738))
+- Remove artifacts from possible previous run ([cea6cd5](https://github.com/netology-group/janus-conference/commit/cea6cd534feadc50212236ad8ab70a93adf954a3))
+- Skip segments with N/A duration ([2806f18](https://github.com/netology-group/janus-conference/commit/2806f18ce8ee62ffa5ff9400732c32e3ae7911b8))
+
+
 ## v0.7.1 (August 7, 2020)
 
 ### Features
