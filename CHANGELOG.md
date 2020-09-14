@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.3 (September 14, 2020)
+
+### Changes
+- Upgrade Janus Gateway ([5c3e86c](https://github.com/netology-group/janus-conference/commit/5c3e86c6a26189a0d3ab800a568d1a886484e302))
+
+
 ## v0.7.2 (August 31, 2020)
 
 ### Fixes
