@@ -87,11 +87,11 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
         let session_id = SessionId::new();
         janus_verb!("[CONFERENCE] Initializing session {}", session_id);
 
-        // WARNING: If this variable gets droppped the memory will be freed by C.
+        // WARNING: If this variable gets dropped the memory will be freed by C.
         //          Any future calls to `SessionWrapper::from_ptr` will return an invalid result
         //          which will cause segfault on drop.
         //          To prevent this we have to store this variable as is and make sure it won't
-        //          be dropped until there're no callbacks are possible to call for this handle.
+        //          be dropped until there're no callbacks possible to call for this handle.
         let session = unsafe { SessionWrapper::associate(handle, session_id) }
             .context("Session associate error")?;
 

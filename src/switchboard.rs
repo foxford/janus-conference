@@ -153,7 +153,7 @@ impl Switchboard {
     }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        janus_info!("[CONFERENCE] Disconnecting publisher asynchronously");
+        janus_info!("[CONFERENCE] Disconnecting session {} asynchronously", id);
 
         let session = self
             .session(id)?
@@ -165,7 +165,14 @@ impl Switchboard {
     }
 
     pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
-        janus_verb!("[CONFERENCE] Disconnecting session {}", id);
+        janus_verb!(
+            "[CONFERENCE] Session {} is going to disconnect. Removing it from the switchboard.",
+            id
+        );
+
+        for subscriber in self.subscribers_to(id).to_owned() {
+            self.disconnect(subscriber)?;
+        }
 
         let stream_ids: Vec<StreamId> = self
             .publishers
