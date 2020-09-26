@@ -65,7 +65,7 @@ RUN wget https://github.com/cisco/libsrtp/archive/v${LIBSRTP_VERSION}.tar.gz \
 ## -----------------------------------------------------------------------------
 ## Install Paho MQTT client
 ## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.3.4
+ARG PAHO_MQTT_VERSION=1.3.5
 
 RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
     && cd "${PAHO_MQTT_BUILD_DIR}" \
