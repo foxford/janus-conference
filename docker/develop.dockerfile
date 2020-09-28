@@ -95,7 +95,7 @@ RUN set -eux; \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='3697786d4f12fa64cec5148a9ba06cb7a7339ff8'
+ARG JANUS_GATEWAY_COMMIT='1da5aa226fb932c87fe70b35551057bd30c3713d'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
