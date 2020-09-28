@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.4 (September 29, 2020)
+
+### Changes
+- Update Janus Gateway ([2204bfe](https://github.com/netology-group/janus-conference/commits/2204bfe9699ecb711b532ea2ff19092b7278e1e6))
+- Update Paho ([e74f7ab](https://github.com/netology-group/janus-conference/commits/e74f7ab9971448816822375a012d382e0c810d6f))
+
+### Fixes
+- Disconnect subscribers on publisher disconnect ([d4dee59](https://github.com/netology-group/janus-conference/commits/d4dee59e82d140bd60e39994b0c39a7e17f7dfd4))
+
+
 ## v0.7.3 (September 14, 2020)
 
 ### Changes
