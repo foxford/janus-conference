@@ -30,7 +30,7 @@ export AWS_ENDPOINT=${APP_UPLOADING__ENDPOINT}
 export AWS_REGION=${APP_UPLOADING__REGION}
 
 RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
-FFMPEG=${FFMPEG:-'ffmpeg -hide-banner -loglevel warning -abort_on empty_output'}
+FFMPEG=${FFMPEG:-'ffmpeg -hide_banner -loglevel warning -abort_on empty_output'}
 AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 
 ###############################################################################

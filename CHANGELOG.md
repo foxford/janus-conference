@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.5 (October 1, 2020)
+
+### Changes
+- Reduce uploading logging verbosity ([98980a1](https://github.com/netology-group/janus-conference/commits/98980a1369120928a7ba3a237dcd7d873060db85)
+- Limit aws-cli bandwidth usage ([5c1fb1f](https://github.com/netology-group/janus-conference/commits/5c1fb1f665c3ce3611b8d313eec7ab97b6bcf93d))
+
+
 ## v0.7.4 (September 29, 2020)
 
 ### Changes
