@@ -30,6 +30,8 @@ export AWS_ENDPOINT=${APP_UPLOADING__ENDPOINT}
 export AWS_REGION=${APP_UPLOADING__REGION}
 
 RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
+FFMPEG=${FFMPEG:-'ffmpeg -hide-banner -loglevel warning -abort_on empty_output'}
+AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 
 ###############################################################################
 
@@ -61,7 +63,7 @@ for FILE in *.video.webm; do
 done
 
 # Concat video segments into a single .webm file.
-ffmpeg -f concat -i video_sources.txt -c copy -y concat.webm
+${FFMPEG} -f concat -i video_sources.txt -c copy -y concat.webm
 
 # Convert audio .mjr dumps into .opus files.
 for FILE in *.audio.mjr; do
@@ -76,10 +78,13 @@ for FILE in *.audio.mjr; do
 done
 
 # Concat audio segments into a single .opus file.
-ffmpeg -f concat -i audio_sources.txt -c copy -y concat.opus
+${FFMPEG} -f concat -i audio_sources.txt -c copy -y concat.opus
 
 # Mux video & audio into a single .webm file.
-ffmpeg -i concat.webm -i concat.opus -c copy -y full.webm
+${FFMPEG} -i concat.webm -i concat.opus -c copy -y full.webm
 
 # Upload record.
-aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION} s3 cp full.webm s3://${BUCKET}/${OBJECT}
+${AWS} s3 cp full.webm s3://${BUCKET}/${OBJECT} \
+  --only-show-errors \
+  --cache-control 'no-cache' \
+  --content-type 'video/webm'
