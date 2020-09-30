@@ -39,6 +39,8 @@ RUN apt-get -y --no-install-recommends install \
         gtk-doc-tools \
         libasan5
 
+RUN aws configure set default.s3.max_bandwidth 50MB/s
+
 ## -----------------------------------------------------------------------------
 ## Install libnice 0.1.13 (signaling doesn't work in dev with newer versions)
 ## -----------------------------------------------------------------------------
