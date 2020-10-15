@@ -87,13 +87,13 @@ where
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
     ) -> anyhow::Result<()> {
-        verb!("Scheduling request"; {"handle_id": session_id, "transaction": transaction});
+        huge!("Scheduling request"; {"handle_id": session_id, "transaction": transaction});
 
         let request = Request::new(session_id, &transaction);
 
         match utils::jansson_to_serde::<R>(payload) {
             Ok(route) => {
-                verb!(
+                huge!(
                     "Pushing request to queue";
                     {"handle_id": session_id, "transaction": transaction}
                 );
@@ -145,7 +145,7 @@ impl<S: Sender> MessageHandler<S> {
 
     /// Handles JSEP if needed, calls the operation and schedules its response.
     async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
-        verb!("Handling request"; {"transaction": request.transaction()});
+        huge!("Handling request"; {"transaction": request.transaction()});
 
         let jsep_answer_result = match operation.is_handle_jsep() {
             true => Self::handle_jsep(&request),
@@ -154,7 +154,7 @@ impl<S: Sender> MessageHandler<S> {
 
         match jsep_answer_result {
             Ok(jsep_answer) => {
-                verb!("Calling operation"; {"transaction": request.transaction()});
+                huge!("Calling operation"; {"transaction": request.transaction()});
 
                 let payload = match operation.call(&request).await {
                     Ok(payload) => JsonValue::from(payload).into(),
@@ -175,7 +175,7 @@ impl<S: Sender> MessageHandler<S> {
 
     /// Serializes the response and pushes it to Janus for sending to the client.
     fn handle_response(&self, response: Response) {
-        verb!(
+        huge!(
             "Handling response";
             {"handle_id": response.session_id(), "transaction": response.transaction()}
         );
@@ -195,7 +195,7 @@ impl<S: Sender> MessageHandler<S> {
             },
         };
 
-        verb!(
+        huge!(
             "Sending response";
             {"handle_id": response.session_id(), "transaction": response.transaction()}
         );
@@ -233,7 +233,7 @@ impl<S: Sender> MessageHandler<S> {
 
         let session_id = response.session_id().to_owned();
         let transaction = response.transaction().to_owned();
-        verb!("Scheduling response"; {"handle_id": session_id, "transaction": transaction});
+        huge!("Scheduling response"; {"handle_id": session_id, "transaction": transaction});
 
         self.tx
             .send(Message::Response(response))
@@ -277,10 +277,10 @@ impl<S: Sender> MessageHandler<S> {
 
     fn notify_error(&self, err: &SvcError) {
         if err.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
-            verb!("Sending error to Sentry");
+            huge!("Sending error to Sentry");
 
             sentry::send(err.to_owned()).unwrap_or_else(|err| {
-                err!("Failed to send error to Sentry: {}", err);
+                warn!("Failed to send error to Sentry: {}", err);
             });
         }
     }

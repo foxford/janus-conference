@@ -304,7 +304,7 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
 fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<()> {
     let session_id = session_id(handle)?;
-    verb!("Handle destroyed"; {"handle_id": session_id});
+    info!("Handle destroyed"; {"handle_id": session_id});
 
     app!()?
         .switchboard

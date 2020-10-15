@@ -27,7 +27,7 @@ struct Response {
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, _request: &super::Request) -> super::OperationResult {
-        info!("Calling stream.upload operation"; {"rtc_id": self.id});
+        verb!("Calling stream.upload operation"; {"rtc_id": self.id});
 
         app!()
             .map_err(internal_error)?
@@ -112,7 +112,7 @@ async fn upload_record(request: &Request) -> Result<()> {
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
     command.args(&[&stream_id, &request.bucket, &request.object]);
-    verb!("Running stream upload shell command: {:?}", command);
+    huge!("Running stream upload shell command: {:?}", command);
 
     command
         .status()

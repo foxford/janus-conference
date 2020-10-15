@@ -145,7 +145,7 @@ impl Switchboard {
 
     pub fn connect(&mut self, session: Session) -> Result<()> {
         let session_id = ***session;
-        verb!("Connecting session"; {"handle_id": session_id});
+        info!("Connecting session"; {"handle_id": session_id});
         let locked_session = Arc::new(Mutex::new(session));
         self.sessions.insert(session_id, locked_session);
         self.states.insert(session_id, SessionState::new());
@@ -153,7 +153,7 @@ impl Switchboard {
     }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        verb!("Disconnecting session asynchronously"; {"handle_id": id.to_string()});
+        info!("Disconnecting session asynchronously"; {"handle_id": id});
 
         let session = self
             .session(id)?
@@ -165,9 +165,9 @@ impl Switchboard {
     }
 
     pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
-        verb!(
+        info!(
             "Session is about to disconnect. Removing it from the switchboard.";
-            {"handle_id": id.to_string()}
+            {"handle_id": id}
         );
 
         for subscriber in self.subscribers_to(id).to_owned() {
@@ -235,7 +235,7 @@ impl Switchboard {
         publisher: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
-        verb!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
+        info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
 
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);

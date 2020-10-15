@@ -99,7 +99,7 @@ impl Recorder {
         let stream_id = self.stream_id;
 
         let handle = thread::spawn(move || {
-            info!("Recorder thread started"; {"rtc_id": stream_id});
+            verb!("Recorder thread started"; {"rtc_id": stream_id});
 
             // Initialize recorders.
             let now = Utc::now().timestamp_millis();
