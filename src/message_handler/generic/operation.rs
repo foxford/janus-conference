@@ -30,7 +30,7 @@ where
         match serde_json::to_value(&response) {
             Ok(payload) => Self { payload },
             Err(err) => {
-                janus_err!("Failed to serialize response payload: {}", err);
+                err!("Failed to serialize response payload: {}", err);
 
                 Self {
                     payload: serde_json::from_str("Serialization error").unwrap(),

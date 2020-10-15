@@ -42,6 +42,7 @@ pub fn push_event(
     let body = unwrap_jansson_option_mut(body);
     let jsep = unwrap_jansson_option_mut(jsep);
 
+    #[allow(const_item_mutation)]
     let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
 
     JanusError::from(res)

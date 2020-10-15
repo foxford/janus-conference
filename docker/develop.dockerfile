@@ -1,4 +1,3 @@
-# Using Debian here because official Rust image is based on Debian too.
 FROM debian:buster as build-janus
 
 ## -----------------------------------------------------------------------------
@@ -112,3 +111,10 @@ RUN set -xe \
     && make install \
     && make configs \
     && rm -rf "${JANUS_GATEWAY_BUILD_DIR}"
+
+## -----------------------------------------------------------------------------
+## Install janus-conference-logger
+## -----------------------------------------------------------------------------
+COPY --from=netologygroup/janus-conference-logger:v0.1.1 \
+    /build/target/release/libjanus_conference_logger.so \
+    /opt/janus/lib/janus/loggers/libjanus_conference_logger.so

@@ -20,8 +20,7 @@ impl Config {
         p.push(CONFIG_FILE_NAME);
 
         let p = p.to_string_lossy();
-
-        janus_info!("[CONFERENCE] Reading config located at {}", p);
+        info!("Reading config located at {}", p);
 
         let mut parser = config::Config::default();
         parser.merge(config::File::new(&p, config::FileFormat::Toml))?;

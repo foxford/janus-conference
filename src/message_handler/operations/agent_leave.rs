@@ -17,7 +17,7 @@ struct Response {}
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, request: &super::Request) -> super::OperationResult {
-        janus_info!("[CONFERENCE] Calling agent.leave operation");
+        verb!("Calling agent.leave operation"; {"agent_id": self.agent_id});
 
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
