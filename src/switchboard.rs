@@ -23,11 +23,11 @@ pub type LockedSession = Arc<Mutex<Session>>;
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct SessionId(Uuid);
+pub struct SessionId(u64);
 
 impl SessionId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    pub fn new(id: u64) -> Self {
+        Self(id)
     }
 }
 

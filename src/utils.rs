@@ -1,5 +1,7 @@
 #![allow(unused_macros)]
 
+use std::os::raw::{c_ulong, c_void};
+
 use anyhow::{format_err, Context, Result};
 use janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
 use serde::de::DeserializeOwned;
@@ -61,6 +63,8 @@ macro_rules! verb(($($args:tt)*) => { log!(janus_plugin::debug::LogLevel::Verb, 
 macro_rules! huge(($($args:tt)*) => { log!(janus_plugin::debug::LogLevel::Huge, $($args)*) };);
 macro_rules! dbg(($($args:tt)*) => { log!(janus_plugin::debug::LogLevel::Dbg, $($args)*) };);
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Courtesy of c_string crate, which also has some other stuff we aren't interested in
 // taking in as a dependency here.
 macro_rules! c_str {
@@ -78,4 +82,13 @@ pub fn jansson_to_serde<T: DeserializeOwned>(json: &JanssonValue) -> Result<T> {
     let json = json.to_libcstring(JanssonEncodingFlags::empty());
     let json = json.to_string_lossy();
     serde_json::from_str(&json).context("Failed to parse JSON")
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub struct janus_ice_handle {
+    _session: *mut c_void,
+    pub handle_id: c_ulong,
 }

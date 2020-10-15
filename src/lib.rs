@@ -84,12 +84,13 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let session_id = SessionId::new();
+        let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
+        let session_id = SessionId::new(ice_handle.handle_id);
         verb!("Initializing session"; {"handle_id": session_id});
 
-        // WARNING: If this variable gets dropped the memory will be freed by C.
-        //          Any future calls to `SessionWrapper::from_ptr` will return an invalid result
-        //          which will cause segfault on drop.
+        // WARNING: If this variable gets dropped the memory would be freed by C.
+        //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
+        //          which would cause segfault on drop.
         //          To prevent this we have to store this variable as is and make sure it won't
         //          be dropped until there're no callbacks possible to call for this handle.
         let session = unsafe { SessionWrapper::associate(handle, session_id) }
