@@ -67,7 +67,7 @@ pub struct UploadConfig {
 impl UploadConfig {
     fn check(&self) -> Result<()> {
         for backend in &self.backends {
-            let prefix = format!("APP_{}", backend.to_uppercase());
+            let prefix = format!("APP_UPLOADING_{}", backend.to_uppercase());
             let env = config::Environment::with_prefix(&prefix).separator("__");
 
             let mut parser = config::Config::default();

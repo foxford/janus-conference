@@ -10,4 +10,4 @@ delete_records = true
 bitrate = 300000
 
 [upload]
-backends = ["NG"]
+backends = ["yandex"]
