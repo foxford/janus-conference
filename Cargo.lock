@@ -653,7 +653,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "janus-conference"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "anyhow 1.0.31 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-trait 0.1.36 (registry+https://github.com/rust-lang/crates.io-index)",

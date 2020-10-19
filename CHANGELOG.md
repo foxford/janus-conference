@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.0 (October 20, 2020)
+
+### Features
+- Add contextual JSON logging ([4471cea](4471ceabbf4b8aab450fc931133104206efb75f0))
+
+### Changes
+- Add backend selection for uploading ([1dbde12](1dbde12bdfa48071ea9cc45ea259025826c04097))
+
+
 ## v0.7.5 (October 1, 2020)
 
 ### Changes
