@@ -12,6 +12,7 @@ pub struct Config {
     pub recordings: recorder::Config,
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
+    pub upload: UploadConfig,
 }
 
 impl Config {
@@ -29,6 +30,7 @@ impl Config {
         let mut config = parser.try_into::<Config>()?;
 
         config.recordings.check()?;
+        config.upload.check()?;
 
         Ok(config)
     }
@@ -47,4 +49,32 @@ pub struct Constraint {
 #[derive(Clone, Deserialize, Debug)]
 pub struct PublisherConstraint {
     pub bitrate: Option<u32>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+struct UploadBackendConfig {
+    access_key_id: String,
+    secret_access_key: String,
+    endpoint: String,
+    region: String,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct UploadConfig {
+    pub backends: Vec<String>,
+}
+
+impl UploadConfig {
+    fn check(&self) -> Result<()> {
+        for backend in &self.backends {
+            let prefix = format!("APP_{}", backend.to_uppercase());
+            let env = config::Environment::with_prefix(&prefix).separator("__");
+
+            let mut parser = config::Config::default();
+            parser.merge(env)?;
+            parser.try_into::<UploadBackendConfig>()?;
+        }
+
+        Ok(())
+    }
 }
