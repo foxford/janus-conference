@@ -18,10 +18,7 @@ struct Response {}
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, request: &super::Request) -> super::OperationResult {
-        janus_info!(
-            "[CONFERENCE] Calling stream.create operation with id {}",
-            self.id
-        );
+        verb!("Calling stream.create operation"; {"rtc_id": self.id});
 
         let internal_error = |err: Error| {
             SvcError::builder()
@@ -40,7 +37,7 @@ impl super::Operation for Request {
                 if app.config.recordings.enabled {
                     let mut recorder = Recorder::new(&app.config.recordings, self.id);
                     recorder.start_recording()?;
-                    janus_verb!("[CONFERENCE] Attaching recorder for {}", request.session_id());
+                    verb!("Attaching recorder"; {"handle_id": request.session_id()});
                     switchboard.state_mut(request.session_id())?.set_recorder(recorder);
                 }
 

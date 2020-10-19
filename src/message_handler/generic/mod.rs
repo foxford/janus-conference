@@ -64,7 +64,7 @@ where
             match self.rx.recv().ok() {
                 None => (),
                 Some(Message::Request(operation, request)) => {
-                    janus_info!("[CONFERENCE] Scheduling request handling");
+                    verb!("Scheduling request handling");
                     let handler = handler.clone();
 
                     self.runtime.spawn(async move {
@@ -87,12 +87,16 @@ where
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
     ) -> anyhow::Result<()> {
-        janus_info!("[CONFERENCE] Scheduling request");
+        huge!("Scheduling request"; {"handle_id": session_id, "transaction": transaction});
+
         let request = Request::new(session_id, &transaction);
 
         match utils::jansson_to_serde::<R>(payload) {
             Ok(route) => {
-                janus_info!("[CONFERENCE] Pushing request to queue");
+                huge!(
+                    "Pushing request to queue";
+                    {"handle_id": session_id, "transaction": transaction}
+                );
 
                 let request = match jsep_offer {
                     None => request,
@@ -108,7 +112,10 @@ where
                     .map_err(|err| format_err!("Failed to schedule request: {}", err))
             }
             Err(err) => {
-                janus_info!("[CONFERENCE] Bad request. Couldn't determine method");
+                verb!(
+                    "Bad request. Couldn't determine method";
+                    {"handle_id": session_id, "transaction": transaction}
+                );
 
                 let err = SvcError::builder()
                     .status(StatusCode::BAD_REQUEST)
@@ -138,7 +145,7 @@ impl<S: Sender> MessageHandler<S> {
 
     /// Handles JSEP if needed, calls the operation and schedules its response.
     async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
-        janus_info!("[CONFERENCE] Handling request");
+        huge!("Handling request"; {"transaction": request.transaction()});
 
         let jsep_answer_result = match operation.is_handle_jsep() {
             true => Self::handle_jsep(&request),
@@ -147,7 +154,7 @@ impl<S: Sender> MessageHandler<S> {
 
         match jsep_answer_result {
             Ok(jsep_answer) => {
-                janus_info!("[CONFERENCE] Calling operation");
+                huge!("Calling operation"; {"transaction": request.transaction()});
 
                 let payload = match operation.call(&request).await {
                     Ok(payload) => JsonValue::from(payload).into(),
@@ -168,20 +175,30 @@ impl<S: Sender> MessageHandler<S> {
 
     /// Serializes the response and pushes it to Janus for sending to the client.
     fn handle_response(&self, response: Response) {
-        janus_info!("[CONFERENCE] Handling response");
+        huge!(
+            "Handling response";
+            {"handle_id": response.session_id(), "transaction": response.transaction()}
+        );
 
         let jsep_answer = match response.jsep_answer() {
             None => None,
             Some(json_value) => match utils::serde_to_jansson(&json_value) {
                 Ok(jansson_value) => Some(jansson_value),
                 Err(err) => {
-                    janus_err!("[CONFERENCE] Failed to serialize JSEP answer: {}", err);
+                    err!(
+                        "Failed to serialize JSEP answer: {}", err;
+                        {"handle_id": response.session_id(), "transaction": response.transaction()}
+                    );
+
                     return;
                 }
             },
         };
 
-        janus_info!("[CONFERENCE] Sending response ({})", response.transaction());
+        huge!(
+            "Sending response";
+            {"handle_id": response.session_id(), "transaction": response.transaction()}
+        );
 
         JanssonValue::try_from(response.payload())
             .and_then(|payload| {
@@ -192,7 +209,12 @@ impl<S: Sender> MessageHandler<S> {
                     jsep_answer,
                 )
             })
-            .unwrap_or_else(|err| janus_err!("[CONFERENCE] Error sending response: {}", err));
+            .unwrap_or_else(|err| {
+                err!(
+                    "Error sending response: {}", err;
+                    {"handle_id": response.session_id(), "transaction": response.transaction()}
+                );
+            });
     }
 
     /// Builds a response object for the request and pushes it to the message handling queue.
@@ -209,14 +231,18 @@ impl<S: Sender> MessageHandler<S> {
             Some(jsep_answer) => response.set_jsep_answer(jsep_answer),
         };
 
-        janus_info!(
-            "[CONFERENCE] Scheduling response ({})",
-            response.transaction()
-        );
+        let session_id = response.session_id().to_owned();
+        let transaction = response.transaction().to_owned();
+        huge!("Scheduling response"; {"handle_id": session_id, "transaction": transaction});
 
         self.tx
             .send(Message::Response(response))
-            .unwrap_or_else(|err| janus_err!("[CONFERENCE] Failed to schedule response: {}", err));
+            .unwrap_or_else(move |err| {
+                err!(
+                    "Failed to schedule response: {}", err;
+                    {"handle_id": session_id, "transaction": transaction}
+                );
+            });
     }
 
     /// Parses SDP offer, returns the answer which is intended to send in the response.
@@ -251,10 +277,10 @@ impl<S: Sender> MessageHandler<S> {
 
     fn notify_error(&self, err: &SvcError) {
         if err.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
-            janus_info!("[CONFERENCE] Sending error to Sentry");
+            huge!("Sending error to Sentry");
 
             sentry::send(err.to_owned()).unwrap_or_else(|err| {
-                janus_err!("[CONFERENCE] Failed to send error to Sentry: {}", err);
+                warn!("Failed to send error to Sentry: {}", err);
             });
         }
     }
@@ -300,7 +326,7 @@ mod tests {
         async fn call(&self, request: &Request) -> OperationResult {
             Ok(PingResponse {
                 message: String::from("pong"),
-                session_id: request.session_id().to_string(),
+                session_id: request.session_id(),
             }
             .into())
         }
@@ -414,7 +440,7 @@ mod tests {
                 json,
                 json!({
                     "message": "pong",
-                    "session_id": session_id.to_string(),
+                    "session_id": session_id,
                     "status": "200",
                 })
             ),

@@ -21,6 +21,8 @@ use janus::{
 };
 
 #[macro_use]
+mod utils;
+#[macro_use]
 mod app;
 mod bidirectional_multimap;
 mod conf;
@@ -31,8 +33,6 @@ mod message_handler;
 mod recorder;
 mod serde;
 mod switchboard;
-#[macro_use]
-mod utils;
 #[cfg(test)]
 mod test_stubs;
 
@@ -50,20 +50,20 @@ extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) 
     let config = match init_config(config_path) {
         Ok(config) => config,
         Err(err) => {
-            janus_fatal!("[CONFERENCE] Failed to read config: {}", err);
+            fatal!("Failed to read config: {}", err);
             return -1;
         }
     };
 
-    janus_info!("{:?}", config);
+    info!("Config: {:#?}", config);
 
     if let Err(err) = App::init(config) {
-        janus_fatal!("[CONFERENCE] Janus Conference plugin init failed: {}", err);
+        fatal!("Init failed: {}", err);
         return -1;
     };
 
     janus_callbacks::init(callbacks);
-    janus_info!("[CONFERENCE] Janus Conference plugin initialized!");
+    info!("Initialized");
     0
 }
 
@@ -77,19 +77,20 @@ fn init_config(config_path: *const c_char) -> Result<Config> {
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
     if let Err(err) = create_session_impl(handle) {
-        janus_err!("[CONFERENCE] {}", err);
+        err!("Failed to create session: {}", err);
         unsafe { *error = -1 };
     }
 }
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let session_id = SessionId::new();
-        janus_verb!("[CONFERENCE] Initializing session {}", session_id);
+        let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
+        let session_id = SessionId::new(ice_handle.handle_id);
+        verb!("Initializing session"; {"handle_id": session_id});
 
-        // WARNING: If this variable gets dropped the memory will be freed by C.
-        //          Any future calls to `SessionWrapper::from_ptr` will return an invalid result
-        //          which will cause segfault on drop.
+        // WARNING: If this variable gets dropped the memory would be freed by C.
+        //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
+        //          which would cause segfault on drop.
         //          To prevent this we have to store this variable as is and make sure it won't
         //          be dropped until there're no callbacks possible to call for this handle.
         let session = unsafe { SessionWrapper::associate(handle, session_id) }
@@ -101,7 +102,7 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
-    janus_verb!("[CONFERENCE] Querying session");
+    verb!("Querying session");
     std::ptr::null_mut()
 }
 
@@ -114,7 +115,7 @@ extern "C" fn handle_message(
     match handle_message_impl(handle, transaction, message, jsep) {
         Ok(()) => PluginResult::ok_wait(None).into_raw(),
         Err(err) => {
-            janus_err!("[CONFERENCE] Message handling error: {}", err);
+            err!("Message handling error: {}", err);
             PluginResult::error(c_str!("Failed to handle message")).into_raw()
         }
     }
@@ -127,7 +128,7 @@ fn handle_message_impl(
     jsep: *mut RawJanssonValue,
 ) -> Result<()> {
     let session_id = session_id(handle)?;
-    janus_verb!("[CONFERENCE] Handling message on {}.", session_id);
+    verb!("Incoming message"; {"handle_id": session_id});
 
     let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
         Ok(transaction) => String::from(transaction),
@@ -164,11 +165,7 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
             send_fir(publisher);
         }
 
-        janus_info!(
-            "[CONFERENCE] WebRTC media is now available for {}.",
-            session_id
-        );
-
+        info!("WebRTC media is now available"; {"handle_id": session_id});
         Ok(())
     })
 }
@@ -281,12 +278,24 @@ extern "C" fn incoming_data(_handle: *mut PluginSession, _packet: *mut PluginDat
     // Dropping incoming data.
 }
 
-extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_int) {
-    janus_info!("[CONFERENCE] Slow link")
+extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int) {
+    report_error(slow_link_impl(handle, uplink, video));
 }
 
-extern "C" fn hangup_media(_handle: *mut PluginSession) {
-    janus_verb!("[CONFERENCE] Hang up")
+fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
+    let session_id = session_id(handle)?;
+    info!("Slow link: uplink = {}; is_video = {}", uplink, video; {"handle_id": session_id});
+    Ok(())
+}
+
+extern "C" fn hangup_media(handle: *mut PluginSession) {
+    report_error(hangup_media_impl(handle));
+}
+
+fn hangup_media_impl(handle: *mut PluginSession) -> Result<()> {
+    let session_id = session_id(handle)?;
+    info!("Hang up"; {"handle_id": session_id});
+    Ok(())
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -295,7 +304,7 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
 fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<()> {
     let session_id = session_id(handle)?;
-    janus_verb!("[CONFERENCE] Destroying Conference session {}", session_id);
+    info!("Handle destroyed"; {"handle_id": session_id});
 
     app!()?
         .switchboard
@@ -303,7 +312,7 @@ fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Resul
 }
 
 extern "C" fn destroy() {
-    janus_info!("[CONFERENCE] Janus Conference plugin destroyed!");
+    info!("Janus Conference plugin destroyed");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -390,7 +399,7 @@ fn report_error(res: Result<()>) {
     match res {
         Ok(_) => {}
         Err(err) => {
-            janus_err!("[CONFERENCE] {}", err);
+            err!("{}", err);
         }
     }
 }

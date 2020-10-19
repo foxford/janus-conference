@@ -17,10 +17,7 @@ struct Response {}
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, request: &super::Request) -> super::OperationResult {
-        janus_info!(
-            "[CONFERENCE] Calling stream.read operation with id {}",
-            self.id
-        );
+        verb!("Calling stream.read operation"; {"rtc_id": self.id});
 
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()

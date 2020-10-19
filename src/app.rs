@@ -29,8 +29,8 @@ pub struct App {
 impl App {
     pub fn init(config: Config) -> Result<()> {
         if let Some(sentry_config) = config.sentry.as_ref() {
-            janus_info!("[CONFERENCE] Initializing Sentry");
             svc_error::extension::sentry::init(sentry_config);
+            info!("Sentry initialized");
         }
 
         let app = App::new(config)?;
@@ -47,7 +47,7 @@ impl App {
                 let interval = Duration::seconds(app.config.general.vacuum_interval);
 
                 if let Err(err) = app.switchboard.vacuum_publishers_loop(interval) {
-                    janus_err!("[CONFERENCE] {}", err);
+                    err!("Vacuum publishers loop failed: {}", err);
                 }
             }
         });

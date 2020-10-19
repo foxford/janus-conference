@@ -27,10 +27,7 @@ struct Response {
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, _request: &super::Request) -> super::OperationResult {
-        janus_info!(
-            "[CONFERENCE] Calling stream.upload operation with id {}",
-            self.id
-        );
+        verb!("Calling stream.upload operation"; {"rtc_id": self.id});
 
         app!()
             .map_err(internal_error)?
@@ -103,7 +100,7 @@ fn internal_error(err: Error) -> SvcError {
 ///////////////////////////////////////////////////////////////////////////////
 
 async fn upload_record(request: &Request) -> Result<()> {
-    janus_info!("[CONFERENCE] Preparing & uploading record");
+    info!("Preparing & uploading record"; {"rtc_id": request.id});
 
     let mut script_path = std::env::current_exe()
         .context("Failed to get current executable path")?
@@ -115,7 +112,7 @@ async fn upload_record(request: &Request) -> Result<()> {
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
     command.args(&[&stream_id, &request.bucket, &request.object]);
-    janus_verb!("[CONFERENCE] {:?}", command);
+    huge!("Running stream upload shell command: {:?}", command);
 
     command
         .status()
@@ -123,11 +120,9 @@ async fn upload_record(request: &Request) -> Result<()> {
         .map_err(|err| format_err!("Failed to run upload_record.sh, return code = '{}'", err))
         .and_then(|status| {
             if status.success() {
-                janus_info!(
-                    "[CONFERENCE] Record {} successfully uploaded to {}/{}",
-                    request.id,
-                    request.bucket,
-                    request.object
+                info!(
+                    "Record successfully uploaded to {}/{}", request.bucket, request.object;
+                    {"rtc_id": request.id}
                 );
 
                 Ok(())

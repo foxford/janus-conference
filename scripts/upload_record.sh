@@ -30,6 +30,7 @@ export AWS_ENDPOINT=${APP_UPLOADING__ENDPOINT}
 export AWS_REGION=${APP_UPLOADING__REGION}
 
 RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
+JANUS_PP_REC="${SCRIPT_ABS_DIR}/janus-pp-rec -d 3"
 FFMPEG=${FFMPEG:-'ffmpeg -hide_banner -loglevel warning -abort_on empty_output'}
 AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 
@@ -44,7 +45,7 @@ rm -f video_sources.txt audio_sources.txt segments.csv
 # Convert video .mjr dumps into .webm files.
 for FILE in *.video.mjr; do
   OUTPUT_FILE="${FILE%.*}.webm"
-  ${SCRIPT_ABS_DIR}/janus-pp-rec ${FILE} ${OUTPUT_FILE}
+  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
 
   if [[ -f ${OUTPUT_FILE} ]]; then
     echo "file '${OUTPUT_FILE}'" >> video_sources.txt
@@ -68,7 +69,7 @@ ${FFMPEG} -f concat -i video_sources.txt -c copy -y concat.webm
 # Convert audio .mjr dumps into .opus files.
 for FILE in *.audio.mjr; do
   OUTPUT_FILE="${FILE%.*}.opus"
-  ${SCRIPT_ABS_DIR}/janus-pp-rec ${FILE} ${OUTPUT_FILE}
+  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
 
   if [[ -f ${OUTPUT_FILE} ]]; then
     echo "file '${OUTPUT_FILE}'" >> audio_sources.txt

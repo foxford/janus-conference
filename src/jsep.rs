@@ -23,7 +23,7 @@ impl Jsep {
             Jsep::Answer { .. } => bail!("Expected JSEP offer, got answer"),
         };
 
-        janus_verb!("[CONFERENCE] offer: {:?}", offer_sdp);
+        verb!("SDP offer: {:?}", offer_sdp);
 
         let answer_sdp = answer_sdp!(
             offer_sdp,
@@ -38,7 +38,7 @@ impl Jsep {
             Self::set_publisher_bitrate_constraint(jsep_offer, &answer_sdp, bitrate)?;
         }
 
-        janus_verb!("[CONFERENCE] answer: {:?}", answer_sdp);
+        verb!("SDP answer: {:?}", answer_sdp);
         let answer = Jsep::Answer { sdp: answer_sdp };
         Ok(Some(answer))
     }

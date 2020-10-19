@@ -22,12 +22,12 @@ pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SessionId(Uuid);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct SessionId(u64);
 
 impl SessionId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    pub fn new(id: u64) -> Self {
+        Self(id)
     }
 }
 
@@ -145,7 +145,7 @@ impl Switchboard {
 
     pub fn connect(&mut self, session: Session) -> Result<()> {
         let session_id = ***session;
-        janus_verb!("[CONFERENCE] Connecting session {}", session_id);
+        info!("Connecting session"; {"handle_id": session_id});
         let locked_session = Arc::new(Mutex::new(session));
         self.sessions.insert(session_id, locked_session);
         self.states.insert(session_id, SessionState::new());
@@ -153,7 +153,7 @@ impl Switchboard {
     }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        janus_info!("[CONFERENCE] Disconnecting session {} asynchronously", id);
+        info!("Disconnecting session asynchronously"; {"handle_id": id});
 
         let session = self
             .session(id)?
@@ -165,9 +165,9 @@ impl Switchboard {
     }
 
     pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
-        janus_verb!(
-            "[CONFERENCE] Session {} is going to disconnect. Removing it from the switchboard.",
-            id
+        info!(
+            "Session is about to disconnect. Removing it from the switchboard.";
+            {"handle_id": id}
         );
 
         for subscriber in self.subscribers_to(id).to_owned() {
@@ -235,12 +235,7 @@ impl Switchboard {
         publisher: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
-        janus_verb!(
-            "[CONFERENCE] Creating stream {}, publisher = {}, agent_id = {}",
-            id,
-            publisher,
-            agent_id,
-        );
+        info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
 
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
@@ -268,11 +263,9 @@ impl Switchboard {
         match maybe_publisher {
             None => bail!("Stream {} does not exist", id),
             Some(publisher) => {
-                janus_verb!(
-                    "[CONFERENCE] Joining to stream {}, subscriber = {}, agent_id = {}",
-                    id,
-                    subscriber,
-                    agent_id,
+                verb!(
+                    "Joining to stream";
+                    {"rtc_id": id, "handle_id": subscriber, "agent_id": agent_id}
                 );
 
                 self.publishers_subscribers.associate(publisher, subscriber);
@@ -283,7 +276,7 @@ impl Switchboard {
     }
 
     pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
-        janus_verb!("[CONFERENCE] Removing stream {}", id);
+        info!("Removing stream"; {"rtc_id": id});
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         if let Some(publisher) = maybe_publisher {
@@ -300,7 +293,7 @@ impl Switchboard {
         let state = self.state_mut(publisher)?;
 
         if let Some(recorder) = state.recorder_mut() {
-            janus_verb!("[CONFERENCE] Stopping recording {}", publisher);
+            info!("Stopping recording"; {"handle_id": publisher});
 
             recorder
                 .stop_recording()
@@ -315,17 +308,14 @@ impl Switchboard {
         for (stream_id, publisher) in self.publishers.clone().into_iter() {
             match self.vacuum_publisher(publisher, timeout) {
                 Ok(false) => (),
-                Ok(true) => janus_warn!(
-                    "[CONFERENCE] Publisher {} timed out on stream {}; No RTP packets from PeerConnection in {} seconds",
-                    publisher,
-                    stream_id,
-                    timeout.num_seconds()
+                Ok(true) => warn!(
+                    "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
+                    timeout.num_seconds();
+                    {"rtc_id": stream_id, "handle_id": publisher}
                 ),
-                Err(err) => janus_err!(
-                    "[CONFERENCE] Failed to vacuum publisher {} on stream {}: {}",
-                    publisher,
-                    stream_id,
-                    err
+                Err(err) => err!(
+                    "Failed to vacuum publisher: {}", err;
+                    {"rtc_id": stream_id, "handle_id": publisher}
                 ),
             }
         }
@@ -379,7 +369,7 @@ impl LockedSwitchboard {
     }
 
     pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
-        janus_info!("[CONFERENCE] Vacuum thread is alive.");
+        info!("Vacuum thread spawned");
 
         let std_interval = interval
             .to_std()
@@ -387,7 +377,7 @@ impl LockedSwitchboard {
 
         loop {
             self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
-                .unwrap_or_else(|err| janus_err!("[CONFERENCE] {}", err));
+                .unwrap_or_else(|err| err!("{}", err));
 
             thread::sleep(std_interval);
         }

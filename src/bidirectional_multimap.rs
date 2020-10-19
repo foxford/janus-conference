@@ -69,7 +69,7 @@ where
             if let Some(vs) = self.forward_mapping.get_vec_mut(&k) {
                 vs.retain(|x| x.borrow() != v);
             } else {
-                janus_err!(
+                err!(
                     "Map in inconsistent state: entry ({:?}, {:?}) has no corresponding entry.",
                     k,
                     v

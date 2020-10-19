@@ -4,10 +4,15 @@ general: {
   transports_folder = "/opt/janus/lib/janus/transports"
   events_folder = "/opt/janus/lib/janus/events"
   debug_level = 5
-  debug_timestamps = true
+  debug_colors = false
+  debug_timestamps = false
+  log_to_stdout = false
   admin_secret = "janusoverlord"
   session_timeout = 0
   opaqueid_in_api = true
+}
+nat: {
+  ignore_mdns = true
 }
 media: {
   rtp_port_range = "30000-30020"

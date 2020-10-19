@@ -86,7 +86,8 @@ impl Recorder {
     }
 
     pub fn start_recording(&mut self) -> Result<()> {
-        janus_info!("[CONFERENCE] Start recording");
+        info!("Start recording"; {"rtc_id": self.stream_id});
+
         let dir = self.create_records_dir().to_string_lossy().into_owned();
 
         // Handle the pipeline in a separate thread.
@@ -95,8 +96,10 @@ impl Recorder {
             .take()
             .ok_or_else(|| format_err!("Empty receiver in recorder"))?;
 
+        let stream_id = self.stream_id;
+
         let handle = thread::spawn(move || {
-            janus_verb!("[CONFERENCE] Recorder thread started");
+            verb!("Recorder thread started"; {"rtc_id": stream_id});
 
             // Initialize recorders.
             let now = Utc::now().timestamp_millis();
@@ -107,7 +110,7 @@ impl Recorder {
             let audio_filename = format!("{}.audio", now);
             let mut audio_recorder = JanusRecorder::create(&dir, &audio_filename, Codec::OPUS)?;
 
-            janus_info!("[CONFERENCE] Recording to {}", dir);
+            info!("Recording to {}", dir; {"rtc_id": stream_id});
 
             // Push RTP packets into the pipeline until stop message.
             for msg in recv.iter() {
@@ -121,7 +124,7 @@ impl Recorder {
                         };
 
                         if let Err(err) = res {
-                            janus_err!("[CONFERENCE] Failed to record frame: {}", err);
+                            err!("Failed to record frame: {}", err; {"rtc_id": stream_id});
                         }
                     }
                 }
@@ -129,7 +132,7 @@ impl Recorder {
 
             video_recorder.close()?;
             audio_recorder.close()?;
-            janus_info!("[CONFERENCE] Recording stopped");
+            info!("Recording stopped"; {"rtc_id": stream_id});
             Ok(())
         });
 
@@ -142,9 +145,9 @@ impl Recorder {
 
         if let Some(handle) = self.recorder_thread_handle.take() {
             if let Err(err) = handle.join() {
-                janus_err!(
-                    "Error during finalization of current record part: {:?}",
-                    err
+                err!(
+                    "Error during finalization of current record part: {:?}", err;
+                    {"rtc_id": self.stream_id}
                 );
             }
         }
