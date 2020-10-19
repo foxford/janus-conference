@@ -10,12 +10,13 @@ You can send a request over [any configured Janus transport](https://janus.conf.
 
 ### Parameters
 
-Name        | Type   | Default    | Description
------------ | ------ | ---------- | -----------
-body.method | string | _required_ | Always `stream.upload`.
-body.id     | string | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
-body.bucket | string | _required_ | Destination S3 bucket.
-body.object | string | _required_ | Destination S3 object name.
+Name         | Type   | Default    | Description
+------------ | ------ | ---------- | -----------
+body.method  | string | _required_ | Always `stream.upload`.
+body.id      | string | _required_ | Unique ID of the stream you want to start. This string is used to group publishers and subscribers. **It's up to you to generate these IDs and ensure their consistency.**
+body.backend | string | _required_ | Destination S3 backend.
+body.bucket  | string | _required_ | Destination S3 bucket.
+body.object  | string | _required_ | Destination S3 object name.
 
 
 ## Response
@@ -40,5 +41,5 @@ JANUS_HANDLE_ID='6383585627302052'
 mosquitto_pub \
     -i "v1.mqtt3/service-agents/test-1.${CONFERENCE_ACCOUNT_ID}" \
     -t "agents/alpha.${JANUS_ACCOUNT_ID}/api/v1/in/${CONFERENCE_ACCOUNT_ID}" \
-    -m '{"payload": "{\"janus\":\"message\", \"session_id\": '${JANUS_SESSION_ID}', \"handle_id\": '${JANUS_HANDLE_ID}', \"body\": {\"method\": \"stream.upload\", \"id\": \"'${RTC_ID}'\", \"bucket\": \"origin.webinar.'${AUDIENCE}'\", \"object\": \"'${RTC_ID}'.source.mp4\"}, \"transaction\": \"ignore\"}"}'
+    -m '{"payload": "{\"janus\":\"message\", \"session_id\": '${JANUS_SESSION_ID}', \"handle_id\": '${JANUS_HANDLE_ID}', \"body\": {\"method\": \"stream.upload\", \"id\": \"'${RTC_ID}'\", \"backend\": \"'${BACKEND}'\", \"bucket\": \"origin.webinar.'${AUDIENCE}'\", \"object\": \"'${RTC_ID}'.source.mp4\"}, \"transaction\": \"ignore\"}"}'
 ```

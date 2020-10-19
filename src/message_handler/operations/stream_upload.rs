@@ -13,6 +13,7 @@ use crate::switchboard::StreamId;
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
     id: StreamId,
+    backend: String,
     bucket: String,
     object: String,
 }
@@ -28,6 +29,16 @@ struct Response {
 impl super::Operation for Request {
     async fn call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling stream.upload operation"; {"rtc_id": self.id});
+
+        {
+            let app = app!().map_err(internal_error)?;
+
+            if !app.config.upload.backends.contains(&self.backend) {
+                let err = anyhow!("Unknown backend '{}'", self.backend);
+                err!("{}", err; {"rtc_id": self.id});
+                return Err(error(StatusCode::BAD_REQUEST, err));
+            }
+        }
 
         app!()
             .map_err(internal_error)?
@@ -111,7 +122,12 @@ async fn upload_record(request: &Request) -> Result<()> {
     script_path.push("upload_record.sh");
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
-    command.args(&[&stream_id, &request.bucket, &request.object]);
+    command.args(&[
+        &stream_id,
+        &request.backend,
+        &request.bucket,
+        &request.object,
+    ]);
     huge!("Running stream upload shell command: {:?}", command);
 
     command

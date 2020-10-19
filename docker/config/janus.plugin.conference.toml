@@ -8,3 +8,6 @@ delete_records = true
 
 [constraint.publisher]
 bitrate = 300000
+
+[upload]
+backends = ["NG"]
