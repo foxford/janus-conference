@@ -9,25 +9,32 @@ SCRIPT_ABS_DIR=$(dirname ${SCRIPT_ABS_PATH})
 
 # Arguments.
 RTC_ID=$1
-BUCKET=$2
-OBJECT=$3
+BACKEND=$2
+BUCKET=$3
+OBJECT=$4
 
 if [[ ! ${RTC_ID} ]]; then $(REPORT_ERROR "RTC_ID isn't specified"); exit 1; fi
+if [[ ! ${BACKEND} ]]; then $(REPORT_ERROR "BACKEND isn't specified"); exit 1; fi
 if [[ ! ${BUCKET} ]]; then $(REPORT_ERROR "BUCKET isn't specified"); exit 1; fi
 if [[ ! ${OBJECT} ]]; then $(REPORT_ERROR "OBJECT isn't specified"); exit 1; fi
 
 ###############################################################################
 
 # Environment.
-if [[ ! ${APP_UPLOADING__ACCESS_KEY_ID} ]]; then $(REPORT_ERROR "APP_UPLOADING__ACCESS_KEY_ID isn't specified"); exit 1; fi
-if [[ ! ${APP_UPLOADING__SECRET_ACCESS_KEY} ]]; then $(REPORT_ERROR "APP_UPLOADING__SECRET_ACCESS_KEY isn't specified"); exit 1; fi
-if [[ ! ${APP_UPLOADING__ENDPOINT} ]]; then $(REPORT_ERROR "APP_UPLOADING__ENDPOINT isn't specified"); exit 1; fi
-if [[ ! ${APP_UPLOADING__REGION} ]]; then $(REPORT_ERROR "APP_UPLOADING__REGION isn't specified"); exit 1; fi
+APP_UPLOADING__ACCESS_KEY_ID_NAME="APP_UPLOADING__${BACKEND^^}_ACCESS_KEY_ID"
+APP_UPLOADING__SECRET_ACCESS_KEY_NAME="APP_UPLOADING__${BACKEND^^}_SECRET_ACCESS_KEY"
+APP_UPLOADING__ENDPOINT_NAME="APP_UPLOADING__${BACKEND^^}_ENDPOINT"
+APP_UPLOADING__REGION_NAME="APP_UPLOADING__${BACKEND^^}_REGION"
 
-export AWS_ACCESS_KEY_ID=${APP_UPLOADING__ACCESS_KEY_ID}
-export AWS_SECRET_ACCESS_KEY=${APP_UPLOADING__SECRET_ACCESS_KEY}
-export AWS_ENDPOINT=${APP_UPLOADING__ENDPOINT}
-export AWS_REGION=${APP_UPLOADING__REGION}
+if [[ ! ${!APP_UPLOADING__ACCESS_KEY_ID_NAME} ]]; then $(REPORT_ERROR "${APP_UPLOADING__ACCESS_KEY_ID_NAME} isn't specified"); exit 1; fi
+if [[ ! ${!APP_UPLOADING__SECRET_ACCESS_KEY_NAME} ]]; then $(REPORT_ERROR "${APP_UPLOADING__SECRET_ACCESS_KEY_NAME} isn't specified"); exit 1; fi
+if [[ ! ${!APP_UPLOADING__ENDPOINT_NAME} ]]; then $(REPORT_ERROR "${APP_UPLOADING__ENDPOINT_NAME} isn't specified"); exit 1; fi
+if [[ ! ${!APP_UPLOADING__REGION_NAME} ]]; then $(REPORT_ERROR "${APP_UPLOADING__REGION_NAME} isn't specified"); exit 1; fi
+
+export AWS_ACCESS_KEY_ID=${!APP_UPLOADING__ACCESS_KEY_ID_NAME}
+export AWS_SECRET_ACCESS_KEY=${!APP_UPLOADING__SECRET_ACCESS_KEY_NAME}
+export AWS_ENDPOINT=${!APP_UPLOADING__ENDPOINT_NAME}
+export AWS_REGION=${!APP_UPLOADING__REGION_NAME}
 
 RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
 JANUS_PP_REC="${SCRIPT_ABS_DIR}/janus-pp-rec -d 3"

@@ -1,6 +1,8 @@
 #![feature(c_variadic)]
 
 #[macro_use]
+extern crate anyhow;
+#[macro_use]
 extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
