@@ -11,9 +11,6 @@ general: {
   session_timeout = 0
   opaqueid_in_api = true
 }
-nat: {
-  ignore_mdns = true
-}
 media: {
   rtp_port_range = "30000-30020"
   no_media_timer = 10

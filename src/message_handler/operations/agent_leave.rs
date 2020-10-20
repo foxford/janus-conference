@@ -40,6 +40,11 @@ impl super::Operation for Request {
                         )
                     })?;
 
+                    info!(
+                        "Agent left; finishing session";
+                        {"agent_id": self.agent_id, "session_id": session_id}
+                    );
+
                     janus_callbacks::end_session(&session);
                 }
 

@@ -45,6 +45,8 @@ impl super::Operation for Request {
             };
 
             start_recording().or_else(|err: Error| {
+                err!("Failed to start recording; stopping the stream"; {"rtc_id": self.id});
+
                 switchboard
                     .remove_stream(self.id)
                     .map_err(|remove_err| {

@@ -46,6 +46,11 @@ impl super::Operation for Request {
             .with_write_lock(|mut switchboard| {
                 // The stream still may be ongoing and we must stop it gracefully.
                 if let Some(publisher) = switchboard.publisher_of(self.id) {
+                    warn!(
+                        "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
+                        {"rtc_id": self.id}
+                    );
+
                     let subscribers = switchboard.subscribers_to(publisher).to_owned();
 
                     // At first we synchronously stop the stream and hence the recording
