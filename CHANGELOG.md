@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.2 (October 21, 2020)
+
+### Features
+- Add more logging on stream removing ([8e8d782](https://github.com/netology-group/janus-conference/commits/8e8d782a6e6cbcf2c5368dfbe71f01e24ca2a213))
+
+
 ## v0.8.1 (October 20, 2020)
 
 ### Fixes
