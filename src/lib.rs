@@ -280,6 +280,10 @@ extern "C" fn incoming_data(_handle: *mut PluginSession, _packet: *mut PluginDat
     // Dropping incoming data.
 }
 
+extern "C" fn data_ready(_handle: *mut PluginSession) {
+    // Skip data channels.
+}
+
 extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int) {
     report_error(slow_link_impl(handle, uplink, video));
 }
@@ -297,7 +301,10 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<()> {
     let session_id = session_id(handle)?;
     info!("Hang up"; {"handle_id": session_id});
-    Ok(())
+
+    app!()?
+        .switchboard
+        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -427,6 +434,7 @@ const PLUGIN: Plugin = build_plugin!(
     incoming_rtp,
     incoming_rtcp,
     incoming_data,
+    data_ready,
     slow_link,
     hangup_media,
     destroy_session,
