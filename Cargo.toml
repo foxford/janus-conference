@@ -35,3 +35,7 @@ rumqtt = "0.30"
 svc-agent = "0.7"
 tempfile = "3.0"
 janus-plugin-sys = "0.7"
+
+[patch.crates-io]
+janus-plugin-sys = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "feature/api-v15" }
+janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "feature/api-v15" }
