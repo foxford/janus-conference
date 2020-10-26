@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.3 (October 26, 2020)
+
+### Fixes
+- Fix memory leak and wrong log messages ([2ae630e](https://github.com/netology-group/janus-conference/commits/2ae630eaea91a63691492638a64398edc8394707))
+
+
 ## v0.8.2 (October 21, 2020)
 
 ### Features
