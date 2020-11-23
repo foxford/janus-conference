@@ -128,8 +128,8 @@ pub struct Switchboard {
     sessions: HashMap<SessionId, LockedSession>,
     states: HashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
-    publishers: HashMap<StreamId, SessionId>,
-    publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
+    writers: BidirectionalMultimap<SessionId, StreamId>,
+    readers: BidirectionalMultimap<SessionId, StreamId>,
 }
 
 impl Switchboard {
@@ -138,8 +138,8 @@ impl Switchboard {
             sessions: HashMap::new(),
             states: HashMap::new(),
             agents: BidirectionalMultimap::new(),
-            publishers: HashMap::new(),
-            publishers_subscribers: BidirectionalMultimap::new(),
+            writers: BidirectionalMultimap::new(),
+            readers: BidirectionalMultimap::new(),
         }
     }
 
@@ -152,43 +152,28 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        info!("Disconnecting session asynchronously"; {"handle_id": id});
+    pub fn disconnect(&mut self, session_id: SessionId) -> Result<()> {
+        info!("Disconnecting session asynchronously"; {"handle_id": session_id});
 
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+        let session = self.session(session_id)?.lock().map_err(|err| {
+            format_err!("Failed to acquire session mutex {}: {}", session_id, err)
+        })?;
 
         janus_callbacks::end_session(&session);
         Ok(())
     }
 
-    pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
+    pub fn handle_disconnect(&mut self, session_id: SessionId) -> Result<()> {
         info!(
             "Session is about to disconnect. Removing it from the switchboard.";
-            {"handle_id": id}
+            {"handle_id": session_id}
         );
 
-        for subscriber in self.subscribers_to(id).to_owned() {
-            self.disconnect(subscriber)?;
-        }
-
-        let stream_ids: Vec<StreamId> = self
-            .publishers
-            .iter()
-            .filter(|(_, session_id)| **session_id == id)
-            .map(|(stream_id, _)| stream_id.to_owned())
-            .collect();
-
-        for stream_id in stream_ids {
-            self.remove_stream(stream_id)?;
-        }
-
-        self.sessions.remove(&id);
-        self.states.remove(&id);
-        self.agents.remove_value(&id);
-        self.publishers_subscribers.remove_value(&id);
+        self.sessions.remove(&session_id);
+        self.states.remove(&session_id);
+        self.agents.remove_value(&session_id);
+        self.writers.remove_key(&session_id);
+        self.readers.remove_key(&session_id);
         Ok(())
     }
 
@@ -215,107 +200,107 @@ impl Switchboard {
         self.agents.get_values(id)
     }
 
-    pub fn subscribers_to(&self, publisher: SessionId) -> &[SessionId] {
-        self.publishers_subscribers.get_values(&publisher)
+    pub fn writer_to(&self, reader: SessionId) -> Option<SessionId> {
+        self.readers
+            .get_values(&reader)
+            .first()
+            .and_then(|stream_id| self.writer_of(*stream_id))
     }
 
-    pub fn publisher_to(&self, subscriber: SessionId) -> Option<SessionId> {
-        self.publishers_subscribers
-            .get_key(&subscriber)
+    pub fn writer_of(&self, stream_id: StreamId) -> Option<SessionId> {
+        self.writers
+            .get_keys(&stream_id)
+            .first()
             .map(|id| id.to_owned())
     }
 
-    pub fn publisher_of(&self, stream_id: StreamId) -> Option<SessionId> {
-        self.publishers.get(&stream_id).map(|p| p.to_owned())
+    pub fn readers_to(&self, writer: SessionId) -> &[SessionId] {
+        if let Some(stream_id) = self.writers.get_values(&writer).first() {
+            self.readers_of(*stream_id)
+        } else {
+            &[]
+        }
+    }
+
+    pub fn readers_of(&self, stream_id: StreamId) -> &[SessionId] {
+        self.readers.get_keys(&stream_id)
     }
 
     pub fn create_stream(
         &mut self,
-        id: StreamId,
-        publisher: SessionId,
+        stream_id: StreamId,
+        writer: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
-        info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-
-        let maybe_old_publisher = self.publishers.remove(&id);
-        self.publishers.insert(id, publisher);
-
-        if let Some(old_publisher) = maybe_old_publisher {
-            if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
-                for subscriber in subscribers {
-                    self.publishers_subscribers.associate(publisher, subscriber);
-                }
-            }
-        }
-
-        self.agents.associate(agent_id, publisher);
+        info!("Creating stream"; {"rtc_id": stream_id, "handle_id": writer, "agent_id": agent_id});
+        self.writers.remove_value(&stream_id);
+        self.writers.associate(writer, stream_id);
+        self.agents.associate(agent_id, writer);
         Ok(())
     }
 
     pub fn join_stream(
         &mut self,
-        id: StreamId,
-        subscriber: SessionId,
+        stream_id: StreamId,
+        reader: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
+        verb!(
+            "Joining to stream";
+            {"rtc_id": stream_id, "handle_id": reader, "agent_id": agent_id}
+        );
 
-        match maybe_publisher {
-            None => bail!("Stream {} does not exist", id),
-            Some(publisher) => {
-                verb!(
-                    "Joining to stream";
-                    {"rtc_id": id, "handle_id": subscriber, "agent_id": agent_id}
-                );
-
-                self.publishers_subscribers.associate(publisher, subscriber);
-                self.agents.associate(agent_id, subscriber);
-                Ok(())
-            }
-        }
-    }
-
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
-        info!("Removing stream"; {"rtc_id": id});
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
-
-        if let Some(publisher) = maybe_publisher {
-            self.stop_recording(publisher)?;
-            self.publishers.remove(&id);
-            self.publishers_subscribers.remove_key(&publisher);
-            self.agents.remove_value(&publisher);
-        }
-
+        self.readers.associate(reader, stream_id);
+        self.agents.associate(agent_id, reader);
         Ok(())
     }
 
-    fn stop_recording(&mut self, publisher: SessionId) -> Result<()> {
-        let state = self.state_mut(publisher)?;
+    pub fn remove_stream(&mut self, stream_id: StreamId) -> Result<()> {
+        info!("Removing stream"; {"rtc_id": stream_id});
+
+        if let Some(writer) = self.writers.get_keys(&stream_id).to_owned().first() {
+            self.stop_recording(*writer)?;
+            self.agents.remove_value(&writer);
+        }
+
+        self.writers.remove_value(&stream_id);
+        self.readers.remove_value(&stream_id);
+        Ok(())
+    }
+
+    fn stop_recording(&mut self, writer: SessionId) -> Result<()> {
+        let state = self.state_mut(writer)?;
 
         if let Some(recorder) = state.recorder_mut() {
-            info!("Stopping recording"; {"handle_id": publisher});
+            info!("Stopping recording"; {"handle_id": writer});
 
             recorder
                 .stop_recording()
-                .map_err(|err| format_err!("Failed to stop recording {}: {}", publisher, err))?;
+                .map_err(|err| format_err!("Failed to stop recording {}: {}", writer, err))?;
         }
 
         state.unset_recorder();
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
-        for (stream_id, publisher) in self.publishers.clone().into_iter() {
-            match self.vacuum_publisher(publisher, timeout) {
+    pub fn vacuum_writers(&mut self, timeout: &Duration) -> Result<()> {
+        let writers = self
+            .writers
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect::<Vec<(SessionId, StreamId)>>();
+
+        for (writer, stream_id) in writers {
+            match self.vacuum_writer(writer, timeout) {
                 Ok(false) => (),
                 Ok(true) => warn!(
-                    "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
+                    "Writer timed out; No RTP packets from PeerConnection in {} seconds",
                     timeout.num_seconds();
-                    {"rtc_id": stream_id, "handle_id": publisher}
+                    {"rtc_id": stream_id, "handle_id": writer}
                 ),
                 Err(err) => err!(
-                    "Failed to vacuum publisher: {}", err;
-                    {"rtc_id": stream_id, "handle_id": publisher}
+                    "Failed to vacuum writer: {}", err;
+                    {"rtc_id": stream_id, "handle_id": writer}
                 ),
             }
         }
@@ -323,8 +308,8 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
-        let state = self.state(publisher)?;
+    fn vacuum_writer(&mut self, writer: SessionId, timeout: &Duration) -> Result<bool> {
+        let state = self.state(writer)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
             None => false,
@@ -332,7 +317,7 @@ impl Switchboard {
         };
 
         if is_timed_out {
-            self.disconnect(publisher)?;
+            self.disconnect(writer)?;
         }
 
         Ok(is_timed_out)
@@ -368,15 +353,15 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
-        info!("Vacuum thread spawned");
+    pub fn vacuum_writers_loop(&self, interval: Duration) -> Result<()> {
+        verb!("Vacuum thread spawned");
 
         let std_interval = interval
             .to_std()
             .context("Failed to convert vacuum interval")?;
 
         loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
+            self.with_write_lock(|mut switchboard| switchboard.vacuum_writers(&interval))
                 .unwrap_or_else(|err| err!("{}", err));
 
             thread::sleep(std_interval);

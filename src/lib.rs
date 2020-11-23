@@ -163,8 +163,8 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
     app!()?.switchboard.with_read_lock(|switchboard| {
         let session_id = session_id(handle)?;
 
-        if let Some(publisher) = switchboard.publisher_to(session_id) {
-            send_fir(publisher);
+        if let Some(writer) = switchboard.writer_to(session_id) {
+            send_fir(writer);
         }
 
         info!("WebRTC media is now available"; {"handle_id": session_id});
@@ -186,8 +186,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Touch last packet timestamp to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
-        // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
-        if let Some(target_bitrate) = app.config.constraint.publisher.bitrate {
+        // Send incremental initial or regular REMB to the writer if needed to control bitrate.
+        if let Some(target_bitrate) = app.config.constraint.writer.bitrate {
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
 
             if initial_rembs_left > 0 {
@@ -203,21 +203,20 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
-        // Retransmit packet to publishers as is.
+        // Retransmit packet to writers as is.
         let mut packet = unsafe { &mut *packet };
         let video = packet.video;
 
-        for subscriber_id in switchboard.subscribers_to(session_id) {
-            let subscriber_session =
-                switchboard.session(*subscriber_id)?.lock().map_err(|err| {
-                    format_err!(
-                        "Failed to acquire subscriber session mutex id = {}: {}",
-                        subscriber_id,
-                        err
-                    )
-                })?;
+        for reader in switchboard.readers_to(session_id) {
+            let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
+                format_err!(
+                    "Failed to acquire reader session mutex id = {}: {}",
+                    reader,
+                    err
+                )
+            })?;
 
-            janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
+            janus_callbacks::relay_rtp(&reader_session, &mut packet);
         }
 
         // Push packet to the recorder.
@@ -247,27 +246,26 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
 
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
-                if let Some(publisher) = switchboard.publisher_to(session_id) {
-                    send_pli(publisher);
+                if let Some(writer) = switchboard.writer_to(session_id) {
+                    send_pli(writer);
                 }
             }
             1 if janus::rtcp::has_fir(data) => {
-                if let Some(publisher) = switchboard.publisher_to(session_id) {
-                    send_fir(publisher);
+                if let Some(writer) = switchboard.writer_to(session_id) {
+                    send_fir(writer);
                 }
             }
             _ => {
-                for subscriber in switchboard.subscribers_to(session_id) {
-                    let subscriber_session =
-                        switchboard.session(*subscriber)?.lock().map_err(|err| {
-                            format_err!(
-                                "Failed to acquire subscriber session mutex for id = {}: {}",
-                                subscriber,
-                                err
-                            )
-                        })?;
+                for reader in switchboard.readers_to(session_id) {
+                    let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
+                        format_err!(
+                            "Failed to acquire reader session mutex for id = {}: {}",
+                            reader,
+                            err
+                        )
+                    })?;
 
-                    janus_callbacks::relay_rtcp(&subscriber_session, &mut packet);
+                    janus_callbacks::relay_rtcp(&reader_session, &mut packet);
                 }
             }
         }
@@ -333,14 +331,14 @@ fn session_id(handle: *mut PluginSession) -> Result<SessionId> {
     }
 }
 
-fn send_pli(publisher: SessionId) {
-    report_error(send_pli_impl(publisher));
+fn send_pli(writer: SessionId) {
+    report_error(send_pli_impl(writer));
 }
 
-fn send_pli_impl(publisher: SessionId) -> Result<()> {
+fn send_pli_impl(writer: SessionId) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        let session = switchboard.session(writer)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
         })?;
 
         let mut pli = janus::rtcp::gen_pli();
@@ -356,17 +354,17 @@ fn send_pli_impl(publisher: SessionId) -> Result<()> {
     })
 }
 
-fn send_fir(publisher: SessionId) {
-    report_error(send_fir_impl(publisher));
+fn send_fir(writer: SessionId) {
+    report_error(send_fir_impl(writer));
 }
 
-fn send_fir_impl(publisher: SessionId) -> Result<()> {
+fn send_fir_impl(writer: SessionId) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        let session = switchboard.session(writer)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
         })?;
 
-        let state = switchboard.state(publisher)?;
+        let state = switchboard.state(writer)?;
         let mut seq = state.increment_fir_seq();
         let mut fir = janus::rtcp::gen_fir(&mut seq);
 
@@ -381,14 +379,14 @@ fn send_fir_impl(publisher: SessionId) -> Result<()> {
     })
 }
 
-fn send_remb(publisher: SessionId, bitrate: u32) {
-    report_error(send_remb_impl(publisher, bitrate));
+fn send_remb(writer: SessionId, bitrate: u32) {
+    report_error(send_remb_impl(writer, bitrate));
 }
 
-fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
+fn send_remb_impl(writer: SessionId, bitrate: u32) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
+        let session = switchboard.session(writer)?.lock().map_err(|err| {
+            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
         })?;
 
         let mut remb = janus::rtcp::gen_remb(bitrate);

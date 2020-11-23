@@ -1,14 +1,13 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use multimap::MultiMap;
+use multimap::{Iter, MultiMap};
 
 #[derive(Debug)]
 pub struct BidirectionalMultimap<K: Eq + Hash, V: Eq + Hash> {
     forward_mapping: MultiMap<K, V>,
-    inverse_mapping: HashMap<V, K>,
+    inverse_mapping: MultiMap<V, K>,
 }
 
 #[allow(dead_code)]
@@ -20,7 +19,7 @@ where
     pub fn new() -> Self {
         Self {
             forward_mapping: MultiMap::new(),
-            inverse_mapping: HashMap::new(),
+            inverse_mapping: MultiMap::new(),
         }
     }
 
@@ -65,15 +64,17 @@ where
         V: Borrow<U>,
         U: Hash + Eq + Debug,
     {
-        if let Some(k) = self.inverse_mapping.remove(v) {
-            if let Some(vs) = self.forward_mapping.get_vec_mut(&k) {
-                vs.retain(|x| x.borrow() != v);
-            } else {
-                err!(
-                    "Map in inconsistent state: entry ({:?}, {:?}) has no corresponding entry.",
-                    k,
-                    v
-                );
+        if let Some(keys) = self.inverse_mapping.remove(v) {
+            for k in keys {
+                if let Some(vs) = self.forward_mapping.get_vec_mut(&k) {
+                    vs.retain(|x| x.borrow() != v);
+                } else {
+                    err!(
+                        "Map in inconsistent state: entry ({:?}, {:?}) has no corresponding entry.",
+                        k,
+                        v
+                    );
+                }
             }
         }
     }
@@ -89,11 +90,18 @@ where
             .unwrap_or(&[])
     }
 
-    pub fn get_key<U>(&self, v: &U) -> Option<&K>
+    pub fn get_keys<U>(&self, v: &U) -> &[K]
     where
         V: Borrow<U>,
         U: Hash + Eq,
     {
-        self.inverse_mapping.get(v)
+        self.inverse_mapping
+            .get_vec(v)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        self.forward_mapping.iter()
     }
 }
