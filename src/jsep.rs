@@ -34,8 +34,8 @@ impl Jsep {
         );
 
         // Set video bitrate
-        if let Some(bitrate) = app!()?.config.constraint.publisher.bitrate {
-            Self::set_publisher_bitrate_constraint(jsep_offer, &answer_sdp, bitrate)?;
+        if let Some(bitrate) = app!()?.config.constraint.writer.bitrate {
+            Self::set_writer_bitrate_constraint(jsep_offer, &answer_sdp, bitrate)?;
         }
 
         verb!("SDP answer: {:?}", answer_sdp);
@@ -43,7 +43,7 @@ impl Jsep {
         Ok(Some(answer))
     }
 
-    fn set_publisher_bitrate_constraint(
+    fn set_writer_bitrate_constraint(
         jsep_offer: &JsonValue,
         answer_sdp: &Sdp,
         bitrate: u32,
