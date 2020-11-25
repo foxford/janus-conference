@@ -6,7 +6,7 @@ enabled = true
 directory = "/recordings"
 delete_records = true
 
-[constraint.publisher]
+[constraint.writer]
 bitrate = 300000
 
 [upload]
