@@ -234,32 +234,22 @@ impl Switchboard {
             .copied()
     }
 
-    pub fn create_stream(
-        &mut self,
-        stream_id: StreamId,
-        writer: SessionId,
-        agent_id: AgentId,
-    ) -> Result<()> {
-        info!("Creating stream"; {"rtc_id": stream_id, "handle_id": writer, "agent_id": agent_id});
-        self.writers.remove_value(&stream_id);
-        self.writers.associate(writer, stream_id);
-        self.agents.associate(agent_id, writer);
+    pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
+        verb!("Associating agent with the handle"; {"handle_id": session_id, "agent_id": agent_id});
+        self.agents.associate(agent_id.to_owned(), session_id);
         Ok(())
     }
 
-    pub fn join_stream(
-        &mut self,
-        stream_id: StreamId,
-        reader: SessionId,
-        agent_id: AgentId,
-    ) -> Result<()> {
-        verb!(
-            "Joining to stream";
-            {"rtc_id": stream_id, "handle_id": reader, "agent_id": agent_id}
-        );
+    pub fn create_stream(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
+        info!("Creating stream"; {"rtc_id": stream_id, "handle_id": writer});
+        self.writers.remove_value(&stream_id);
+        self.writers.associate(writer, stream_id);
+        Ok(())
+    }
 
+    pub fn join_stream(&mut self, stream_id: StreamId, reader: SessionId) -> Result<()> {
+        verb!("Joining to stream"; {"rtc_id": stream_id, "handle_id": reader});
         self.readers.associate(reader, stream_id);
-        self.agents.associate(agent_id, reader);
         Ok(())
     }
 
