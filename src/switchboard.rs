@@ -232,22 +232,14 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn create_stream(
-        &mut self,
-        stream_id: StreamId,
-        writer: SessionId,
-    ) -> Result<()> {
+    pub fn create_stream(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
         info!("Creating stream"; {"rtc_id": stream_id, "handle_id": writer});
         self.writers.remove_value(&stream_id);
         self.writers.associate(writer, stream_id);
         Ok(())
     }
 
-    pub fn join_stream(
-        &mut self,
-        stream_id: StreamId,
-        reader: SessionId,
-    ) -> Result<()> {
+    pub fn join_stream(&mut self, stream_id: StreamId, reader: SessionId) -> Result<()> {
         verb!("Joining to stream"; {"rtc_id": stream_id, "handle_id": reader});
         self.readers.associate(reader, stream_id);
         Ok(())
