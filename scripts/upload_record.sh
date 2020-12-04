@@ -46,6 +46,20 @@ AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 # Working directory.
 cd ${RECORDINGS_DIR}/${RTC_ID}
 
+# Try to acquire lock
+if { set -C; 2>/dev/null > vacuum_${RTC_ID}.lock; }; then
+  trap "rm -f vacuum_${RTC_ID}.lock" EXIT
+else
+  echo "Lock file exists, exiting"
+  exit 251
+fi
+
+for FILE in *.mjr; do
+${AWS} s3 cp ${FILE} s3://${BUCKET}/${RTC_ID}_dump/${FILE} \
+  --only-show-errors \
+  --cache-control 'no-cache'
+done
+
 # Remove artifacts from possible previous run to avoid concat duplication.
 rm -f video_sources.txt audio_sources.txt segments.csv
 

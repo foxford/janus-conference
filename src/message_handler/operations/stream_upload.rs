@@ -80,17 +80,23 @@ impl super::Operation for Request {
             .check_existence()
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
-        upload_record(&self).await.map_err(internal_error)?;
-        let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
+        match upload_record(&self).await.map_err(internal_error)? {
+            UploadStatus::AlreadyRunning => {
+                Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
+            }
+            UploadStatus::Done => {
+                let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
 
-        recorder.delete_record().map_err(internal_error)?;
+                recorder.delete_record().map_err(internal_error)?;
 
-        Ok(Response {
-            id: self.id,
-            started_at,
-            time: segments,
+                Ok(Response {
+                    id: self.id,
+                    started_at,
+                    time: segments,
+                }
+                .into())
+            }
         }
-        .into())
     }
 
     fn is_handle_jsep(&self) -> bool {
@@ -115,7 +121,14 @@ fn internal_error(err: Error) -> SvcError {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-async fn upload_record(request: &Request) -> Result<()> {
+pub enum UploadStatus {
+    AlreadyRunning,
+    Done,
+}
+
+const LOCKFILE_EARLY_EXIT_STATUS: i32 = 251;
+
+async fn upload_record(request: &Request) -> Result<UploadStatus> {
     info!("Preparing & uploading record"; {"rtc_id": request.id});
 
     let mut script_path = std::env::current_exe()
@@ -146,9 +159,12 @@ async fn upload_record(request: &Request) -> Result<()> {
                     {"rtc_id": request.id}
                 );
 
-                Ok(())
+                Ok(UploadStatus::Done)
             } else {
-                Err(format_err!("Failed to prepare & upload record: {}", status))
+                match status.code() {
+                    Some(LOCKFILE_EARLY_EXIT_STATUS) => Ok(UploadStatus::AlreadyRunning),
+                    _ => Err(format_err!("Failed to prepare & upload record: {}", status)),
+                }
             }
         })
 }
