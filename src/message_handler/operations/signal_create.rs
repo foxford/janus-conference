@@ -31,10 +31,11 @@ impl super::Operation for Request {
 
         let app = app!().map_err(internal_error)?;
 
-        app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.associate_agent(request.session_id(), &self.agent_id)
-        })
-        .map_err(internal_error)?;
+        app.switchboard
+            .with_write_lock(|mut switchboard| {
+                switchboard.associate_agent(request.session_id(), &self.agent_id)
+            })
+            .map_err(internal_error)?;
 
         Ok(Response {}.into())
     }
