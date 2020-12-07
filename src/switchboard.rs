@@ -226,6 +226,14 @@ impl Switchboard {
         self.readers.get_keys(&stream_id)
     }
 
+    pub fn stream_id_to(&self, session_id: SessionId) -> Option<StreamId> {
+        self.readers
+            .get_values(&session_id)
+            .first()
+            .or_else(|| self.writers.get_values(&session_id).first())
+            .copied()
+    }
+
     pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
         verb!("Associating agent with the handle"; {"handle_id": session_id, "agent_id": agent_id});
         self.agents.associate(agent_id.to_owned(), session_id);

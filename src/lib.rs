@@ -167,7 +167,8 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
             send_fir(writer);
         }
 
-        info!("WebRTC media is now available"; {"handle_id": session_id});
+        let rtc_id = switchboard.stream_id_to(session_id);
+        info!("WebRTC media is now available"; {"handle_id": session_id, "rtc_id": rtc_id});
         Ok(())
     })
 }
@@ -288,7 +289,16 @@ extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int)
 
 fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
     let session_id = session_id(handle)?;
-    info!("Slow link: uplink = {}; is_video = {}", uplink, video; {"handle_id": session_id});
+
+    let rtc_id = app!()?
+        .switchboard
+        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
+
+    info!(
+        "Slow link: uplink = {}; is_video = {}", uplink, video;
+        {"handle_id": session_id, "rtc_id": rtc_id}
+    );
+
     Ok(())
 }
 
@@ -298,7 +308,12 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<()> {
     let session_id = session_id(handle)?;
-    info!("Hang up"; {"handle_id": session_id});
+
+    let rtc_id = app!()?
+        .switchboard
+        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
+
+    info!("Hang up"; {"handle_id": session_id, "rtc_id": rtc_id});
 
     app!()?
         .switchboard
@@ -311,7 +326,12 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 
 fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<()> {
     let session_id = session_id(handle)?;
-    info!("Handle destroyed"; {"handle_id": session_id});
+
+    let rtc_id = app!()?
+        .switchboard
+        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
+
+    info!("Handle destroyed"; {"handle_id": session_id, "rtc_id": rtc_id});
 
     app!()?
         .switchboard
