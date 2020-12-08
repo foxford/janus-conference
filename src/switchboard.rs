@@ -229,6 +229,24 @@ impl Switchboard {
         self.publishers.get(&stream_id).map(|p| p.to_owned())
     }
 
+    pub fn stream_id_to(&self, session_id: SessionId) -> Option<StreamId> {
+        self.publishers_subscribers
+            .get_values(&session_id)
+            .first()
+            .and_then(|publisher| self.published_by(*publisher))
+            .or_else(|| self.published_by(session_id))
+    }
+
+    fn published_by(&self, session_id: SessionId) -> Option<StreamId> {
+        self.publishers.iter().find_map(|(stream_id, publisher)| {
+            if *publisher == session_id {
+                Some(*stream_id)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn create_stream(
         &mut self,
         id: StreamId,
