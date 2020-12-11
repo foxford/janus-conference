@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use multimap::{Iter, MultiMap};
+use multimap::{IterAll, MultiMap};
 
 #[derive(Debug)]
 pub struct BidirectionalMultimap<K: Eq + Hash, V: Eq + Hash> {
@@ -101,7 +101,7 @@ where
             .unwrap_or(&[])
     }
 
-    pub fn iter(&self) -> Iter<'_, K, V> {
-        self.forward_mapping.iter()
+    pub fn iter_all(&self) -> IterAll<'_, K, Vec<V>> {
+        self.forward_mapping.iter_all()
     }
 }

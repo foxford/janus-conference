@@ -300,8 +300,8 @@ impl Switchboard {
     pub fn vacuum_writers(&mut self, timeout: &Duration) -> Result<()> {
         let writers = self
             .writers
-            .iter()
-            .map(|(k, v)| (*k, *v))
+            .iter_all()
+            .flat_map(|(k, values)| values.iter().map(move |v| (*k, *v)))
             .collect::<Vec<(SessionId, StreamId)>>();
 
         for (writer, stream_id) in writers {
