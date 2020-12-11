@@ -5,6 +5,11 @@ use anyhow::{bail, Context, Result};
 use janus::sdp::{AudioCodec, MediaDirection, MediaType, OfferAnswerParameters, Sdp, VideoCodec};
 use serde_json::Value as JsonValue;
 
+const WRITER_DIRECTIONS: &[MediaDirection] = &[
+    MediaDirection::JANUS_SDP_SENDRECV,
+    MediaDirection::JANUS_SDP_SENDONLY,
+];
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum Jsep {
@@ -15,14 +20,7 @@ pub enum Jsep {
 impl Jsep {
     /// Parses JSEP SDP offer and returns the answer.
     pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<Self>> {
-        let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
-            .context("Failed to deserialize JSEP")?;
-
-        let offer_sdp = match offer {
-            Jsep::Offer { ref sdp } => sdp,
-            Jsep::Answer { .. } => bail!("Expected JSEP offer, got answer"),
-        };
-
+        let offer_sdp = Self::parse_offer_sdp(jsep_offer)?;
         verb!("SDP offer: {:?}", offer_sdp);
 
         let answer_sdp = answer_sdp!(
@@ -41,6 +39,16 @@ impl Jsep {
         verb!("SDP answer: {:?}", answer_sdp);
         let answer = Jsep::Answer { sdp: answer_sdp };
         Ok(Some(answer))
+    }
+
+    fn parse_offer_sdp(jsep_offer: &JsonValue) -> Result<Sdp> {
+        let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
+            .context("Failed to deserialize JSEP")?;
+
+        match offer {
+            Jsep::Offer { sdp } => Ok(sdp),
+            Jsep::Answer { .. } => bail!("Expected JSEP offer, got answer"),
+        }
     }
 
     fn set_writer_bitrate_constraint(
@@ -70,14 +78,28 @@ impl Jsep {
         };
 
         for m_line in video_m_lines {
-            if m_line.direction == MediaDirection::JANUS_SDP_SENDRECV
-                || m_line.direction == MediaDirection::JANUS_SDP_SENDONLY
-            {
+            if WRITER_DIRECTIONS.contains(&m_line.direction) {
                 m_line.b_name = CString::new(b_name.to_string())?.into_raw();
                 m_line.b_value = b_value as c_int;
             }
         }
 
         Ok(())
+    }
+
+    pub fn is_writer(jsep_offer: &JsonValue) -> Result<bool> {
+        let offer_sdp = Self::parse_offer_sdp(jsep_offer)?;
+        let m_lines = offer_sdp.get_mlines();
+
+        let video_m_lines = match m_lines.get(&MediaType::JANUS_SDP_VIDEO) {
+            None => bail!("Missing video m-lines in SDP offer"),
+            Some(video_m_lines) => video_m_lines,
+        };
+
+        let is_writer = video_m_lines
+            .iter()
+            .all(|m_line| WRITER_DIRECTIONS.contains(&m_line.direction));
+
+        Ok(is_writer)
     }
 }
