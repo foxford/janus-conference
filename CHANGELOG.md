@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.4 (December 16, 2020)
+
+### Features
+- Add lock file for records uploading & upload mjr dumps ([c6f4b5f](https://github.com/netology-group/janus-conference/commits/c6f4b5fbaa3d02571992f600140155baca8d3615))
+- Log stream id ([3445ae3](https://github.com/netology-group/janus-conference/commits/3445ae3df36df45451c29a096efd5230f7f98fe3))
+
+
 ## v0.8.3 (October 26, 2020)
 
 ### Fixes
