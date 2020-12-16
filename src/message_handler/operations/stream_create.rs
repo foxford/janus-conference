@@ -33,7 +33,7 @@ impl super::Operation for Request {
         let app = app!().map_err(internal_error)?;
 
         app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.set_writer(self.id, request.session_id());
+            switchboard.set_writer(self.id, request.session_id())?;
 
             let mut start_recording = || {
                 if app.config.recordings.enabled {

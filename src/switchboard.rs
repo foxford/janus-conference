@@ -102,6 +102,10 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
+    pub fn unset_last_rtp_packet_timestamp(&self) {
+        self.last_rtp_packet_timestamp.store(0, Ordering::Relaxed);
+    }
+
     pub fn recorder(&self) -> Option<&Recorder> {
         self.recorder.as_ref()
     }
@@ -218,15 +222,26 @@ impl Switchboard {
         self.writers.get_values(&writer).first().copied()
     }
 
-    pub fn set_writer(&mut self, stream_id: StreamId, writer: SessionId) {
+    pub fn set_writer(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
+        self.remove_writer(stream_id)?;
         info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
-        self.writers.remove_value(&stream_id);
         self.writers.associate(writer, stream_id);
+        Ok(())
     }
 
-    pub fn remove_writer(&mut self, stream_id: StreamId) {
-        info!("Removing writer"; {"rtc_id": stream_id});
-        self.writers.remove_value(&stream_id);
+    pub fn remove_writer(&mut self, stream_id: StreamId) -> Result<()> {
+        let writer = match self.writer_of(stream_id) {
+            Some(writer) => writer,
+            None => return Ok(()),
+        };
+
+        info!("Removing writer"; {"rtc_id": stream_id, "handle_id": writer});
+
+        let state = self.state(writer)?;
+        state.unset_last_rtp_packet_timestamp();
+
+        self.writers.remove_key(&writer);
+        Ok(())
     }
 
     pub fn readers_to(&self, writer: SessionId) -> &[SessionId] {

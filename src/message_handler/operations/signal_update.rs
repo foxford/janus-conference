@@ -39,12 +39,12 @@ impl super::Operation for Request {
                     // Reader becomes writer.
                     if let Some(stream_id) = switchboard.read_by(request.session_id()) {
                         switchboard.remove_reader(stream_id, request.session_id());
-                        switchboard.set_writer(stream_id, request.session_id());
+                        switchboard.set_writer(stream_id, request.session_id())?;
                     }
                 } else {
                     // Writer becomes reader.
                     if let Some(stream_id) = switchboard.written_by(request.session_id()) {
-                        switchboard.remove_writer(stream_id);
+                        switchboard.remove_writer(stream_id)?;
                         switchboard.add_reader(stream_id, request.session_id());
                     }
                 }
