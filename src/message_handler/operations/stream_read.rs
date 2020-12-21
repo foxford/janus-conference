@@ -33,7 +33,8 @@ impl super::Operation for Request {
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
             .with_write_lock(|mut switchboard| {
-                switchboard.join_stream(self.id, request.session_id())
+                switchboard.add_reader(self.id, request.session_id());
+                Ok(())
             })
             .map_err(|err| error(StatusCode::UNPROCESSABLE_ENTITY, err))?;
 

@@ -102,6 +102,10 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
+    pub fn unset_last_rtp_packet_timestamp(&self) {
+        self.last_rtp_packet_timestamp.store(0, Ordering::Relaxed);
+    }
+
     pub fn recorder(&self) -> Option<&Recorder> {
         self.recorder.as_ref()
     }
@@ -214,6 +218,32 @@ impl Switchboard {
             .map(|id| id.to_owned())
     }
 
+    pub fn written_by(&self, writer: SessionId) -> Option<StreamId> {
+        self.writers.get_values(&writer).first().copied()
+    }
+
+    pub fn set_writer(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
+        self.remove_writer(stream_id)?;
+        info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
+        self.writers.associate(writer, stream_id);
+        Ok(())
+    }
+
+    pub fn remove_writer(&mut self, stream_id: StreamId) -> Result<()> {
+        let writer = match self.writer_of(stream_id) {
+            Some(writer) => writer,
+            None => return Ok(()),
+        };
+
+        info!("Removing writer"; {"rtc_id": stream_id, "handle_id": writer});
+
+        let state = self.state(writer)?;
+        state.unset_last_rtp_packet_timestamp();
+
+        self.writers.remove_key(&writer);
+        Ok(())
+    }
+
     pub fn readers_to(&self, writer: SessionId) -> &[SessionId] {
         if let Some(stream_id) = self.writers.get_values(&writer).first() {
             self.readers_of(*stream_id)
@@ -224,6 +254,20 @@ impl Switchboard {
 
     pub fn readers_of(&self, stream_id: StreamId) -> &[SessionId] {
         self.readers.get_keys(&stream_id)
+    }
+
+    pub fn read_by(&self, reader: SessionId) -> Option<StreamId> {
+        self.readers.get_values(&reader).first().copied()
+    }
+
+    pub fn add_reader(&mut self, stream_id: StreamId, reader: SessionId) {
+        verb!("Adding reader"; {"rtc_id": stream_id, "handle_id": reader});
+        self.readers.associate(reader, stream_id);
+    }
+
+    pub fn remove_reader(&mut self, stream_id: StreamId, reader: SessionId) {
+        verb!("Removing reader"; {"rtc_id": stream_id, "handle_id": reader});
+        self.readers.disassociate(&reader, &stream_id);
     }
 
     pub fn stream_id_to(&self, session_id: SessionId) -> Option<StreamId> {
@@ -237,19 +281,6 @@ impl Switchboard {
     pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
         verb!("Associating agent with the handle"; {"handle_id": session_id, "agent_id": agent_id});
         self.agents.associate(agent_id.to_owned(), session_id);
-        Ok(())
-    }
-
-    pub fn create_stream(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
-        info!("Creating stream"; {"rtc_id": stream_id, "handle_id": writer});
-        self.writers.remove_value(&stream_id);
-        self.writers.associate(writer, stream_id);
-        Ok(())
-    }
-
-    pub fn join_stream(&mut self, stream_id: StreamId, reader: SessionId) -> Result<()> {
-        verb!("Joining to stream"; {"rtc_id": stream_id, "handle_id": reader});
-        self.readers.associate(reader, stream_id);
         Ok(())
     }
 
@@ -284,8 +315,8 @@ impl Switchboard {
     pub fn vacuum_writers(&mut self, timeout: &Duration) -> Result<()> {
         let writers = self
             .writers
-            .iter()
-            .map(|(k, v)| (*k, *v))
+            .iter_all()
+            .flat_map(|(k, values)| values.iter().map(move |v| (*k, *v)))
             .collect::<Vec<(SessionId, StreamId)>>();
 
         for (writer, stream_id) in writers {
