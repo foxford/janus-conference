@@ -102,8 +102,12 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    pub fn unset_last_rtp_packet_timestamp(&self) {
+    pub fn reset(&mut self) {
+        self.fir_seq.store(0, Ordering::Relaxed);
+        self.initial_rembs_counter.store(0, Ordering::Relaxed);
+        self.last_remb_timestamp.store(0, Ordering::Relaxed);
         self.last_rtp_packet_timestamp.store(0, Ordering::Relaxed);
+        self.unset_recorder();
     }
 
     pub fn recorder(&self) -> Option<&Recorder> {
@@ -223,9 +227,33 @@ impl Switchboard {
     }
 
     pub fn set_writer(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
+        let app = app!()?;
         self.remove_writer(stream_id)?;
         info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
         self.writers.associate(writer, stream_id);
+
+        if app.config.recordings.enabled {
+            let mut recorder = Recorder::new(&app.config.recordings, stream_id);
+
+            if let Err(err) = recorder.start_recording() {
+                err!("Failed to start recording; stopping the stream"; {"rtc_id": stream_id});
+
+                self.remove_stream(stream_id).map_err(|remove_err| {
+                    format_err!(
+                        "Failed to remove stream {}: {} while recovering from another error: {}",
+                        stream_id,
+                        remove_err,
+                        err
+                    )
+                })?;
+
+                return Err(err);
+            }
+
+            verb!("Attaching recorder"; {"rtc_id": stream_id, "handle_id": writer});
+            self.state_mut(writer)?.set_recorder(recorder);
+        }
+
         Ok(())
     }
 
@@ -235,11 +263,8 @@ impl Switchboard {
             None => return Ok(()),
         };
 
+        self.state_mut(writer)?.reset();
         info!("Removing writer"; {"rtc_id": stream_id, "handle_id": writer});
-
-        let state = self.state(writer)?;
-        state.unset_last_rtp_packet_timestamp();
-
         self.writers.remove_key(&writer);
         Ok(())
     }
