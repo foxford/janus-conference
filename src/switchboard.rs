@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
+use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::Recorder;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -138,6 +139,7 @@ pub struct Switchboard {
     agents: BidirectionalMultimap<AgentId, SessionId>,
     writers: BidirectionalMultimap<SessionId, StreamId>,
     readers: BidirectionalMultimap<SessionId, StreamId>,
+    switching_contexts: HashMap<StreamId, JanusRtpSwitchingContext>,
 }
 
 impl Switchboard {
@@ -148,6 +150,7 @@ impl Switchboard {
             agents: BidirectionalMultimap::new(),
             writers: BidirectionalMultimap::new(),
             readers: BidirectionalMultimap::new(),
+            switching_contexts: HashMap::new(),
         }
     }
 
@@ -232,6 +235,11 @@ impl Switchboard {
         info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
         self.writers.associate(writer, stream_id);
 
+        if self.switching_contexts.get(&stream_id).is_none() {
+            self.switching_contexts
+                .insert(stream_id, JanusRtpSwitchingContext::new());
+        }
+
         if app.config.recordings.enabled {
             let mut recorder = Recorder::new(&app.config.recordings, stream_id);
 
@@ -269,14 +277,6 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn readers_to(&self, writer: SessionId) -> &[SessionId] {
-        if let Some(stream_id) = self.writers.get_values(&writer).first() {
-            self.readers_of(*stream_id)
-        } else {
-            &[]
-        }
-    }
-
     pub fn readers_of(&self, stream_id: StreamId) -> &[SessionId] {
         self.readers.get_keys(&stream_id)
     }
@@ -299,8 +299,16 @@ impl Switchboard {
         self.readers
             .get_values(&session_id)
             .first()
-            .or_else(|| self.writers.get_values(&session_id).first())
             .copied()
+            .or_else(|| self.stream_id_to_writer(session_id))
+    }
+
+    pub fn stream_id_to_writer(&self, writer: SessionId) -> Option<StreamId> {
+        self.writers.get_values(&writer).first().copied()
+    }
+
+    pub fn switching_context(&self, stream_id: StreamId) -> Option<&JanusRtpSwitchingContext> {
+        self.switching_contexts.get(&stream_id)
     }
 
     pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
@@ -319,6 +327,7 @@ impl Switchboard {
 
         self.writers.remove_value(&stream_id);
         self.readers.remove_value(&stream_id);
+        self.switching_contexts.remove(&stream_id);
         Ok(())
     }
 
