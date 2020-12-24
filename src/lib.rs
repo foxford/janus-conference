@@ -30,6 +30,7 @@ mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
 mod janus_recorder;
+mod janus_rtp;
 mod jsep;
 mod message_handler;
 mod recorder;
@@ -204,11 +205,37 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
-        // Retransmit packet to writers as is.
         let mut packet = unsafe { &mut *packet };
         let video = packet.video;
 
-        for reader in switchboard.readers_to(session_id) {
+        // Find stream id for the writer.
+        let stream_id = match switchboard.stream_id_to_writer(session_id) {
+            Some(stream_id) => stream_id,
+            None => {
+                verb!(
+                    "Incoming RTP packet from non-writer. Dropping.";
+                    {"handle_id": session_id}
+                );
+
+                return Ok(());
+            }
+        };
+
+        // Update packet header for proper timestamp and seq number.
+        match switchboard.switching_context(stream_id) {
+            Some(switching_context) => {
+                switching_context.update_rtp_packet_header(&mut packet)?;
+            }
+            None => {
+                warn!(
+                    "Failed to get switching context. Skipping RTP packet header update";
+                    {"rtc_id": stream_id, "handle_id": session_id}
+                );
+            }
+        }
+
+        // Retransmit packet to writers.
+        for reader in switchboard.readers_of(stream_id) {
             let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
                 format_err!(
                     "Failed to acquire reader session mutex id = {}: {}",
@@ -257,7 +284,19 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                 }
             }
             _ => {
-                for reader in switchboard.readers_to(session_id) {
+                let stream_id = match switchboard.stream_id_to_writer(session_id) {
+                    Some(stream_id) => stream_id,
+                    None => {
+                        verb!(
+                            "Incoming RTCP packet from non-writer. Dropping.";
+                            {"handle_id": session_id}
+                        );
+        
+                        return Ok(());
+                    }
+                };
+
+                for reader in switchboard.readers_of(stream_id) {
                     let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
                         format_err!(
                             "Failed to acquire reader session mutex for id = {}: {}",
