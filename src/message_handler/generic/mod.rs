@@ -326,7 +326,7 @@ mod tests {
         async fn call(&self, request: &Request) -> OperationResult {
             Ok(PingResponse {
                 message: String::from("pong"),
-                session_id: request.session_id(),
+                session_id: request.session_id().to_string(),
             }
             .into())
         }
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn handle_message() -> Result<()> {
         let (sender, rx) = TestSender::new();
-        let session_id = SessionId::new();
+        let session_id = SessionId::new(123);
 
         thread::spawn(move || {
             let message_handling_loop: MessageHandlingLoop<TestRouter, TestSender> =
@@ -440,7 +440,7 @@ mod tests {
                 json,
                 json!({
                     "message": "pong",
-                    "session_id": session_id,
+                    "session_id": session_id.to_string(),
                     "status": "200",
                 })
             ),

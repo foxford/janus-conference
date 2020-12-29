@@ -1,0 +1,13 @@
+[general]
+vacuum_interval = 3600
+
+[recordings]
+enabled = false
+directory = "/recordings"
+delete_records = false
+
+[constraint.writer]
+bitrate = 300000
+
+[upload]
+backends = ["yandex"]

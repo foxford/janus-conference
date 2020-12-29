@@ -209,7 +209,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         let video = packet.video;
 
         // Find stream id for the writer.
-        let stream_id = match switchboard.stream_id_to_writer(session_id) {
+        let stream_id = match switchboard.written_by(session_id) {
             Some(stream_id) => stream_id,
             None => {
                 verb!(
@@ -284,14 +284,14 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                 }
             }
             _ => {
-                let stream_id = match switchboard.stream_id_to_writer(session_id) {
+                let stream_id = match switchboard.written_by(session_id) {
                     Some(stream_id) => stream_id,
                     None => {
                         verb!(
                             "Incoming RTCP packet from non-writer. Dropping.";
                             {"handle_id": session_id}
                         );
-        
+
                         return Ok(());
                     }
                 };
