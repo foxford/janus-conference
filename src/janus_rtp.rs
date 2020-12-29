@@ -23,16 +23,24 @@ impl JanusRtpSwitchingContext {
             uninit_context.assume_init()
         };
 
-        Self { locked_context: Arc::new(Mutex::new(context)) }
+        Self {
+            locked_context: Arc::new(Mutex::new(context)),
+        }
     }
 
     pub fn update_rtp_packet_header(&self, packet: &mut PluginRtpPacket) -> Result<()> {
-        let mut context = self.locked_context.lock().map_err(|err| {
-            anyhow!("Failed to acquire RTP switching context mutex: {}", err)
-        })?;
+        let mut context = self
+            .locked_context
+            .lock()
+            .map_err(|err| anyhow!("Failed to acquire RTP switching context mutex: {}", err))?;
 
         let video = matches!(packet.video, 1).into();
-        unsafe { janus_rtp_header_update(packet.buffer, &mut *context, video, 0) };
+
+        #[allow(unused_unsafe)]
+        unsafe {
+            janus_rtp_header_update(packet.buffer, &mut *context, video, 0)
+        };
+
         Ok(())
     }
 }
@@ -93,6 +101,7 @@ struct janus_rtp_switching_context {
     v_evaluating_start_time: gint64,
 }
 
+#[cfg(not(test))]
 extern "C" {
     fn janus_rtp_switching_context_reset(context: *mut janus_rtp_switching_context);
 
@@ -102,4 +111,21 @@ extern "C" {
         video: gboolean,
         step: c_int,
     );
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_switching_context_reset(_context: *mut janus_rtp_switching_context) {
+}
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_header_update(
+    _header: *mut c_char,
+    _context: *mut janus_rtp_switching_context,
+    _video: gboolean,
+    _step: c_int,
+) {
 }

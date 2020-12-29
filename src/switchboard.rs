@@ -292,7 +292,7 @@ impl Switchboard {
 
     pub fn remove_reader(&mut self, stream_id: StreamId, reader: SessionId) {
         verb!("Removing reader"; {"rtc_id": stream_id, "handle_id": reader});
-        self.readers.disassociate(&reader, &stream_id);
+        self.readers.remove_pair(&reader, &stream_id);
     }
 
     pub fn stream_id_to(&self, session_id: SessionId) -> Option<StreamId> {
@@ -300,11 +300,7 @@ impl Switchboard {
             .get_values(&session_id)
             .first()
             .copied()
-            .or_else(|| self.stream_id_to_writer(session_id))
-    }
-
-    pub fn stream_id_to_writer(&self, writer: SessionId) -> Option<StreamId> {
-        self.writers.get_values(&writer).first().copied()
+            .or_else(|| self.written_by(session_id))
     }
 
     pub fn switching_context(&self, stream_id: StreamId) -> Option<&JanusRtpSwitchingContext> {
@@ -322,7 +318,6 @@ impl Switchboard {
 
         if let Some(writer) = self.writers.get_keys(&stream_id).to_owned().first() {
             self.stop_recording(*writer)?;
-            self.agents.remove_value(&writer);
         }
 
         self.writers.remove_value(&stream_id);
@@ -429,5 +424,338 @@ impl LockedSwitchboard {
 
             thread::sleep(std_interval);
         }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::ptr;
+
+    use janus::PluginSession;
+    use janus_plugin_sys::janus_refcount;
+    use uuid::Uuid;
+
+    use crate::app::App;
+    use crate::conf::Config;
+
+    use super::*;
+
+    #[test]
+    fn connect_two_streams() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect writers and readers.
+        let writer1 = connect(&mut switchboard, 1)?;
+        let reader11 = connect(&mut switchboard, 11)?;
+        let reader12 = connect(&mut switchboard, 12)?;
+
+        let writer2 = connect(&mut switchboard, 2)?;
+        let reader21 = connect(&mut switchboard, 21)?;
+        let reader22 = connect(&mut switchboard, 22)?;
+
+        // Bind writers and readers to streams.
+        let stream1 = Uuid::new_v4();
+        switchboard.set_writer(stream1, writer1)?;
+        switchboard.add_reader(stream1, reader11);
+        switchboard.add_reader(stream1, reader12);
+
+        let stream2 = Uuid::new_v4();
+        switchboard.set_writer(stream2, writer2)?;
+        switchboard.add_reader(stream2, reader21);
+        switchboard.add_reader(stream2, reader22);
+
+        for session_id in &[writer1, reader11, reader12, writer2, reader21, reader22] {
+            // Assert session getter.
+            {
+                let locked_session = switchboard
+                    .session(*session_id)?
+                    .lock()
+                    .expect("Failed to obtain session lock");
+
+                assert_eq!(****locked_session, *session_id);
+            }
+
+            // Assert session setter and getter.
+            {
+                let state = switchboard.state_mut(*session_id)?;
+                state.increment_initial_rembs_counter();
+            }
+
+            let state = switchboard.state(*session_id)?;
+            assert_eq!(state.initial_rembs_counter(), 1);
+
+            // Assert agent_sessions.
+            assert!(has_agent_session(&switchboard, *session_id));
+        }
+
+        // Assert writer_to.
+        assert_eq!(switchboard.writer_to(reader11), Some(writer1));
+        assert_eq!(switchboard.writer_to(reader12), Some(writer1));
+        assert_eq!(switchboard.writer_to(reader21), Some(writer2));
+        assert_eq!(switchboard.writer_to(reader22), Some(writer2));
+        assert_eq!(switchboard.writer_to(writer1), None);
+        assert_eq!(switchboard.writer_to(SessionId::new(100)), None);
+
+        // Assert writer_of.
+        assert_eq!(switchboard.writer_of(stream1), Some(writer1));
+        assert_eq!(switchboard.writer_of(stream2), Some(writer2));
+        assert_eq!(switchboard.writer_of(Uuid::new_v4()), None);
+
+        // Assert written_by.
+        assert_eq!(switchboard.written_by(writer1), Some(stream1));
+        assert_eq!(switchboard.written_by(writer2), Some(stream2));
+        assert_eq!(switchboard.written_by(reader11), None);
+        assert_eq!(switchboard.written_by(SessionId::new(100)), None);
+
+        // Assert readers_of.
+        let stream1_readers = switchboard.readers_of(stream1);
+        assert!(stream1_readers.contains(&reader11));
+        assert!(stream1_readers.contains(&reader12));
+
+        let stream2_readers = switchboard.readers_of(stream2);
+        assert!(stream2_readers.contains(&reader21));
+        assert!(stream2_readers.contains(&reader22));
+
+        // Assert read_by.
+        assert_eq!(switchboard.read_by(reader11), Some(stream1));
+        assert_eq!(switchboard.read_by(reader12), Some(stream1));
+        assert_eq!(switchboard.read_by(reader21), Some(stream2));
+        assert_eq!(switchboard.read_by(reader22), Some(stream2));
+        assert_eq!(switchboard.read_by(writer2), None);
+        assert_eq!(switchboard.read_by(SessionId::new(100)), None);
+
+        // Assert stream_id_to.
+        assert_eq!(switchboard.stream_id_to(writer1), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(reader11), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(reader12), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(writer2), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(reader21), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(reader22), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(SessionId::new(100)), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn disconnect_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        // Bind writer and readers to a stream.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Disconnect writer.
+        switchboard.handle_disconnect(writer)?;
+
+        // Assert writer to be missing.
+        assert!(switchboard.session(writer).is_err());
+        assert!(switchboard.state(writer).is_err());
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert_eq!(switchboard.written_by(writer), None);
+        assert_eq!(switchboard.written_by(writer), None);
+        assert_eq!(switchboard.stream_id_to(writer), None);
+        assert!(!has_agent_session(&switchboard, writer));
+
+        // Assert readers to be still on the stream.
+        let stream_readers = switchboard.readers_of(stream);
+        assert!(stream_readers.contains(&reader1));
+        assert!(stream_readers.contains(&reader2));
+
+        for reader in &[reader1, reader2] {
+            assert!(switchboard.session(*reader).is_ok());
+            assert!(switchboard.state(*reader).is_ok());
+            assert_eq!(switchboard.read_by(*reader), Some(stream));
+            assert_eq!(switchboard.stream_id_to(*reader), Some(stream));
+            assert_eq!(switchboard.writer_to(*reader), None);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn disconnect_reader() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        // Bind writer and readers to a stream.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Disconnect a reader.
+        switchboard.handle_disconnect(reader1)?;
+
+        // Assert the disconnect reader to be missing.
+        assert!(switchboard.session(reader1).is_err());
+        assert!(switchboard.state(reader1).is_err());
+        assert_eq!(switchboard.read_by(reader1), None);
+        assert_eq!(switchboard.stream_id_to(reader1), None);
+        assert!(!has_agent_session(&switchboard, reader1));
+
+        // Assert only the other reader on the stream.
+        let stream_readers = switchboard.readers_of(stream);
+        assert_eq!(stream_readers.len(), 1);
+        assert_eq!(stream_readers[0], reader2);
+
+        assert!(switchboard.session(reader2).is_ok());
+        assert!(switchboard.state(reader2).is_ok());
+        assert_eq!(switchboard.read_by(reader2), Some(stream));
+        assert_eq!(switchboard.stream_id_to(reader2), Some(stream));
+
+        // Assert the writer is still on the stream.
+        assert_eq!(switchboard.writer_of(stream), Some(writer));
+        assert!(switchboard.session(writer).is_ok());
+        assert!(switchboard.state(writer).is_ok());
+        assert_eq!(switchboard.written_by(writer), Some(stream));
+        assert_eq!(switchboard.stream_id_to(writer), Some(stream));
+
+        assert_eq!(switchboard.writer_to(reader1), None);
+        assert_eq!(switchboard.writer_to(reader2), Some(writer));
+
+        Ok(())
+    }
+
+    #[test]
+    fn replace_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect two sessions.
+        let session1 = connect(&mut switchboard, 1)?;
+        let session2 = connect(&mut switchboard, 2)?;
+
+        // Make the first a writer and the second a reader.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, session1)?;
+
+        // Switch the writer to the second session.
+        switchboard.set_writer(stream, session2)?;
+
+        // Assert the second one has become a writer and the first one a reader.
+        assert_eq!(switchboard.writer_of(stream), Some(session2));
+        assert_eq!(switchboard.written_by(session1), None);
+        assert_eq!(switchboard.written_by(session2), Some(stream));
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a session and make it a writer.
+        let session = connect(&mut switchboard, 0)?;
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, session)?;
+
+        // Remove the writer from the stream.
+        switchboard.remove_writer(stream)?;
+
+        // Assert there's no writer on the stream.
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert_eq!(switchboard.written_by(session), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_reader() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect two sessions and make them readers.
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        let stream = Uuid::new_v4();
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Remove the reader from the stream.
+        switchboard.remove_reader(stream, reader1);
+
+        // Assert there's no reader on the stream.
+        assert_eq!(switchboard.readers_of(stream), &[reader2]);
+        assert_eq!(switchboard.read_by(reader1), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_stream() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers and bind them to the stream.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Remove the stream.
+        switchboard.remove_stream(stream)?;
+
+        // Assert all sessions have gone.
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert!(switchboard.readers_of(stream).is_empty());
+
+        Ok(())
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+
+    fn init_app() -> Result<()> {
+        let config = Config::from_path(Path::new("test"))?;
+        App::init(config)
+    }
+
+    static mut PLUGIN_SESSION: PluginSession = PluginSession {
+        gateway_handle: ptr::null_mut(),
+        plugin_handle: ptr::null_mut(),
+        stopped: 0,
+        ref_: janus_refcount { count: 1, free },
+    };
+
+    extern "C" fn free(_ref: *const janus_refcount) {}
+
+    fn connect(switchboard: &mut Switchboard, id: u64) -> Result<SessionId> {
+        let plugin_session_mut_ptr = unsafe { &mut PLUGIN_SESSION as *mut PluginSession };
+        let session_id = SessionId::new(id);
+
+        let wrapper = unsafe { SessionWrapper::associate(plugin_session_mut_ptr, session_id)? };
+        switchboard.connect(wrapper)?;
+
+        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
+        switchboard.associate_agent(session_id, &agent_id)?;
+        Ok(session_id)
+    }
+
+    fn has_agent_session(switchboard: &Switchboard, session_id: SessionId) -> bool {
+        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
+        let agent_sessions = switchboard.agent_sessions(&agent_id);
+        agent_sessions.first() == Some(&session_id)
     }
 }
