@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 async-trait = "0.1"
 anyhow = "1.0"
 chrono = "0.4"
+crossbeam-channel = "0.5"
 janus-plugin-sys = "0.7"
 janus-plugin = "0.12"
 serde = "1.0"

@@ -384,18 +384,129 @@ impl Switchboard {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-pub struct LockedSwitchboard(RwLock<Switchboard>);
+enum SwitchboardLockMetricKind {
+    Read,
+    Write,
+}
+
+enum SwitchboardLockMetricMessage {
+    Register {
+        kind: SwitchboardLockMetricKind,
+        duration: Duration,
+    },
+    Flush,
+    Stop,
+}
+
+pub struct LockedSwitchboard {
+    rwlock: RwLock<Switchboard>,
+    metric_tx: crossbeam_channel::Sender<SwitchboardLockMetricMessage>,
+}
 
 impl LockedSwitchboard {
     pub fn new() -> Self {
-        Self(RwLock::new(Switchboard::new()))
+        let (metric_tx, metric_rx) = crossbeam_channel::unbounded();
+
+        thread::spawn(move || {
+            let mut read_durations: Vec<i64> = Vec::with_capacity(1000);
+            let mut write_durations: Vec<i64> = Vec::with_capacity(1000);
+
+            for message in metric_rx {
+                match message {
+                    SwitchboardLockMetricMessage::Register { kind, duration } => {
+                        let microseconds = duration.num_microseconds().unwrap_or(std::i64::MAX);
+
+                        match kind {
+                            SwitchboardLockMetricKind::Read => read_durations.push(microseconds),
+                            SwitchboardLockMetricKind::Write => write_durations.push(microseconds),
+                        }
+                    }
+                    SwitchboardLockMetricMessage::Flush => {
+                        let sets = &mut [
+                            ("read", &mut read_durations),
+                            ("write", &mut write_durations),
+                        ];
+
+                        for (kind, ref mut values) in sets {
+                            if values.is_empty() {
+                                continue;
+                            }
+
+                            values.sort();
+                            let count = values.len();
+                            let p50_idx = (count as f32 * 0.50) as usize;
+                            let p95_idx = (count as f32 * 0.95) as usize;
+                            let p99_idx = (count as f32 * 0.99) as usize;
+                            let max_idx = count - 1;
+                            let max = values[max_idx];
+
+                            let p50 = if p50_idx < max_idx {
+                                (values[p50_idx] + max) / 2
+                            } else {
+                                max
+                            };
+
+                            let p95 = if p95_idx < max_idx {
+                                (values[p95_idx] + max) / 2
+                            } else {
+                                max
+                            };
+
+                            let p99 = if p99_idx < max_idx {
+                                (values[p99_idx] + max) / 2
+                            } else {
+                                max
+                            };
+
+                            info!(""; {
+                                "metric": "switchboard_rwlock",
+                                "kind": kind,
+                                "count": count,
+                                "p50": p50,
+                                "p95": p95,
+                                "p99": p99,
+                                "max": max
+                            });
+
+                            values.clear();
+                        }
+                    }
+                    SwitchboardLockMetricMessage::Stop => break,
+                }
+            }
+        });
+
+        let metric_tx_clone = metric_tx.clone();
+
+        thread::spawn(move || loop {
+            thread::sleep(std::time::Duration::from_secs(5));
+
+            if let Err(_) = metric_tx_clone.send(SwitchboardLockMetricMessage::Flush) {
+                break;
+            }
+        });
+
+        Self {
+            rwlock: RwLock::new(Switchboard::new()),
+            metric_tx,
+        }
     }
 
     pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R>
     where
         F: FnOnce(RwLockReadGuard<Switchboard>) -> Result<R>,
     {
-        match self.0.read() {
+        let start = Utc::now();
+        let result = self.rwlock.read();
+
+        self.metric_tx
+            .send(SwitchboardLockMetricMessage::Register {
+                kind: SwitchboardLockMetricKind::Read,
+                duration: (Utc::now() - start),
+            })
+            .unwrap_or(());
+
+        match result {
             Ok(switchboard) => callback(switchboard),
             Err(_) => bail!("Failed to acquire switchboard read lock"),
         }
@@ -405,7 +516,17 @@ impl LockedSwitchboard {
     where
         F: FnOnce(RwLockWriteGuard<Switchboard>) -> Result<R>,
     {
-        match self.0.write() {
+        let start = Utc::now();
+        let result = self.rwlock.write();
+
+        self.metric_tx
+            .send(SwitchboardLockMetricMessage::Register {
+                kind: SwitchboardLockMetricKind::Write,
+                duration: Utc::now() - start,
+            })
+            .unwrap_or(());
+
+        match result {
             Ok(switchboard) => callback(switchboard),
             Err(_) => bail!("Failed to acquire switchboard write lock"),
         }
@@ -423,6 +544,17 @@ impl LockedSwitchboard {
                 .unwrap_or_else(|err| err!("{}", err));
 
             thread::sleep(std_interval);
+        }
+    }
+}
+
+impl Drop for LockedSwitchboard {
+    fn drop(&mut self) {
+        if let Err(err) = self.metric_tx.send(SwitchboardLockMetricMessage::Stop) {
+            warn!(
+                "Failed to stop switchboard rwlock metric collector: {}",
+                err
+            );
         }
     }
 }
