@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
+use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::Recorder;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -102,6 +103,14 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
+    pub fn reset(&mut self) {
+        self.fir_seq.store(0, Ordering::Relaxed);
+        self.initial_rembs_counter.store(0, Ordering::Relaxed);
+        self.last_remb_timestamp.store(0, Ordering::Relaxed);
+        self.last_rtp_packet_timestamp.store(0, Ordering::Relaxed);
+        self.unset_recorder();
+    }
+
     pub fn recorder(&self) -> Option<&Recorder> {
         self.recorder.as_ref()
     }
@@ -128,8 +137,9 @@ pub struct Switchboard {
     sessions: HashMap<SessionId, LockedSession>,
     states: HashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
-    publishers: HashMap<StreamId, SessionId>,
-    publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
+    writers: BidirectionalMultimap<SessionId, StreamId>,
+    readers: BidirectionalMultimap<SessionId, StreamId>,
+    switching_contexts: HashMap<StreamId, JanusRtpSwitchingContext>,
 }
 
 impl Switchboard {
@@ -138,8 +148,9 @@ impl Switchboard {
             sessions: HashMap::new(),
             states: HashMap::new(),
             agents: BidirectionalMultimap::new(),
-            publishers: HashMap::new(),
-            publishers_subscribers: BidirectionalMultimap::new(),
+            writers: BidirectionalMultimap::new(),
+            readers: BidirectionalMultimap::new(),
+            switching_contexts: HashMap::new(),
         }
     }
 
@@ -152,43 +163,28 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        info!("Disconnecting session asynchronously"; {"handle_id": id});
+    pub fn disconnect(&mut self, session_id: SessionId) -> Result<()> {
+        info!("Disconnecting session asynchronously"; {"handle_id": session_id});
 
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+        let session = self.session(session_id)?.lock().map_err(|err| {
+            format_err!("Failed to acquire session mutex {}: {}", session_id, err)
+        })?;
 
         janus_callbacks::end_session(&session);
         Ok(())
     }
 
-    pub fn handle_disconnect(&mut self, id: SessionId) -> Result<()> {
+    pub fn handle_disconnect(&mut self, session_id: SessionId) -> Result<()> {
         info!(
             "Session is about to disconnect. Removing it from the switchboard.";
-            {"handle_id": id}
+            {"handle_id": session_id}
         );
 
-        for subscriber in self.subscribers_to(id).to_owned() {
-            self.disconnect(subscriber)?;
-        }
-
-        let stream_ids: Vec<StreamId> = self
-            .publishers
-            .iter()
-            .filter(|(_, session_id)| **session_id == id)
-            .map(|(stream_id, _)| stream_id.to_owned())
-            .collect();
-
-        for stream_id in stream_ids {
-            self.remove_stream(stream_id)?;
-        }
-
-        self.sessions.remove(&id);
-        self.states.remove(&id);
-        self.agents.remove_value(&id);
-        self.publishers_subscribers.remove_value(&id);
+        self.sessions.remove(&session_id);
+        self.states.remove(&session_id);
+        self.agents.remove_value(&session_id);
+        self.writers.remove_key(&session_id);
+        self.readers.remove_key(&session_id);
         Ok(())
     }
 
@@ -215,125 +211,154 @@ impl Switchboard {
         self.agents.get_values(id)
     }
 
-    pub fn subscribers_to(&self, publisher: SessionId) -> &[SessionId] {
-        self.publishers_subscribers.get_values(&publisher)
+    pub fn writer_to(&self, reader: SessionId) -> Option<SessionId> {
+        self.readers
+            .get_values(&reader)
+            .first()
+            .and_then(|stream_id| self.writer_of(*stream_id))
     }
 
-    pub fn publisher_to(&self, subscriber: SessionId) -> Option<SessionId> {
-        self.publishers_subscribers
-            .get_key(&subscriber)
+    pub fn writer_of(&self, stream_id: StreamId) -> Option<SessionId> {
+        self.writers
+            .get_keys(&stream_id)
+            .first()
             .map(|id| id.to_owned())
     }
 
-    pub fn publisher_of(&self, stream_id: StreamId) -> Option<SessionId> {
-        self.publishers.get(&stream_id).map(|p| p.to_owned())
+    pub fn written_by(&self, writer: SessionId) -> Option<StreamId> {
+        self.writers.get_values(&writer).first().copied()
+    }
+
+    pub fn set_writer(&mut self, stream_id: StreamId, writer: SessionId) -> Result<()> {
+        let app = app!()?;
+        self.remove_writer(stream_id)?;
+        info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
+        self.writers.associate(writer, stream_id);
+
+        if self.switching_contexts.get(&stream_id).is_none() {
+            self.switching_contexts
+                .insert(stream_id, JanusRtpSwitchingContext::new());
+        }
+
+        if app.config.recordings.enabled {
+            let mut recorder = Recorder::new(&app.config.recordings, stream_id);
+
+            if let Err(err) = recorder.start_recording() {
+                err!("Failed to start recording; stopping the stream"; {"rtc_id": stream_id});
+
+                self.remove_stream(stream_id).map_err(|remove_err| {
+                    format_err!(
+                        "Failed to remove stream {}: {} while recovering from another error: {}",
+                        stream_id,
+                        remove_err,
+                        err
+                    )
+                })?;
+
+                return Err(err);
+            }
+
+            verb!("Attaching recorder"; {"rtc_id": stream_id, "handle_id": writer});
+            self.state_mut(writer)?.set_recorder(recorder);
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_writer(&mut self, stream_id: StreamId) -> Result<()> {
+        let writer = match self.writer_of(stream_id) {
+            Some(writer) => writer,
+            None => return Ok(()),
+        };
+
+        self.state_mut(writer)?.reset();
+        info!("Removing writer"; {"rtc_id": stream_id, "handle_id": writer});
+        self.writers.remove_key(&writer);
+        Ok(())
+    }
+
+    pub fn readers_of(&self, stream_id: StreamId) -> &[SessionId] {
+        self.readers.get_keys(&stream_id)
+    }
+
+    pub fn read_by(&self, reader: SessionId) -> Option<StreamId> {
+        self.readers.get_values(&reader).first().copied()
+    }
+
+    pub fn add_reader(&mut self, stream_id: StreamId, reader: SessionId) {
+        verb!("Adding reader"; {"rtc_id": stream_id, "handle_id": reader});
+        self.readers.associate(reader, stream_id);
+    }
+
+    pub fn remove_reader(&mut self, stream_id: StreamId, reader: SessionId) {
+        verb!("Removing reader"; {"rtc_id": stream_id, "handle_id": reader});
+        self.readers.remove_pair(&reader, &stream_id);
     }
 
     pub fn stream_id_to(&self, session_id: SessionId) -> Option<StreamId> {
-        self.publishers_subscribers
+        self.readers
             .get_values(&session_id)
             .first()
-            .and_then(|publisher| self.published_by(*publisher))
-            .or_else(|| self.published_by(session_id))
+            .copied()
+            .or_else(|| self.written_by(session_id))
     }
 
-    fn published_by(&self, session_id: SessionId) -> Option<StreamId> {
-        self.publishers.iter().find_map(|(stream_id, publisher)| {
-            if *publisher == session_id {
-                Some(*stream_id)
-            } else {
-                None
-            }
-        })
+    pub fn switching_context(&self, stream_id: StreamId) -> Option<&JanusRtpSwitchingContext> {
+        self.switching_contexts.get(&stream_id)
     }
 
-    pub fn create_stream(
-        &mut self,
-        id: StreamId,
-        publisher: SessionId,
-        agent_id: AgentId,
-    ) -> Result<()> {
-        info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-
-        let maybe_old_publisher = self.publishers.remove(&id);
-        self.publishers.insert(id, publisher);
-
-        if let Some(old_publisher) = maybe_old_publisher {
-            if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
-                for subscriber in subscribers {
-                    self.publishers_subscribers.associate(publisher, subscriber);
-                }
-            }
-        }
-
-        self.agents.associate(agent_id, publisher);
+    pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
+        verb!("Associating agent with the handle"; {"handle_id": session_id, "agent_id": agent_id});
+        self.agents.associate(agent_id.to_owned(), session_id);
         Ok(())
     }
 
-    pub fn join_stream(
-        &mut self,
-        id: StreamId,
-        subscriber: SessionId,
-        agent_id: AgentId,
-    ) -> Result<()> {
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
+    pub fn remove_stream(&mut self, stream_id: StreamId) -> Result<()> {
+        info!("Removing stream"; {"rtc_id": stream_id});
 
-        match maybe_publisher {
-            None => bail!("Stream {} does not exist", id),
-            Some(publisher) => {
-                verb!(
-                    "Joining to stream";
-                    {"rtc_id": id, "handle_id": subscriber, "agent_id": agent_id}
-                );
-
-                self.publishers_subscribers.associate(publisher, subscriber);
-                self.agents.associate(agent_id, subscriber);
-                Ok(())
-            }
-        }
-    }
-
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
-        info!("Removing stream"; {"rtc_id": id});
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
-
-        if let Some(publisher) = maybe_publisher {
-            self.stop_recording(publisher)?;
-            self.publishers.remove(&id);
-            self.publishers_subscribers.remove_key(&publisher);
-            self.agents.remove_value(&publisher);
+        if let Some(writer) = self.writers.get_keys(&stream_id).to_owned().first() {
+            self.stop_recording(*writer)?;
         }
 
+        self.writers.remove_value(&stream_id);
+        self.readers.remove_value(&stream_id);
+        self.switching_contexts.remove(&stream_id);
         Ok(())
     }
 
-    fn stop_recording(&mut self, publisher: SessionId) -> Result<()> {
-        let state = self.state_mut(publisher)?;
+    fn stop_recording(&mut self, writer: SessionId) -> Result<()> {
+        let state = self.state_mut(writer)?;
 
         if let Some(recorder) = state.recorder_mut() {
-            info!("Stopping recording"; {"handle_id": publisher});
+            info!("Stopping recording"; {"handle_id": writer});
 
             recorder
                 .stop_recording()
-                .map_err(|err| format_err!("Failed to stop recording {}: {}", publisher, err))?;
+                .map_err(|err| format_err!("Failed to stop recording {}: {}", writer, err))?;
         }
 
         state.unset_recorder();
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
-        for (stream_id, publisher) in self.publishers.clone().into_iter() {
-            match self.vacuum_publisher(publisher, timeout) {
+    pub fn vacuum_writers(&mut self, timeout: &Duration) -> Result<()> {
+        let writers = self
+            .writers
+            .iter_all()
+            .flat_map(|(k, values)| values.iter().map(move |v| (*k, *v)))
+            .collect::<Vec<(SessionId, StreamId)>>();
+
+        for (writer, stream_id) in writers {
+            match self.vacuum_writer(writer, timeout) {
                 Ok(false) => (),
                 Ok(true) => warn!(
-                    "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
+                    "Writer timed out; No RTP packets from PeerConnection in {} seconds",
                     timeout.num_seconds();
-                    {"rtc_id": stream_id, "handle_id": publisher}
+                    {"rtc_id": stream_id, "handle_id": writer}
                 ),
                 Err(err) => err!(
-                    "Failed to vacuum publisher: {}", err;
-                    {"rtc_id": stream_id, "handle_id": publisher}
+                    "Failed to vacuum writer: {}", err;
+                    {"rtc_id": stream_id, "handle_id": writer}
                 ),
             }
         }
@@ -341,8 +366,8 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
-        let state = self.state(publisher)?;
+    fn vacuum_writer(&mut self, writer: SessionId, timeout: &Duration) -> Result<bool> {
+        let state = self.state(writer)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
             None => false,
@@ -350,7 +375,7 @@ impl Switchboard {
         };
 
         if is_timed_out {
-            self.disconnect(publisher)?;
+            self.disconnect(writer)?;
         }
 
         Ok(is_timed_out)
@@ -386,18 +411,351 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
-        info!("Vacuum thread spawned");
+    pub fn vacuum_writers_loop(&self, interval: Duration) -> Result<()> {
+        verb!("Vacuum thread spawned");
 
         let std_interval = interval
             .to_std()
             .context("Failed to convert vacuum interval")?;
 
         loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
+            self.with_write_lock(|mut switchboard| switchboard.vacuum_writers(&interval))
                 .unwrap_or_else(|err| err!("{}", err));
 
             thread::sleep(std_interval);
         }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::ptr;
+
+    use janus::PluginSession;
+    use janus_plugin_sys::janus_refcount;
+    use uuid::Uuid;
+
+    use crate::app::App;
+    use crate::conf::Config;
+
+    use super::*;
+
+    #[test]
+    fn connect_two_streams() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect writers and readers.
+        let writer1 = connect(&mut switchboard, 1)?;
+        let reader11 = connect(&mut switchboard, 11)?;
+        let reader12 = connect(&mut switchboard, 12)?;
+
+        let writer2 = connect(&mut switchboard, 2)?;
+        let reader21 = connect(&mut switchboard, 21)?;
+        let reader22 = connect(&mut switchboard, 22)?;
+
+        // Bind writers and readers to streams.
+        let stream1 = Uuid::new_v4();
+        switchboard.set_writer(stream1, writer1)?;
+        switchboard.add_reader(stream1, reader11);
+        switchboard.add_reader(stream1, reader12);
+
+        let stream2 = Uuid::new_v4();
+        switchboard.set_writer(stream2, writer2)?;
+        switchboard.add_reader(stream2, reader21);
+        switchboard.add_reader(stream2, reader22);
+
+        for session_id in &[writer1, reader11, reader12, writer2, reader21, reader22] {
+            // Assert session getter.
+            {
+                let locked_session = switchboard
+                    .session(*session_id)?
+                    .lock()
+                    .expect("Failed to obtain session lock");
+
+                assert_eq!(****locked_session, *session_id);
+            }
+
+            // Assert session setter and getter.
+            {
+                let state = switchboard.state_mut(*session_id)?;
+                state.increment_initial_rembs_counter();
+            }
+
+            let state = switchboard.state(*session_id)?;
+            assert_eq!(state.initial_rembs_counter(), 1);
+
+            // Assert agent_sessions.
+            assert!(has_agent_session(&switchboard, *session_id));
+        }
+
+        // Assert writer_to.
+        assert_eq!(switchboard.writer_to(reader11), Some(writer1));
+        assert_eq!(switchboard.writer_to(reader12), Some(writer1));
+        assert_eq!(switchboard.writer_to(reader21), Some(writer2));
+        assert_eq!(switchboard.writer_to(reader22), Some(writer2));
+        assert_eq!(switchboard.writer_to(writer1), None);
+        assert_eq!(switchboard.writer_to(SessionId::new(100)), None);
+
+        // Assert writer_of.
+        assert_eq!(switchboard.writer_of(stream1), Some(writer1));
+        assert_eq!(switchboard.writer_of(stream2), Some(writer2));
+        assert_eq!(switchboard.writer_of(Uuid::new_v4()), None);
+
+        // Assert written_by.
+        assert_eq!(switchboard.written_by(writer1), Some(stream1));
+        assert_eq!(switchboard.written_by(writer2), Some(stream2));
+        assert_eq!(switchboard.written_by(reader11), None);
+        assert_eq!(switchboard.written_by(SessionId::new(100)), None);
+
+        // Assert readers_of.
+        let stream1_readers = switchboard.readers_of(stream1);
+        assert!(stream1_readers.contains(&reader11));
+        assert!(stream1_readers.contains(&reader12));
+
+        let stream2_readers = switchboard.readers_of(stream2);
+        assert!(stream2_readers.contains(&reader21));
+        assert!(stream2_readers.contains(&reader22));
+
+        // Assert read_by.
+        assert_eq!(switchboard.read_by(reader11), Some(stream1));
+        assert_eq!(switchboard.read_by(reader12), Some(stream1));
+        assert_eq!(switchboard.read_by(reader21), Some(stream2));
+        assert_eq!(switchboard.read_by(reader22), Some(stream2));
+        assert_eq!(switchboard.read_by(writer2), None);
+        assert_eq!(switchboard.read_by(SessionId::new(100)), None);
+
+        // Assert stream_id_to.
+        assert_eq!(switchboard.stream_id_to(writer1), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(reader11), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(reader12), Some(stream1));
+        assert_eq!(switchboard.stream_id_to(writer2), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(reader21), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(reader22), Some(stream2));
+        assert_eq!(switchboard.stream_id_to(SessionId::new(100)), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn disconnect_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        // Bind writer and readers to a stream.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Disconnect writer.
+        switchboard.handle_disconnect(writer)?;
+
+        // Assert writer to be missing.
+        assert!(switchboard.session(writer).is_err());
+        assert!(switchboard.state(writer).is_err());
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert_eq!(switchboard.written_by(writer), None);
+        assert_eq!(switchboard.written_by(writer), None);
+        assert_eq!(switchboard.stream_id_to(writer), None);
+        assert!(!has_agent_session(&switchboard, writer));
+
+        // Assert readers to be still on the stream.
+        let stream_readers = switchboard.readers_of(stream);
+        assert!(stream_readers.contains(&reader1));
+        assert!(stream_readers.contains(&reader2));
+
+        for reader in &[reader1, reader2] {
+            assert!(switchboard.session(*reader).is_ok());
+            assert!(switchboard.state(*reader).is_ok());
+            assert_eq!(switchboard.read_by(*reader), Some(stream));
+            assert_eq!(switchboard.stream_id_to(*reader), Some(stream));
+            assert_eq!(switchboard.writer_to(*reader), None);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn disconnect_reader() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        // Bind writer and readers to a stream.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Disconnect a reader.
+        switchboard.handle_disconnect(reader1)?;
+
+        // Assert the disconnect reader to be missing.
+        assert!(switchboard.session(reader1).is_err());
+        assert!(switchboard.state(reader1).is_err());
+        assert_eq!(switchboard.read_by(reader1), None);
+        assert_eq!(switchboard.stream_id_to(reader1), None);
+        assert!(!has_agent_session(&switchboard, reader1));
+
+        // Assert only the other reader on the stream.
+        let stream_readers = switchboard.readers_of(stream);
+        assert_eq!(stream_readers.len(), 1);
+        assert_eq!(stream_readers[0], reader2);
+
+        assert!(switchboard.session(reader2).is_ok());
+        assert!(switchboard.state(reader2).is_ok());
+        assert_eq!(switchboard.read_by(reader2), Some(stream));
+        assert_eq!(switchboard.stream_id_to(reader2), Some(stream));
+
+        // Assert the writer is still on the stream.
+        assert_eq!(switchboard.writer_of(stream), Some(writer));
+        assert!(switchboard.session(writer).is_ok());
+        assert!(switchboard.state(writer).is_ok());
+        assert_eq!(switchboard.written_by(writer), Some(stream));
+        assert_eq!(switchboard.stream_id_to(writer), Some(stream));
+
+        assert_eq!(switchboard.writer_to(reader1), None);
+        assert_eq!(switchboard.writer_to(reader2), Some(writer));
+
+        Ok(())
+    }
+
+    #[test]
+    fn replace_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect two sessions.
+        let session1 = connect(&mut switchboard, 1)?;
+        let session2 = connect(&mut switchboard, 2)?;
+
+        // Make the first a writer and the second a reader.
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, session1)?;
+
+        // Switch the writer to the second session.
+        switchboard.set_writer(stream, session2)?;
+
+        // Assert the second one has become a writer and the first one a reader.
+        assert_eq!(switchboard.writer_of(stream), Some(session2));
+        assert_eq!(switchboard.written_by(session1), None);
+        assert_eq!(switchboard.written_by(session2), Some(stream));
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_writer() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a session and make it a writer.
+        let session = connect(&mut switchboard, 0)?;
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, session)?;
+
+        // Remove the writer from the stream.
+        switchboard.remove_writer(stream)?;
+
+        // Assert there's no writer on the stream.
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert_eq!(switchboard.written_by(session), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_reader() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect two sessions and make them readers.
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        let stream = Uuid::new_v4();
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Remove the reader from the stream.
+        switchboard.remove_reader(stream, reader1);
+
+        // Assert there's no reader on the stream.
+        assert_eq!(switchboard.readers_of(stream), &[reader2]);
+        assert_eq!(switchboard.read_by(reader1), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn remove_stream() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+
+        // Connect a writer and readers and bind them to the stream.
+        let writer = connect(&mut switchboard, 0)?;
+        let reader1 = connect(&mut switchboard, 1)?;
+        let reader2 = connect(&mut switchboard, 2)?;
+
+        let stream = Uuid::new_v4();
+        switchboard.set_writer(stream, writer)?;
+        switchboard.add_reader(stream, reader1);
+        switchboard.add_reader(stream, reader2);
+
+        // Remove the stream.
+        switchboard.remove_stream(stream)?;
+
+        // Assert all sessions have gone.
+        assert_eq!(switchboard.writer_of(stream), None);
+        assert!(switchboard.readers_of(stream).is_empty());
+
+        Ok(())
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+
+    fn init_app() -> Result<()> {
+        let config = Config::from_path(Path::new("test"))?;
+        App::init(config)
+    }
+
+    static mut PLUGIN_SESSION: PluginSession = PluginSession {
+        gateway_handle: ptr::null_mut(),
+        plugin_handle: ptr::null_mut(),
+        stopped: 0,
+        ref_: janus_refcount { count: 1, free },
+    };
+
+    extern "C" fn free(_ref: *const janus_refcount) {}
+
+    fn connect(switchboard: &mut Switchboard, id: u64) -> Result<SessionId> {
+        let plugin_session_mut_ptr = unsafe { &mut PLUGIN_SESSION as *mut PluginSession };
+        let session_id = SessionId::new(id);
+
+        let wrapper = unsafe { SessionWrapper::associate(plugin_session_mut_ptr, session_id)? };
+        switchboard.connect(wrapper)?;
+
+        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
+        switchboard.associate_agent(session_id, &agent_id)?;
+        Ok(session_id)
+    }
+
+    fn has_agent_session(switchboard: &Switchboard, session_id: SessionId) -> bool {
+        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
+        let agent_sessions = switchboard.agent_sessions(&agent_id);
+        agent_sessions.first() == Some(&session_id)
     }
 }

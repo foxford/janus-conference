@@ -17,8 +17,12 @@ pub use self::generic::{Operation, OperationResult, Request};
 pub enum Method {
     #[serde(rename = "agent.leave")]
     AgentLeave(operations::agent_leave::Request),
+    #[serde(rename = "signal.create")]
+    SignalCreate(operations::signal_create::Request),
     #[serde(rename = "stream.create")]
     StreamCreate(operations::stream_create::Request),
+    #[serde(rename = "signal.update")]
+    SignalUpdate(operations::signal_update::Request),
     #[serde(rename = "stream.read")]
     StreamRead(operations::stream_read::Request),
     #[serde(rename = "stream.upload")]
@@ -29,6 +33,8 @@ impl Into<Box<dyn Operation>> for Method {
     fn into(self) -> Box<dyn Operation> {
         match self {
             Method::AgentLeave(op) => Box::new(op),
+            Method::SignalCreate(op) => Box::new(op),
+            Method::SignalUpdate(op) => Box::new(op),
             Method::StreamCreate(op) => Box::new(op),
             Method::StreamRead(op) => Box::new(op),
             Method::StreamUpload(op) => Box::new(op),

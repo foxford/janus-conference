@@ -725,6 +725,12 @@ checksum = "b8b7a7c0c47db5545ed3fef7468ee7bb5b74691498139e4b3f6a20685dc6dd8e"
 [[package]]
 name = "jansson-sys"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c71b62bcd47246aeb80d8559cfda53c85b494f5c31eb814113fef51afe67e2a"
+
+[[package]]
+name = "jansson-sys"
+version = "0.1.0"
 source = "git+https://github.com/netology-group/janus-plugin-rs?branch=feature/api-v15#ac8d6aa374f35679bf0d801840e3a13b21c0891a"
 
 [[package]]
@@ -739,6 +745,7 @@ dependencies = [
  "futures 0.3.4",
  "futures-channel",
  "http 0.1.21",
+ "jansson-sys 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "janus-plugin",
  "janus-plugin-sys",
  "lazy_static",
@@ -766,7 +773,7 @@ dependencies = [
  "chrono",
  "colored",
  "glib-sys",
- "jansson-sys",
+ "jansson-sys 0.1.0 (git+https://github.com/netology-group/janus-plugin-rs?branch=feature/api-v15)",
  "janus-plugin-sys",
  "libc",
  "serde 1.0.106",
@@ -778,7 +785,7 @@ version = "0.7.0"
 source = "git+https://github.com/netology-group/janus-plugin-rs?branch=feature/api-v15#ac8d6aa374f35679bf0d801840e3a13b21c0891a"
 dependencies = [
  "glib-sys",
- "jansson-sys",
+ "jansson-sys 0.1.0 (git+https://github.com/netology-group/janus-plugin-rs?branch=feature/api-v15)",
 ]
 
 [[package]]

@@ -1,10 +1,10 @@
 [general]
-vacuum_interval = 60
+vacuum_interval = 3600
 
 [recordings]
-enabled = true
+enabled = false
 directory = "/recordings"
-delete_records = true
+delete_records = false
 
 [constraint.writer]
 bitrate = 300000

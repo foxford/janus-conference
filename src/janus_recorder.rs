@@ -108,6 +108,7 @@ struct janus_recorder {
     ref_: janus_refcount,
 }
 
+#[cfg(not(test))]
 extern "C" {
     fn janus_recorder_create(
         dir: *const c_char,
@@ -124,3 +125,35 @@ extern "C" {
     fn janus_recorder_close(recorder: *mut janus_recorder) -> c_int;
     fn janus_recorder_destroy(recorder: *mut janus_recorder);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_recorder_create(
+    _dir: *const c_char,
+    _codec: *const c_char,
+    _filename: *const c_char,
+) -> *mut janus_recorder {
+    std::ptr::null_mut()
+}
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_recorder_save_frame(
+    _recorder: *mut janus_recorder,
+    _buffer: *const c_char,
+    _length: c_uint,
+) -> c_int {
+    0
+}
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_recorder_close(_recorder: *mut janus_recorder) -> c_int {
+    0
+}
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_recorder_destroy(_recorder: *mut janus_recorder) {}

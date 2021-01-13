@@ -46,8 +46,8 @@ impl App {
             if let Ok(app) = app!() {
                 let interval = Duration::seconds(app.config.general.vacuum_interval);
 
-                if let Err(err) = app.switchboard.vacuum_publishers_loop(interval) {
-                    err!("Vacuum publishers loop failed: {}", err);
+                if let Err(err) = app.switchboard.vacuum_writers_loop(interval) {
+                    err!("Vacuum writers loop failed: {}", err);
                 }
             }
         });

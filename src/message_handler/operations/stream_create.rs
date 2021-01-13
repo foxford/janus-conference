@@ -1,15 +1,13 @@
-use anyhow::{format_err, Error};
+use anyhow::Error;
 use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::recorder::Recorder;
-use crate::switchboard::{AgentId, StreamId};
+use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
     id: StreamId,
-    agent_id: AgentId,
 }
 
 #[derive(Serialize)]
@@ -18,7 +16,10 @@ struct Response {}
 #[async_trait]
 impl super::Operation for Request {
     async fn call(&self, request: &super::Request) -> super::OperationResult {
-        verb!("Calling stream.create operation"; {"rtc_id": self.id});
+        verb!(
+            "Calling stream.create operation";
+            {"rtc_id": self.id, "handle_id": request.session_id()}
+        );
 
         let internal_error = |err: Error| {
             SvcError::builder()
@@ -30,39 +31,16 @@ impl super::Operation for Request {
 
         let app = app!().map_err(internal_error)?;
 
-        app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.create_stream(self.id, request.session_id(), self.agent_id.to_owned())?;
-
-            let mut start_recording = || {
-                if app.config.recordings.enabled {
-                    let mut recorder = Recorder::new(&app.config.recordings, self.id);
-                    recorder.start_recording()?;
-                    verb!("Attaching recorder"; {"handle_id": request.session_id()});
-                    switchboard.state_mut(request.session_id())?.set_recorder(recorder);
-                }
-
-                Ok(())
-            };
-
-            start_recording().or_else(|err: Error| {
-                err!("Failed to start recording; stopping the stream"; {"rtc_id": self.id});
-
-                switchboard
-                    .remove_stream(self.id)
-                    .map_err(|remove_err| {
-                        format_err!(
-                            "Failed to remove stream {}: {} while recovering from another error: {}",
-                            self.id, remove_err, err
-                        )
-                    })
+        app.switchboard
+            .with_write_lock(|mut switchboard| {
+                switchboard.set_writer(self.id, request.session_id())
             })
-        })
-        .map_err(internal_error)?;
+            .map_err(internal_error)?;
 
         Ok(Response {}.into())
     }
 
     fn is_handle_jsep(&self) -> bool {
-        true
+        false
     }
 }

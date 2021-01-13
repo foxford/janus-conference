@@ -43,11 +43,11 @@ pub struct General {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Constraint {
-    pub publisher: PublisherConstraint,
+    pub writer: WriterConstraint,
 }
 
 #[derive(Clone, Deserialize, Debug)]
-pub struct PublisherConstraint {
+pub struct WriterConstraint {
     pub bitrate: Option<u32>,
 }
 

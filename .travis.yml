@@ -1,7 +1,7 @@
 dist: xenial
 language: rust
 rust:
-  - stable
+  - nightly
 addons:
   apt:
     packages:
@@ -44,4 +44,9 @@ stages:
   - name: deploy
 notifications:
   email: false
-
+env:
+  global:
+    APP_UPLOADING_YANDEX_ACCESS_KEY_ID: "12345"
+    APP_UPLOADING_YANDEX_SECRET_ACCESS_KEY: "secret"
+    APP_UPLOADING_YANDEX_ENDPOINT: "https://storage.yandexcloud.net"
+    APP_UPLOADING_YANDEX_REGION: "ru-central1"
