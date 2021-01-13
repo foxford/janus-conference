@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
-use anyhow::{bail, format_err, Context, Result};
+use anyhow::{bail, format_err, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use janus::session::SessionWrapper;
 use uuid::Uuid;
@@ -200,7 +200,7 @@ impl Switchboard {
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
-    pub fn state_mut(&mut self, id: SessionId) -> Result<&mut SessionState> {
+    fn state_mut(&mut self, id: SessionId) -> Result<&mut SessionState> {
         self.states
             .get_mut(&id)
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
@@ -384,45 +384,80 @@ impl Switchboard {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-pub struct LockedSwitchboard(RwLock<Switchboard>);
+const DISPATCHER_MAX_QUEUE_SIZE: usize = 1000;
 
-impl LockedSwitchboard {
-    pub fn new() -> Self {
-        Self(RwLock::new(Switchboard::new()))
+enum DispatcherMessage {
+    Dispatch(Box<dyn FnOnce(&mut Switchboard) + Send>),
+    Halt,
+}
+
+pub struct Dispatcher {
+    tx: crossbeam_channel::Sender<DispatcherMessage>,
+}
+
+impl Dispatcher {
+    pub fn start() -> Self {
+        let (tx, rx) = crossbeam_channel::bounded(DISPATCHER_MAX_QUEUE_SIZE);
+
+        thread::spawn(move || {
+            let mut switchboard = Switchboard::new();
+
+            while let Ok(message) = rx.recv() {
+                match message {
+                    DispatcherMessage::Dispatch(callback) => callback(&mut switchboard),
+                    DispatcherMessage::Halt => break,
+                }
+            }
+        });
+
+        Self { tx }
     }
 
-    pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R>
+    pub async fn dispatch<F, R>(&self, callback: F) -> Result<R>
     where
-        F: FnOnce(RwLockReadGuard<Switchboard>) -> Result<R>,
+        F: FnOnce(&mut Switchboard) -> R + Send + 'static,
+        R: Send + 'static,
     {
-        match self.0.read() {
-            Ok(switchboard) => callback(switchboard),
-            Err(_) => bail!("Failed to acquire switchboard read lock"),
+        let (ret_tx, ret_rx) = futures::channel::oneshot::channel();
+
+        let boxed_callback = Box::new(move |switchboard: &mut Switchboard| {
+            if let Err(_) = ret_tx.send(callback(switchboard)) {
+                err!("Failed to send return value from switchboard dispatcher");
+            }
+        });
+
+        let send_result = self
+            .tx
+            .try_send(DispatcherMessage::Dispatch(boxed_callback));
+
+        if let Err(err) = send_result {
+            bail!("Failed to send dispatch message to switchboard: {}", err);
         }
+
+        ret_rx.await.map_err(|err| {
+            anyhow!(
+                "Failed to receive return value from switchboard dispatcher: {}",
+                err
+            )
+        })
     }
 
-    pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R>
+    pub fn dispatch_sync<F, R>(&self, callback: F) -> Result<R>
     where
-        F: FnOnce(RwLockWriteGuard<Switchboard>) -> Result<R>,
+        F: FnOnce(&mut Switchboard) -> R + Send + 'static,
+        R: Send + 'static,
     {
-        match self.0.write() {
-            Ok(switchboard) => callback(switchboard),
-            Err(_) => bail!("Failed to acquire switchboard write lock"),
-        }
+        async_std::task::block_on(async { self.dispatch(callback).await })
     }
+}
 
-    pub fn vacuum_writers_loop(&self, interval: Duration) -> Result<()> {
-        verb!("Vacuum thread spawned");
-
-        let std_interval = interval
-            .to_std()
-            .context("Failed to convert vacuum interval")?;
-
-        loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_writers(&interval))
-                .unwrap_or_else(|err| err!("{}", err));
-
-            thread::sleep(std_interval);
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        if let Err(err) = self.tx.send(DispatcherMessage::Halt) {
+            err!(
+                "Failed to send halt message to switchboard dispatcher: {}",
+                err
+            );
         }
     }
 }
@@ -725,6 +760,43 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn dispatch_async() -> Result<()> {
+        init_app()?;
+
+        async_std::task::block_on(async {
+            let dispatcher = Dispatcher::start();
+            let session = build_session(123)?;
+            let session_id = ***session;
+
+            dispatcher
+                .dispatch(move |switchboard| switchboard.connect(session))
+                .await?
+                .expect("Failed to connect");
+
+            dispatcher
+                .dispatch(move |switchboard| {
+                    assert!(switchboard.session(session_id).is_ok());
+                })
+                .await
+        })
+    }
+
+    #[test]
+    fn dispatch_sync() -> Result<()> {
+        init_app()?;
+        let dispatcher = Dispatcher::start();
+        let session = build_session(123)?;
+        let session_id = ***session;
+
+        dispatcher
+            .dispatch_sync(move |switchboard| switchboard.connect(session))?
+            .expect("Failed to connect");
+
+        dispatcher
+            .dispatch_sync(move |switchboard| assert!(switchboard.session(session_id).is_ok()))
+    }
+
     ////////////////////////////////////////////////////////////////////////////
 
     fn init_app() -> Result<()> {
@@ -741,13 +813,18 @@ mod tests {
 
     extern "C" fn free(_ref: *const janus_refcount) {}
 
-    fn connect(switchboard: &mut Switchboard, id: u64) -> Result<SessionId> {
+    fn build_session(id: u64) -> Result<Session> {
         let plugin_session_mut_ptr = unsafe { &mut PLUGIN_SESSION as *mut PluginSession };
         let session_id = SessionId::new(id);
 
-        let wrapper = unsafe { SessionWrapper::associate(plugin_session_mut_ptr, session_id)? };
-        switchboard.connect(wrapper)?;
+        unsafe { SessionWrapper::associate(plugin_session_mut_ptr, session_id) }
+            .map_err(|err| anyhow!("Failed to build session: {}", err))
+    }
 
+    fn connect(switchboard: &mut Switchboard, id: u64) -> Result<SessionId> {
+        let session = build_session(id)?;
+        let session_id = ***session;
+        switchboard.connect(session)?;
         let agent_id = format!("web.{}.usr.dev.example.org", session_id);
         switchboard.associate_agent(session_id, &agent_id)?;
         Ok(session_id)

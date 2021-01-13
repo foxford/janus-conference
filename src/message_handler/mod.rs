@@ -61,21 +61,23 @@ impl Sender for JanusSender {
         payload: Option<JanssonValue>,
         jsep_answer: Option<JanssonValue>,
     ) -> Result<()> {
-        app!()?.switchboard.with_read_lock(move |switchboard| {
-            let session = switchboard.session(session_id)?.lock().map_err(|err| {
-                format_err!(
-                    "Failed to acquire mutex for session {}: {}",
-                    session_id,
-                    err
-                )
-            })?;
+        let txn = CString::new(transaction.to_owned())
+            .context("Failed to cast transaction to CString")?;
 
-            let txn = CString::new(transaction.to_owned())
-                .context("Failed to cast transaction to CString")?;
+        app!()?
+            .switchboard_dispatcher
+            .dispatch_sync(move |switchboard| {
+                let session = switchboard.session(session_id)?.lock().map_err(|err| {
+                    format_err!(
+                        "Failed to acquire mutex for session {}: {}",
+                        session_id,
+                        err
+                    )
+                })?;
 
-            janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
-                .context("Failed to push event")
-        })
+                janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
+                    .context("Failed to push event")
+            })?
     }
 }
 

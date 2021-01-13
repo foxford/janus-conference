@@ -1,4 +1,5 @@
 use std::thread;
+use std::time::Duration as StdDuration;
 
 use anyhow::Result;
 use atom::AtomSetOnce;
@@ -6,7 +7,7 @@ use chrono::Duration;
 
 use crate::conf::Config;
 use crate::message_handler::{JanusSender, MessageHandlingLoop};
-use crate::switchboard::LockedSwitchboard as Switchboard;
+use crate::switchboard::Dispatcher as SwitchboardDispatcher;
 
 lazy_static! {
     pub static ref APP: AtomSetOnce<Box<App>> = AtomSetOnce::empty();
@@ -22,7 +23,7 @@ macro_rules! app {
 
 pub struct App {
     pub config: Config,
-    pub switchboard: Switchboard,
+    pub switchboard_dispatcher: SwitchboardDispatcher,
     pub message_handling_loop: MessageHandlingLoop,
 }
 
@@ -43,11 +44,23 @@ impl App {
         });
 
         thread::spawn(|| {
-            if let Ok(app) = app!() {
-                let interval = Duration::seconds(app.config.general.vacuum_interval);
+            verb!("Vacuum thread spawned");
 
-                if let Err(err) = app.switchboard.vacuum_writers_loop(interval) {
-                    err!("Vacuum writers loop failed: {}", err);
+            if let Ok(app) = app!() {
+                let vacuum_interval_seconds = app.config.general.vacuum_interval;
+                let interval = Duration::seconds(vacuum_interval_seconds);
+                let std_interval = StdDuration::from_secs(vacuum_interval_seconds as u64);
+
+                loop {
+                    app.switchboard_dispatcher
+                        .dispatch_sync(move |switchboard| switchboard.vacuum_writers(&interval))
+                        .unwrap_or_else(|err| {
+                            err!("Vacuum dispatch error: {}", err);
+                            Ok(())
+                        })
+                        .unwrap_or_else(|err| err!("Vacuum error: {}", err));
+
+                    thread::sleep(std_interval);
                 }
             }
         });
@@ -58,7 +71,7 @@ impl App {
     pub fn new(config: Config) -> Result<Self> {
         Ok(Self {
             config,
-            switchboard: Switchboard::new(),
+            switchboard_dispatcher: SwitchboardDispatcher::start(),
             message_handling_loop: MessageHandlingLoop::new(JanusSender::new()),
         })
     }
