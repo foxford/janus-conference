@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.0 (January 13, 2020)
+
+### Features
+- New signaling flow ([4b1eb19](https://github.com/netology-group/janus-conference/commits/4b1eb19a7079c942f925a0fe0d337ec9a7010624))
+
+
 ## v0.8.4 (December 16, 2020)
 
 ### Features
