@@ -5,7 +5,6 @@ before interaction with plugin.
 
 - [Error object](./api.error.md)
 
-- [agent.leave](./api.agent.leave.md)
 - [signal.create](./api.signal.create.md)
 - [stream.create](./api.stream.create.md)
 - [stream.read](./api.stream.read.md)

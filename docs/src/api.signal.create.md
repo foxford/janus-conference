@@ -7,9 +7,6 @@ or [stream.read](api.stream.read.md) to subscribe to a stream. Mind specifying a
 with proper mode depending on the intent. In order to write the stream it must be `sendonly` or
 `sendrecv`. In order to read the stream it must be `recvonly` or `sendrecv`.
 
-The `agent_id` parameter is needed to associate an agent id with the session. It may be later
-disconnected by calling [agent.leave](api.agent.leave.md) with the same `agent_id`.
-
 ## Request
 
 You can send a request over [any configured Janus transport](https://janus.conf.meetecho.com/docs/rest.html).
@@ -18,7 +15,6 @@ You can send a request over [any configured Janus transport](https://janus.conf.
 
 Name          | Type   | Default    | Description
 ------------- | ------ | ---------- | ---------------------
-body.agent_id | string | _required_ | Agent ID associated with the session.
 jsep.type     | string | _required_ | Always `offer`.
 jsep.sdp      | string | _required_ | An SDP offer.
 
