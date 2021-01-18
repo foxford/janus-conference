@@ -121,10 +121,8 @@ mod tests {
         let payload = Payload::from(json!({"result": "ok"}));
         let jansson_value = JanssonValue::try_from(&payload)?;
         let json_str = jansson_value.to_libcstring(JanssonEncodingFlags::empty());
-        assert_eq!(
-            json_str.to_string_lossy(),
-            "{\"result\": \"ok\", \"status\": \"200\"}"
-        );
+        let parsed_json = serde_json::from_str::<JsonValue>(&json_str.to_string_lossy())?;
+        assert_eq!(parsed_json, json!({"result": "ok", "status": "200"}));
         Ok(())
     }
 
