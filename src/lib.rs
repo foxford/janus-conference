@@ -267,13 +267,11 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
             // Push packet to the recorder.
             if let Some(recorder) = state.recorder() {
-                let is_video = matches!(video, 1);
-
                 let buf = unsafe {
                     std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
                 };
 
-                recorder.record_packet(buf, is_video)?;
+                recorder.record_packet(buf, video == 1)?;
             }
 
             Ok(())
@@ -331,6 +329,14 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                         janus_callbacks::relay_rtcp(&reader_session, &mut packet);
                     }
                 }
+            }
+
+            if let Some(recorder) = switchboard.state(session_id)?.recorder() {
+                let buf = unsafe {
+                    std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+                };
+
+                recorder.record_packet(buf, packet.video == 1)?;
             }
 
             Ok(())
