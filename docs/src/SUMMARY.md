@@ -3,7 +3,6 @@
 - [Overview](overview.md)
 - [API](api.md)
     - [Intro](api.intro.md)
-    - [agent.leave](api.agent.leave.md)
     - [signal.create](api.signal.create.md)
     - [signal.update](api.signal.update.md)
     - [stream.create](api.stream.create.md)

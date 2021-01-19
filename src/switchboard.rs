@@ -17,7 +17,6 @@ use crate::recorder::Recorder;
 ///////////////////////////////////////////////////////////////////////////////
 
 pub type StreamId = Uuid;
-pub type AgentId = String;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
 pub type LockedSession = Arc<Mutex<Session>>;
 
@@ -136,7 +135,6 @@ impl SessionState {
 pub struct Switchboard {
     sessions: HashMap<SessionId, LockedSession>,
     states: HashMap<SessionId, SessionState>,
-    agents: BidirectionalMultimap<AgentId, SessionId>,
     writers: BidirectionalMultimap<SessionId, StreamId>,
     readers: BidirectionalMultimap<SessionId, StreamId>,
     switching_contexts: HashMap<StreamId, JanusRtpSwitchingContext>,
@@ -147,7 +145,6 @@ impl Switchboard {
         Self {
             sessions: HashMap::new(),
             states: HashMap::new(),
-            agents: BidirectionalMultimap::new(),
             writers: BidirectionalMultimap::new(),
             readers: BidirectionalMultimap::new(),
             switching_contexts: HashMap::new(),
@@ -182,7 +179,6 @@ impl Switchboard {
 
         self.sessions.remove(&session_id);
         self.states.remove(&session_id);
-        self.agents.remove_value(&session_id);
         self.writers.remove_key(&session_id);
         self.readers.remove_key(&session_id);
         Ok(())
@@ -204,11 +200,6 @@ impl Switchboard {
         self.states
             .get_mut(&id)
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
-    }
-
-    #[allow(clippy::ptr_arg)]
-    pub fn agent_sessions(&self, id: &AgentId) -> &[SessionId] {
-        self.agents.get_values(id)
     }
 
     pub fn writer_to(&self, reader: SessionId) -> Option<SessionId> {
@@ -305,12 +296,6 @@ impl Switchboard {
 
     pub fn switching_context(&self, stream_id: StreamId) -> Option<&JanusRtpSwitchingContext> {
         self.switching_contexts.get(&stream_id)
-    }
-
-    pub fn associate_agent(&mut self, session_id: SessionId, agent_id: &AgentId) -> Result<()> {
-        verb!("Associating agent with the handle"; {"handle_id": session_id, "agent_id": agent_id});
-        self.agents.associate(agent_id.to_owned(), session_id);
-        Ok(())
     }
 
     pub fn remove_stream(&mut self, stream_id: StreamId) -> Result<()> {
@@ -522,9 +507,6 @@ mod tests {
 
             let state = switchboard.state(*session_id)?;
             assert_eq!(state.initial_rembs_counter(), 1);
-
-            // Assert agent_sessions.
-            assert!(has_agent_session(&switchboard, *session_id));
         }
 
         // Assert writer_to.
@@ -601,7 +583,6 @@ mod tests {
         assert_eq!(switchboard.written_by(writer), None);
         assert_eq!(switchboard.written_by(writer), None);
         assert_eq!(switchboard.stream_id_to(writer), None);
-        assert!(!has_agent_session(&switchboard, writer));
 
         // Assert readers to be still on the stream.
         let stream_readers = switchboard.readers_of(stream);
@@ -643,7 +624,6 @@ mod tests {
         assert!(switchboard.state(reader1).is_err());
         assert_eq!(switchboard.read_by(reader1), None);
         assert_eq!(switchboard.stream_id_to(reader1), None);
-        assert!(!has_agent_session(&switchboard, reader1));
 
         // Assert only the other reader on the stream.
         let stream_readers = switchboard.readers_of(stream);
@@ -825,14 +805,6 @@ mod tests {
         let session = build_session(id)?;
         let session_id = ***session;
         switchboard.connect(session)?;
-        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
-        switchboard.associate_agent(session_id, &agent_id)?;
         Ok(session_id)
-    }
-
-    fn has_agent_session(switchboard: &Switchboard, session_id: SessionId) -> bool {
-        let agent_id = format!("web.{}.usr.dev.example.org", session_id);
-        let agent_sessions = switchboard.agent_sessions(&agent_id);
-        agent_sessions.first() == Some(&session_id)
     }
 }
