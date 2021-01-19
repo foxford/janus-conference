@@ -29,13 +29,14 @@ impl super::Operation for Request {
                 .build()
         };
 
+        let id = self.id;
+        let session_id = request.session_id().to_owned();
+
         app!()
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
-            .switchboard
-            .with_write_lock(|mut switchboard| {
-                switchboard.add_reader(self.id, request.session_id());
-                Ok(())
-            })
+            .switchboard_dispatcher
+            .dispatch(move |switchboard| switchboard.add_reader(id, session_id))
+            .await
             .map_err(|err| error(StatusCode::UNPROCESSABLE_ENTITY, err))?;
 
         Ok(Response {}.into())

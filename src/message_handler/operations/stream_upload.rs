@@ -2,10 +2,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use anyhow::{bail, format_err, Context, Error, Result};
+use async_std::process::Command;
 use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
-use tokio::process::Command; // No async-std equivalent yet.
 
 use crate::recorder::Recorder;
 use crate::switchboard::StreamId;
@@ -40,20 +40,22 @@ impl super::Operation for Request {
             }
         }
 
+        let id = self.id;
+
         app!()
             .map_err(internal_error)?
-            .switchboard
-            .with_write_lock(|mut switchboard| {
+            .switchboard_dispatcher
+            .dispatch(move |switchboard| -> anyhow::Result<()> {
                 // The stream still may be ongoing and we must stop it gracefully.
-                if let Some(writer) = switchboard.writer_of(self.id) {
+                if let Some(writer) = switchboard.writer_of(id) {
                     warn!(
                         "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
-                        {"rtc_id": self.id}
+                        {"rtc_id": id}
                     );
 
                     // At first we synchronously stop the stream and hence the recording
                     // ensuring that it finishes correctly.
-                    switchboard.remove_stream(self.id)?;
+                    switchboard.remove_stream(id)?;
 
                     // Then we disconnect the writer to close its PeerConnection and notify
                     // the frontend. Disconnection also implies stream removal but it's being
@@ -62,23 +64,25 @@ impl super::Operation for Request {
                     if let Err(err) = switchboard.disconnect(writer) {
                         err!(
                             "Failed to disconnect writer while preparing for upload: {}", err;
-                            {"rtc_id": self.id, "handle_id": writer}
+                            {"rtc_id": id, "handle_id": writer}
                         );
                     }
                 }
 
                 // Disconnect readers also since there will be no further streaming possible.
-                for reader in switchboard.readers_of(self.id).to_owned() {
+                for reader in switchboard.readers_of(id).to_owned() {
                     if let Err(err) = switchboard.disconnect(reader) {
                         err!(
                             "Failed to disconnect reader while preparing for upload: {}", err;
-                            {"rtc_id": self.id, "handle_id": reader}
+                            {"rtc_id": id, "handle_id": reader}
                         );
                     }
                 }
 
                 Ok(())
             })
+            .await
+            .map_err(internal_error)?
             .map_err(internal_error)?;
 
         let recorder_config = app!().map_err(internal_error)?.config.recordings.clone();

@@ -41,13 +41,24 @@ mod test_stubs;
 
 use app::App;
 use conf::Config;
-use switchboard::SessionId;
+use switchboard::{SessionId, Switchboard};
 
 const INITIAL_REMBS: u64 = 4;
 
 lazy_static! {
     static ref REMB_INTERVAL: Duration = Duration::seconds(5);
 }
+
+// These type unsafely allow passing C pointers to RTP/RTCP packets to another thread.
+// However we must ensure blocking the thread that called `incoming_rtp/rtcp` callback until the
+// asynchronous processing is over to prevent C from freeing the memory too early.
+struct RtpPacket(*mut PluginRtpPacket);
+unsafe impl Send for RtpPacket {}
+unsafe impl Sync for RtpPacket {}
+
+struct RtcpPacket(*mut PluginRtcpPacket);
+unsafe impl Send for RtcpPacket {}
+unsafe impl Sync for RtcpPacket {}
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -86,22 +97,22 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 }
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
-    app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
-        let session_id = SessionId::new(ice_handle.handle_id);
-        verb!("Initializing session"; {"handle_id": session_id});
+    let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
 
-        // WARNING: If this variable gets dropped the memory would be freed by C.
-        //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
-        //          which would cause segfault on drop.
-        //          To prevent this we have to store this variable as is and make sure it won't
-        //          be dropped until there're no callbacks possible to call for this handle.
-        let session = unsafe { SessionWrapper::associate(handle, session_id) }
-            .context("Session associate error")?;
+    let session_id = SessionId::new(ice_handle.handle_id);
+    verb!("Initializing session"; {"handle_id": session_id});
 
-        switchboard.connect(session)?;
-        Ok(())
-    })
+    // WARNING: If this variable gets dropped the memory would be freed by C.
+    //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
+    //          which would cause segfault on drop.
+    //          To prevent this we have to store this variable as is and make sure it won't
+    //          be dropped until there're no callbacks possible to call for this handle.
+    let session = unsafe { SessionWrapper::associate(handle, session_id) }
+        .context("Session associate error")?;
+
+    app!()?
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| switchboard.connect(session))?
 }
 
 extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue {
@@ -161,17 +172,22 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 }
 
 fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
+    let session_id = session_id(handle)?;
 
-        if let Some(writer) = switchboard.writer_to(session_id) {
-            send_fir(writer);
-        }
+    app!()?
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| {
+            if let Some(writer) = switchboard.writer_to(session_id) {
+                send_fir(&switchboard, writer);
+            }
 
-        let rtc_id = switchboard.stream_id_to(session_id);
-        info!("WebRTC media is now available"; {"handle_id": session_id, "rtc_id": rtc_id});
-        Ok(())
-    })
+            info!(
+                "WebRTC media is now available";
+                {"handle_id": session_id, "rtc_id": switchboard.stream_id_to(session_id)}
+            );
+        })?;
+
+    Ok(())
 }
 
 extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPacket) {
@@ -180,86 +196,88 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     let app = app!()?;
+    let session_id = session_id(handle)?;
+    let packet = RtpPacket(packet);
 
-    app.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-        let state = switchboard.state(session_id)?;
+    app.switchboard_dispatcher
+        .dispatch_sync(move |switchboard| {
+            let mut packet = unsafe { &mut *packet.0 };
+            let state = switchboard.state(session_id)?;
 
-        // Touch last packet timestamp to drop timeout.
-        state.touch_last_rtp_packet_timestamp();
+            // Touch last packet timestamp to drop timeout.
+            state.touch_last_rtp_packet_timestamp();
 
-        // Send incremental initial or regular REMB to the writer if needed to control bitrate.
-        if let Some(target_bitrate) = app.config.constraint.writer.bitrate {
-            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
+            // Send incremental initial or regular REMB to the writer if needed to control bitrate.
+            if let Some(target_bitrate) = app.config.constraint.writer.bitrate {
+                let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
 
-            if initial_rembs_left > 0 {
-                let bitrate = target_bitrate / initial_rembs_left as u32;
-                send_remb(session_id, bitrate);
-                state.touch_last_remb_timestamp();
-                state.increment_initial_rembs_counter();
-            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
-                    send_remb(session_id, target_bitrate);
+                if initial_rembs_left > 0 {
+                    let bitrate = target_bitrate / initial_rembs_left as u32;
+                    send_remb(&switchboard, session_id, bitrate);
                     state.touch_last_remb_timestamp();
+                    state.increment_initial_rembs_counter();
+                } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
+                    if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                        send_remb(&switchboard, session_id, target_bitrate);
+                        state.touch_last_remb_timestamp();
+                    }
                 }
             }
-        }
 
-        let mut packet = unsafe { &mut *packet };
-        let video = packet.video;
+            let video = packet.video;
 
-        // Find stream id for the writer.
-        let stream_id = match switchboard.written_by(session_id) {
-            Some(stream_id) => stream_id,
-            None => {
-                verb!(
-                    "Incoming RTP packet from non-writer. Dropping.";
-                    {"handle_id": session_id}
-                );
+            // Find stream id for the writer.
+            let stream_id = match switchboard.written_by(session_id) {
+                Some(stream_id) => stream_id,
+                None => {
+                    verb!(
+                        "Incoming RTP packet from non-writer. Dropping.";
+                        {"handle_id": session_id}
+                    );
 
-                return Ok(());
-            }
-        };
-
-        // Update packet header for proper timestamp and seq number.
-        match switchboard.switching_context(stream_id) {
-            Some(switching_context) => {
-                switching_context.update_rtp_packet_header(&mut packet)?;
-            }
-            None => {
-                warn!(
-                    "Failed to get switching context. Skipping RTP packet header update";
-                    {"rtc_id": stream_id, "handle_id": session_id}
-                );
-            }
-        }
-
-        // Retransmit packet to writers.
-        for reader in switchboard.readers_of(stream_id) {
-            let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
-                format_err!(
-                    "Failed to acquire reader session mutex id = {}: {}",
-                    reader,
-                    err
-                )
-            })?;
-
-            janus_callbacks::relay_rtp(&reader_session, &mut packet);
-        }
-
-        // Push packet to the recorder.
-        if let Some(recorder) = state.recorder() {
-            let is_video = matches!(video, 1);
-
-            let buf = unsafe {
-                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+                    return Ok(());
+                }
             };
 
-            recorder.record_packet(buf, is_video)?;
-        }
+            // Update packet header for proper timestamp and seq number.
+            match switchboard.switching_context(stream_id) {
+                Some(switching_context) => {
+                    switching_context.update_rtp_packet_header(&mut packet)?;
+                }
+                None => {
+                    warn!(
+                        "Failed to get switching context. Skipping RTP packet header update";
+                        {"rtc_id": stream_id, "handle_id": session_id}
+                    );
+                }
+            }
 
-        Ok(())
-    })
+            // Retransmit packet to writers.
+            for reader in switchboard.readers_of(stream_id) {
+                let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
+                    format_err!(
+                        "Failed to acquire reader session mutex id = {}: {}",
+                        reader,
+                        err
+                    )
+                })?;
+
+                janus_callbacks::relay_rtp(&reader_session, &mut packet);
+            }
+
+            // Push packet to the recorder.
+            if let Some(recorder) = state.recorder() {
+                let is_video = matches!(video, 1);
+
+                let buf = unsafe {
+                    std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+                };
+
+                recorder.record_packet(buf, is_video)?;
+            }
+
+            Ok(())
+        })?
 }
 
 extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) {
@@ -267,51 +285,56 @@ extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpP
 }
 
 fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) -> Result<()> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-        let mut packet = unsafe { &mut *packet };
-        let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
+    let session_id = session_id(handle)?;
+    let packet = RtcpPacket(packet);
 
-        match packet.video {
-            1 if janus::rtcp::has_pli(data) => {
-                if let Some(writer) = switchboard.writer_to(session_id) {
-                    send_pli(writer);
-                }
-            }
-            1 if janus::rtcp::has_fir(data) => {
-                if let Some(writer) = switchboard.writer_to(session_id) {
-                    send_fir(writer);
-                }
-            }
-            _ => {
-                let stream_id = match switchboard.written_by(session_id) {
-                    Some(stream_id) => stream_id,
-                    None => {
-                        verb!(
-                            "Incoming RTCP packet from non-writer. Dropping.";
-                            {"handle_id": session_id}
-                        );
+    app!()?
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| {
+            let mut packet = unsafe { &mut *packet.0 };
+            let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
-                        return Ok(());
+            match packet.video {
+                1 if janus::rtcp::has_pli(data) => {
+                    if let Some(writer) = switchboard.writer_to(session_id) {
+                        send_pli(&switchboard, writer);
                     }
-                };
+                }
+                1 if janus::rtcp::has_fir(data) => {
+                    if let Some(writer) = switchboard.writer_to(session_id) {
+                        send_fir(&switchboard, writer);
+                    }
+                }
+                _ => {
+                    let stream_id = match switchboard.written_by(session_id) {
+                        Some(stream_id) => stream_id,
+                        None => {
+                            verb!(
+                                "Incoming RTCP packet from non-writer. Dropping.";
+                                {"handle_id": session_id}
+                            );
 
-                for reader in switchboard.readers_of(stream_id) {
-                    let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
-                        format_err!(
-                            "Failed to acquire reader session mutex for id = {}: {}",
-                            reader,
-                            err
-                        )
-                    })?;
+                            return Ok(());
+                        }
+                    };
 
-                    janus_callbacks::relay_rtcp(&reader_session, &mut packet);
+                    for reader in switchboard.readers_of(stream_id) {
+                        let reader_session =
+                            switchboard.session(*reader)?.lock().map_err(|err| {
+                                format_err!(
+                                    "Failed to acquire reader session mutex for id = {}: {}",
+                                    reader,
+                                    err
+                                )
+                            })?;
+
+                        janus_callbacks::relay_rtcp(&reader_session, &mut packet);
+                    }
                 }
             }
-        }
 
-        Ok(())
-    })
+            Ok(())
+        })?
 }
 
 extern "C" fn incoming_data(_handle: *mut PluginSession, _packet: *mut PluginDataPacket) {
@@ -328,10 +351,11 @@ extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int)
 
 fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
     let session_id = session_id(handle)?;
+    let session_id_clone = session_id.clone();
 
     let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| switchboard.stream_id_to(session_id_clone))?;
 
     info!(
         "Slow link: uplink = {}; is_video = {}", uplink, video;
@@ -348,15 +372,13 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<()> {
     let session_id = session_id(handle)?;
 
-    let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
-
-    info!("Hang up"; {"handle_id": session_id, "rtc_id": rtc_id});
-
     app!()?
-        .switchboard
-        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| {
+            let stream_id = switchboard.stream_id_to(session_id);
+            info!("Hang up"; {"handle_id": session_id, "rtc_id": stream_id});
+            switchboard.disconnect(session_id)
+        })?
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -366,15 +388,13 @@ extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
 fn destroy_session_impl(handle: *mut PluginSession, _error: *mut c_int) -> Result<()> {
     let session_id = session_id(handle)?;
 
-    let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
-
-    info!("Handle destroyed"; {"handle_id": session_id, "rtc_id": rtc_id});
-
     app!()?
-        .switchboard
-        .with_write_lock(|mut switchboard| switchboard.handle_disconnect(session_id))
+        .switchboard_dispatcher
+        .dispatch_sync(move |switchboard| {
+            let stream_id = switchboard.stream_id_to(session_id);
+            info!("Handle destroyed"; {"handle_id": session_id, "rtc_id": stream_id});
+            switchboard.handle_disconnect(session_id)
+        })?
 }
 
 extern "C" fn destroy() {
@@ -390,75 +410,72 @@ fn session_id(handle: *mut PluginSession) -> Result<SessionId> {
     }
 }
 
-fn send_pli(writer: SessionId) {
-    report_error(send_pli_impl(writer));
+fn send_pli(switchboard: &Switchboard, writer: SessionId) {
+    report_error(send_pli_impl(switchboard, writer));
 }
 
-fn send_pli_impl(writer: SessionId) -> Result<()> {
-    app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(writer)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
-        })?;
+fn send_pli_impl(switchboard: &Switchboard, writer: SessionId) -> Result<()> {
+    let session = switchboard
+        .session(writer)?
+        .lock()
+        .map_err(|err| format_err!("Failed to acquire mutex for session {}: {}", writer, err))?;
 
-        let mut pli = janus::rtcp::gen_pli();
+    let mut pli = janus::rtcp::gen_pli();
 
-        let mut packet = PluginRtcpPacket {
-            video: 1,
-            buffer: pli.as_mut_ptr(),
-            length: pli.len() as i16,
-        };
+    let mut packet = PluginRtcpPacket {
+        video: 1,
+        buffer: pli.as_mut_ptr(),
+        length: pli.len() as i16,
+    };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
-        Ok(())
-    })
+    janus_callbacks::relay_rtcp(&session, &mut packet);
+    Ok(())
 }
 
-fn send_fir(writer: SessionId) {
-    report_error(send_fir_impl(writer));
+fn send_fir(switchboard: &Switchboard, writer: SessionId) {
+    report_error(send_fir_impl(switchboard, writer));
 }
 
-fn send_fir_impl(writer: SessionId) -> Result<()> {
-    app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(writer)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
-        })?;
+fn send_fir_impl(switchboard: &Switchboard, writer: SessionId) -> Result<()> {
+    let session = switchboard
+        .session(writer)?
+        .lock()
+        .map_err(|err| format_err!("Failed to acquire mutex for session {}: {}", writer, err))?;
 
-        let state = switchboard.state(writer)?;
-        let mut seq = state.increment_fir_seq();
-        let mut fir = janus::rtcp::gen_fir(&mut seq);
+    let state = switchboard.state(writer)?;
+    let mut seq = state.increment_fir_seq();
+    let mut fir = janus::rtcp::gen_fir(&mut seq);
 
-        let mut packet = PluginRtcpPacket {
-            video: 1,
-            buffer: fir.as_mut_ptr(),
-            length: fir.len() as i16,
-        };
+    let mut packet = PluginRtcpPacket {
+        video: 1,
+        buffer: fir.as_mut_ptr(),
+        length: fir.len() as i16,
+    };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
-        Ok(())
-    })
+    janus_callbacks::relay_rtcp(&session, &mut packet);
+    Ok(())
 }
 
-fn send_remb(writer: SessionId, bitrate: u32) {
-    report_error(send_remb_impl(writer, bitrate));
+fn send_remb(switchboard: &Switchboard, writer: SessionId, bitrate: u32) {
+    report_error(send_remb_impl(switchboard, writer, bitrate));
 }
 
-fn send_remb_impl(writer: SessionId, bitrate: u32) -> Result<()> {
-    app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(writer)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", writer, err)
-        })?;
+fn send_remb_impl(switchboard: &Switchboard, writer: SessionId, bitrate: u32) -> Result<()> {
+    let session = switchboard
+        .session(writer)?
+        .lock()
+        .map_err(|err| format_err!("Failed to acquire mutex for session {}: {}", writer, err))?;
 
-        let mut remb = janus::rtcp::gen_remb(bitrate);
+    let mut remb = janus::rtcp::gen_remb(bitrate);
 
-        let mut packet = PluginRtcpPacket {
-            video: 1,
-            buffer: remb.as_mut_ptr(),
-            length: remb.len() as i16,
-        };
+    let mut packet = PluginRtcpPacket {
+        video: 1,
+        buffer: remb.as_mut_ptr(),
+        length: remb.len() as i16,
+    };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
-        Ok(())
-    })
+    janus_callbacks::relay_rtcp(&session, &mut packet);
+    Ok(())
 }
 
 fn report_error(res: Result<()>) {

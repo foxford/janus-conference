@@ -4,14 +4,12 @@ mod response;
 
 use std::convert::TryFrom;
 use std::marker::PhantomData;
-use std::sync::mpsc;
 
 use anyhow::{format_err, Error};
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
-use tokio::runtime::Runtime;
 
 use self::response::{Payload as ResponsePayload, Response};
 use crate::jsep::Jsep;
@@ -21,6 +19,8 @@ use crate::utils;
 pub use self::operation::{Operation, Result as OperationResult};
 pub use self::request::Request;
 
+const MESSAGE_HANDLER_MAX_QUEUE_SIZE: usize = 100;
+
 pub trait Router: serde::de::DeserializeOwned + Into<Box<dyn Operation>> {}
 
 enum Message {
@@ -29,9 +29,8 @@ enum Message {
 }
 
 pub struct MessageHandlingLoop<R, S> {
-    runtime: Runtime,
-    tx: mpsc::SyncSender<Message>,
-    rx: mpsc::Receiver<Message>,
+    tx: crossbeam_channel::Sender<Message>,
+    rx: crossbeam_channel::Receiver<Message>,
     router: PhantomData<R>,
     sender: S,
 }
@@ -44,10 +43,9 @@ where
     S: 'static + Clone + Send + Sync + Sender,
 {
     pub fn new(sender: S) -> Self {
-        let (tx, rx) = mpsc::sync_channel(10);
+        let (tx, rx) = crossbeam_channel::bounded(MESSAGE_HANDLER_MAX_QUEUE_SIZE);
 
         Self {
-            runtime: Runtime::new().expect("Failed to start async runtime"),
             tx,
             rx,
             router: PhantomData,
@@ -67,7 +65,7 @@ where
                     verb!("Scheduling request handling");
                     let handler = handler.clone();
 
-                    self.runtime.spawn(async move {
+                    async_std::task::block_on(async {
                         handler.handle_request(operation, request).await;
                     });
                 }
@@ -134,12 +132,12 @@ where
 
 #[derive(Clone)]
 struct MessageHandler<S> {
-    tx: mpsc::SyncSender<Message>,
+    tx: crossbeam_channel::Sender<Message>,
     sender: S,
 }
 
 impl<S: Sender> MessageHandler<S> {
-    pub fn new(tx: mpsc::SyncSender<Message>, sender: S) -> Self {
+    pub fn new(tx: crossbeam_channel::Sender<Message>, sender: S) -> Self {
         Self { tx, sender }
     }
 
@@ -298,7 +296,7 @@ pub trait Sender {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{mpsc, Arc, Mutex};
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -362,12 +360,12 @@ mod tests {
 
     #[derive(Clone)]
     struct TestSender {
-        tx: Arc<Mutex<mpsc::Sender<TestResponse>>>,
+        tx: Arc<Mutex<crossbeam_channel::Sender<TestResponse>>>,
     }
 
     impl TestSender {
-        fn new() -> (Self, mpsc::Receiver<TestResponse>) {
-            let (tx, rx) = mpsc::channel();
+        fn new() -> (Self, crossbeam_channel::Receiver<TestResponse>) {
+            let (tx, rx) = crossbeam_channel::unbounded();
 
             let object = Self {
                 tx: Arc::new(Mutex::new(tx)),

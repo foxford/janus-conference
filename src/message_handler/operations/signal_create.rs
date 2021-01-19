@@ -30,11 +30,13 @@ impl super::Operation for Request {
         };
 
         let app = app!().map_err(internal_error)?;
+        let agent_id = self.agent_id.to_owned();
+        let session_id = request.session_id().to_owned();
 
-        app.switchboard
-            .with_write_lock(|mut switchboard| {
-                switchboard.associate_agent(request.session_id(), &self.agent_id)
-            })
+        app.switchboard_dispatcher
+            .dispatch(move |switchboard| switchboard.associate_agent(session_id, &agent_id))
+            .await
+            .map_err(internal_error)?
             .map_err(internal_error)?;
 
         Ok(Response {}.into())

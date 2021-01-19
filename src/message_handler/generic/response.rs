@@ -153,18 +153,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[derive(Serialize)]
-    struct BadResponse;
-
-    #[test]
-    fn serialize_bad_response() {
-        let json_value = serde_json::to_value(BadResponse {}).unwrap();
-        let payload = Payload::from(json_value);
-
-        match JanssonValue::try_from(&payload) {
-            Ok(_) => panic!("Expected serialization to fail"),
-            Err(err) => assert!(err.to_string().starts_with("Failed to serialize response")),
-        }
-    }
 }

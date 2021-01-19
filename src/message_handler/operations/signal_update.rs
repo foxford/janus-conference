@@ -32,25 +32,28 @@ impl super::Operation for Request {
             Jsep::is_writer(jsep_offer).map_err(|err| error(StatusCode::BAD_REQUEST, err))?;
 
         let app = app!().map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
+        let session_id = request.session_id().to_owned();
 
-        app.switchboard
-            .with_write_lock(|mut switchboard| {
+        app.switchboard_dispatcher
+            .dispatch(move |switchboard| -> anyhow::Result<()> {
                 if will_be_writer {
                     // Reader becomes writer.
-                    if let Some(stream_id) = switchboard.read_by(request.session_id()) {
-                        switchboard.remove_reader(stream_id, request.session_id());
-                        switchboard.set_writer(stream_id, request.session_id())?;
+                    if let Some(stream_id) = switchboard.read_by(session_id) {
+                        switchboard.remove_reader(stream_id, session_id);
+                        switchboard.set_writer(stream_id, session_id)?;
                     }
                 } else {
                     // Writer becomes reader.
-                    if let Some(stream_id) = switchboard.written_by(request.session_id()) {
+                    if let Some(stream_id) = switchboard.written_by(session_id) {
                         switchboard.remove_writer(stream_id)?;
-                        switchboard.add_reader(stream_id, request.session_id());
+                        switchboard.add_reader(stream_id, session_id);
                     }
                 }
 
                 Ok(())
             })
+            .await
+            .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?;
 
         Ok(Response {}.into())
