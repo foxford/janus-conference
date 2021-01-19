@@ -27,7 +27,6 @@ RUN set -xe \
         libsofia-sip-ua-dev \
         libssl-dev \
         libtool \
-        libwebsockets-dev \
         m4 \
         make \
         pkg-config \
@@ -79,7 +78,7 @@ RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='1da5aa226fb932c87fe70b35551057bd30c3713d'
+ARG JANUS_GATEWAY_COMMIT='v0.10.9'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
