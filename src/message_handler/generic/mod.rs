@@ -4,14 +4,13 @@ mod response;
 
 use std::convert::TryFrom;
 use std::marker::PhantomData;
-use std::sync::mpsc;
 
 use anyhow::{format_err, Error};
+use async_std::task;
 use http::StatusCode;
 use janus::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
-use tokio::runtime::Runtime;
 
 use self::response::{Payload as ResponsePayload, Response};
 use crate::jsep::Jsep;
@@ -29,9 +28,8 @@ enum Message {
 }
 
 pub struct MessageHandlingLoop<R, S> {
-    runtime: Runtime,
-    tx: mpsc::SyncSender<Message>,
-    rx: mpsc::Receiver<Message>,
+    tx: async_std::channel::Sender<Message>,
+    rx: async_std::channel::Receiver<Message>,
     router: PhantomData<R>,
     sender: S,
 }
@@ -44,10 +42,9 @@ where
     S: 'static + Clone + Send + Sync + Sender,
 {
     pub fn new(sender: S) -> Self {
-        let (tx, rx) = mpsc::sync_channel(10);
+        let (tx, rx) = async_std::channel::bounded(1000);
 
         Self {
-            runtime: Runtime::new().expect("Failed to start async runtime"),
             tx,
             rx,
             router: PhantomData,
@@ -57,25 +54,30 @@ where
 
     pub fn start(&self) {
         let tx = self.tx.to_owned();
+        let rx = &self.rx;
         let sender = self.sender.to_owned();
         let handler: MessageHandler<S> = MessageHandler::new(tx, sender);
 
-        loop {
-            match self.rx.recv().ok() {
-                None => (),
-                Some(Message::Request(operation, request)) => {
-                    verb!("Scheduling request handling");
-                    let handler = handler.clone();
+        task::block_on(async {
+            loop {
+                match rx.recv().await {
+                    Ok(Message::Request(operation, request)) => {
+                        verb!("Scheduling request handling");
+                        let handler = handler.clone();
 
-                    self.runtime.spawn(async move {
-                        handler.handle_request(operation, request).await;
-                    });
-                }
-                Some(Message::Response(response)) => {
-                    handler.handle_response(response);
+                        task::spawn(async move {
+                            handler.handle_request(operation, request).await;
+                        });
+                    }
+                    Ok(Message::Response(response)) => {
+                        handler.handle_response(response);
+                    }
+                    Err(err) => {
+                        err!("Error reading a message from channel: {}", err);
+                    }
                 }
             }
-        }
+        });
     }
 
     /// Determines the operation by Router, builds a request object and pushes it
@@ -107,9 +109,20 @@ where
                     }
                 };
 
-                self.tx
-                    .send(Message::Request(route.into(), request))
-                    .map_err(|err| format_err!("Failed to schedule request: {}", err))
+                let tx = self.tx.clone();
+                let message = Message::Request(route.into(), request);
+                let transaction = transaction.to_owned();
+
+                task::spawn(async move {
+                    if let Err(err) = tx.send(message).await {
+                        err!(
+                            "Failed to schedule request: {}", err;
+                            {"handle_id": session_id, "transaction": transaction}
+                        );
+                    }
+                });
+
+                Ok(())
             }
             Err(err) => {
                 verb!(
@@ -125,7 +138,11 @@ where
                 let tx = self.tx.to_owned();
                 let sender = self.sender.to_owned();
                 let handler: MessageHandler<S> = MessageHandler::new(tx, sender);
-                handler.schedule_response(request, err.into(), None);
+
+                task::spawn(
+                    async move { handler.schedule_response(request, err.into(), None).await },
+                );
+
                 Ok(())
             }
         }
@@ -134,12 +151,12 @@ where
 
 #[derive(Clone)]
 struct MessageHandler<S> {
-    tx: mpsc::SyncSender<Message>,
+    tx: async_std::channel::Sender<Message>,
     sender: S,
 }
 
 impl<S: Sender> MessageHandler<S> {
-    pub fn new(tx: mpsc::SyncSender<Message>, sender: S) -> Self {
+    pub fn new(tx: async_std::channel::Sender<Message>, sender: S) -> Self {
         Self { tx, sender }
     }
 
@@ -164,11 +181,11 @@ impl<S: Sender> MessageHandler<S> {
                     }
                 };
 
-                self.schedule_response(request, payload, jsep_answer);
+                self.schedule_response(request, payload, jsep_answer).await;
             }
             Err(err) => {
                 self.notify_error(&err);
-                self.schedule_response(request, err.into(), None)
+                self.schedule_response(request, err.into(), None).await
             }
         }
     }
@@ -218,7 +235,7 @@ impl<S: Sender> MessageHandler<S> {
     }
 
     /// Builds a response object for the request and pushes it to the message handling queue.
-    fn schedule_response(
+    async fn schedule_response(
         &self,
         request: Request,
         payload: ResponsePayload,
@@ -237,6 +254,7 @@ impl<S: Sender> MessageHandler<S> {
 
         self.tx
             .send(Message::Response(response))
+            .await
             .unwrap_or_else(move |err| {
                 err!(
                     "Failed to schedule response: {}", err;
@@ -298,7 +316,6 @@ pub trait Sender {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -362,17 +379,13 @@ mod tests {
 
     #[derive(Clone)]
     struct TestSender {
-        tx: Arc<Mutex<mpsc::Sender<TestResponse>>>,
+        tx: crossbeam_channel::Sender<TestResponse>,
     }
 
     impl TestSender {
-        fn new() -> (Self, mpsc::Receiver<TestResponse>) {
-            let (tx, rx) = mpsc::channel();
-
-            let object = Self {
-                tx: Arc::new(Mutex::new(tx)),
-            };
-
+        fn new() -> (Self, async_std::channel::Receiver<TestResponse>) {
+            let (tx, rx) = async_std::channel::unbounded();
+            let object = Self { tx };
             (object, rx)
         }
     }
@@ -414,7 +427,7 @@ mod tests {
         let (sender, rx) = TestSender::new();
         let session_id = SessionId::new();
 
-        thread::spawn(move || {
+        task::spawn(async move {
             let message_handling_loop: MessageHandlingLoop<TestRouter, TestSender> =
                 MessageHandlingLoop::new(sender);
 
@@ -424,6 +437,7 @@ mod tests {
 
             message_handling_loop
                 .schedule_request(session_id, "txn", &json, None)
+                .await
                 .unwrap();
 
             message_handling_loop.start();
