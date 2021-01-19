@@ -2,10 +2,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use anyhow::{bail, format_err, Context, Error, Result};
+use async_std::process::Command;
 use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
-use tokio::process::Command; // No async-std equivalent yet.
 
 use crate::recorder::Recorder;
 use crate::switchboard::StreamId;
@@ -140,12 +140,14 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
     script_path.push("upload_record.sh");
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
+
     command.args(&[
         &stream_id,
         &request.backend,
         &request.bucket,
         &request.object,
     ]);
+
     huge!("Running stream upload shell command: {:?}", command);
 
     command

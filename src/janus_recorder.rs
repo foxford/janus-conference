@@ -9,6 +9,7 @@ use libc::{pthread_mutex_t, FILE};
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Codec {
     VP8,
