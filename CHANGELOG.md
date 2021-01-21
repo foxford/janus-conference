@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.0 (January 21, 2021)
+
+### Features
+- Record RTCP packets ([6b66de7](https://github.com/netology-group/janus-conference/commits/6b66de76ecfd3795731beeb746a8f0c4c781fac2))
+
+### Changes
+- Refactor switchboard dispatching ([25dfd3f](https://github.com/netology-group/janus-conference/commits/25dfd3fa3bf638e5127d81acd1424b1f539f433c))
+- Update janus to v0.10.9 ([49ac09e](https://github.com/netology-group/janus-conference/commits/49ac09e4ea87753eb6d7185d60073f8f5d800678))
+- Remove agent.leave method ([8d46e89](https://github.com/netology-group/janus-conference/commits/8d46e89e464d2c39493f4e21db45c092439e730d))
+
+
 ## v0.9.0 (January 13, 2020)
 
 ### Features
