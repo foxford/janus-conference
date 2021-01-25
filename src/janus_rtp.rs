@@ -45,6 +45,27 @@ impl JanusRtpSwitchingContext {
     }
 }
 
+pub struct JanusRtpHeader(janus_rtp_header);
+
+impl JanusRtpHeader {
+    pub fn extract(packet: &PluginRtpPacket) -> Self {
+        let mut uninit_header = MaybeUninit::<janus_rtp_header>::uninit();
+
+        Self(unsafe {
+            std::ptr::copy(
+                packet.buffer,
+                uninit_header.as_mut_ptr() as *mut i8,
+                RTP_HEADER_SIZE,
+            );
+            uninit_header.assume_init()
+        })
+    }
+
+    pub fn restore(&self, packet: &mut PluginRtpPacket) {
+        unsafe { std::ptr::copy(&self.0 as *const i8, &mut *packet.buffer, RTP_HEADER_SIZE) };
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type gboolean = c_int;
@@ -53,6 +74,9 @@ type gint32 = c_int;
 type gint64 = c_long;
 type uint16_t = c_ushort;
 type uint32_t = c_uint;
+
+const RTP_HEADER_SIZE: usize = 12;
+type janus_rtp_header = [i8; RTP_HEADER_SIZE];
 
 #[derive(Debug)]
 #[repr(C)]
