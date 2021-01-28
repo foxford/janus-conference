@@ -41,6 +41,7 @@ mod test_stubs;
 
 use app::App;
 use conf::Config;
+use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 const INITIAL_REMBS: u64 = 4;
@@ -225,6 +226,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
 
             let video = packet.video;
+            let header = JanusRtpHeader::extract(&packet);
 
             // Find stream id for the writer.
             let stream_id = match switchboard.written_by(session_id) {
@@ -239,30 +241,18 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 }
             };
 
-            // Update packet header for proper timestamp and seq number.
-            match switchboard.switching_context(stream_id) {
-                Some(switching_context) => {
-                    switching_context.update_rtp_packet_header(&mut packet)?;
-                }
-                None => {
-                    warn!(
-                        "Failed to get switching context. Skipping RTP packet header update";
-                        {"rtc_id": stream_id, "handle_id": session_id}
+            // Relay packet to readers.
+            // For each reader we clone the packet and change the header according to his own
+            // switching context to avoid sending identical packets and to maintain SSRC switching.
+            for reader in switchboard.readers_of(stream_id) {
+                let result = relay_rtp_packet(&switchboard, *reader, &mut packet, &header);
+
+                if let Err(err) = result {
+                    huge!(
+                        "Failed to relay an RTP packet: {}", err;
+                        {"handle_id": reader, "rtc_id": stream_id}
                     );
                 }
-            }
-
-            // Retransmit packet to writers.
-            for reader in switchboard.readers_of(stream_id) {
-                let reader_session = switchboard.session(*reader)?.lock().map_err(|err| {
-                    format_err!(
-                        "Failed to acquire reader session mutex id = {}: {}",
-                        reader,
-                        err
-                    )
-                })?;
-
-                janus_callbacks::relay_rtp(&reader_session, &mut packet);
             }
 
             // Push packet to the recorder.
@@ -276,6 +266,34 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
             Ok(())
         })?
+}
+
+fn relay_rtp_packet(
+    switchboard: &Switchboard,
+    reader: SessionId,
+    packet: &mut PluginRtpPacket,
+    original_header: &JanusRtpHeader,
+) -> Result<()> {
+    let reader_state = switchboard.state(reader)?;
+
+    reader_state
+        .switching_context()
+        .update_rtp_packet_header(packet)?;
+
+    let reader_session = switchboard.session(reader)?.lock().map_err(|err| {
+        format_err!(
+            "Failed to acquire reader session mutex id = {}: {}",
+            reader,
+            err
+        )
+    })?;
+
+    janus_callbacks::relay_rtp(&reader_session, packet);
+
+    // Restore original header rewritten by `janus_rtp_header_update`
+    // for the next iteration of the loop.
+    original_header.restore(packet);
+    Ok(())
 }
 
 extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) {

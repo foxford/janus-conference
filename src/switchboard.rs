@@ -41,6 +41,7 @@ impl fmt::Display for SessionId {
 
 #[derive(Debug)]
 pub struct SessionState {
+    switching_context: JanusRtpSwitchingContext,
     fir_seq: AtomicI32,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
@@ -51,12 +52,17 @@ pub struct SessionState {
 impl SessionState {
     fn new() -> Self {
         Self {
+            switching_context: JanusRtpSwitchingContext::new(),
             fir_seq: AtomicI32::new(0),
             initial_rembs_counter: AtomicU64::new(0),
             last_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
         }
+    }
+
+    pub fn switching_context(&self) -> &JanusRtpSwitchingContext {
+        &self.switching_context
     }
 
     pub fn increment_fir_seq(&self) -> i32 {
@@ -137,7 +143,6 @@ pub struct Switchboard {
     states: HashMap<SessionId, SessionState>,
     writers: BidirectionalMultimap<SessionId, StreamId>,
     readers: BidirectionalMultimap<SessionId, StreamId>,
-    switching_contexts: HashMap<StreamId, JanusRtpSwitchingContext>,
 }
 
 impl Switchboard {
@@ -147,7 +152,6 @@ impl Switchboard {
             states: HashMap::new(),
             writers: BidirectionalMultimap::new(),
             readers: BidirectionalMultimap::new(),
-            switching_contexts: HashMap::new(),
         }
     }
 
@@ -226,11 +230,6 @@ impl Switchboard {
         info!("Setting writer"; {"rtc_id": stream_id, "handle_id": writer});
         self.writers.associate(writer, stream_id);
 
-        if self.switching_contexts.get(&stream_id).is_none() {
-            self.switching_contexts
-                .insert(stream_id, JanusRtpSwitchingContext::new());
-        }
-
         if app.config.recordings.enabled {
             let mut recorder = Recorder::new(&app.config.recordings, stream_id);
 
@@ -294,10 +293,6 @@ impl Switchboard {
             .or_else(|| self.written_by(session_id))
     }
 
-    pub fn switching_context(&self, stream_id: StreamId) -> Option<&JanusRtpSwitchingContext> {
-        self.switching_contexts.get(&stream_id)
-    }
-
     pub fn remove_stream(&mut self, stream_id: StreamId) -> Result<()> {
         info!("Removing stream"; {"rtc_id": stream_id});
 
@@ -307,7 +302,6 @@ impl Switchboard {
 
         self.writers.remove_value(&stream_id);
         self.readers.remove_value(&stream_id);
-        self.switching_contexts.remove(&stream_id);
         Ok(())
     }
 
