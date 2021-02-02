@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.1 (February 2, 2021)
+
+### Features
+- Give each handle its own switching context ([050529c](https://github.com/netology-group/janus-conference/commits050529c3641c6d764a04a261318ffc8d7b544f39))
+
+
 ## v0.10.0 (January 21, 2021)
 
 ### Features
