@@ -86,20 +86,4 @@ impl Jsep {
 
         Ok(())
     }
-
-    pub fn is_writer(jsep_offer: &JsonValue) -> Result<bool> {
-        let offer_sdp = Self::parse_offer_sdp(jsep_offer)?;
-        let m_lines = offer_sdp.get_mlines();
-
-        let video_m_lines = match m_lines.get(&MediaType::JANUS_SDP_VIDEO) {
-            None => bail!("Missing video m-lines in SDP offer"),
-            Some(video_m_lines) => video_m_lines,
-        };
-
-        let is_writer = video_m_lines
-            .iter()
-            .all(|m_line| WRITER_DIRECTIONS.contains(&m_line.direction));
-
-        Ok(is_writer)
-    }
 }
