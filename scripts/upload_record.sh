@@ -46,7 +46,7 @@ AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 # Working directory.
 cd ${RECORDINGS_DIR}/${RTC_ID}
 
-# Try to acquire lock
+# Try to acquire lock.
 if { set -C; 2>/dev/null > vacuum_${RTC_ID}.lock; }; then
   trap "rm -f vacuum_${RTC_ID}.lock" EXIT
 else
@@ -54,10 +54,11 @@ else
   exit 251
 fi
 
+# Upload source .mjr dumps.
 for FILE in *.mjr; do
-${AWS} s3 cp ${FILE} s3://${BUCKET}/${RTC_ID}_dump/${FILE} \
-  --only-show-errors \
-  --cache-control 'no-cache'
+  ${AWS} s3 cp ${FILE} s3://${BUCKET}/${RTC_ID}_dump/${FILE} \
+    --only-show-errors \
+    --cache-control 'no-cache'
 done
 
 # Remove artifacts from possible previous run to avoid concat duplication.
@@ -66,7 +67,7 @@ rm -f video_sources.txt audio_sources.txt segments.csv
 # Convert video .mjr dumps into .webm files.
 for FILE in *.video.mjr; do
   OUTPUT_FILE="${FILE%.*}.webm"
-  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
+  ! ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
 
   if [[ -f ${OUTPUT_FILE} ]]; then
     echo "file '${OUTPUT_FILE}'" >> video_sources.txt
@@ -90,7 +91,7 @@ ${FFMPEG} -f concat -i video_sources.txt -c copy -y concat.webm
 # Convert audio .mjr dumps into .opus files.
 for FILE in *.audio.mjr; do
   OUTPUT_FILE="${FILE%.*}.opus"
-  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
+  ! ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
 
   if [[ -f ${OUTPUT_FILE} ]]; then
     echo "file '${OUTPUT_FILE}'" >> audio_sources.txt
