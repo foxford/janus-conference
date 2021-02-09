@@ -1,9 +1,19 @@
 # Changelog
 
+## v0.10.2 (February 9, 2021)
+
+### Changes
+- Use older nightly version ([41f146c](https://github.com/netology-group/janus-conference/commits/41f146c78fc826e2dfcc01858490851ceaedb6c9))
+
+### Fixes
+- Fix exploit in signal.update ([5a792cf](https://github.com/netology-group/janus-conference/commits/5a792cf9c87b1386c91078579899d7529bc0bf5e))
+- Don't fail on janus-pp-rec errors ([5d4f857](https://github.com/netology-group/janus-conference/commits/5d4f8573b7eecb03514123749decd57e1ab1de16))
+
+
 ## v0.10.1 (February 2, 2021)
 
 ### Features
-- Give each handle its own switching context ([050529c](https://github.com/netology-group/janus-conference/commits050529c3641c6d764a04a261318ffc8d7b544f39))
+- Give each handle its own switching context ([050529c](https://github.com/netology-group/janus-conference/commits/050529c3641c6d764a04a261318ffc8d7b544f39))
 
 
 ## v0.10.0 (January 21, 2021)
