@@ -277,7 +277,10 @@ impl Switchboard {
 
     pub fn add_reader(&mut self, stream_id: StreamId, reader: SessionId) {
         verb!("Adding reader"; {"rtc_id": stream_id, "handle_id": reader});
-        self.readers.associate(reader, stream_id);
+
+        if self.read_by(reader) != Some(stream_id) {
+            self.readers.associate(reader, stream_id);
+        }
     }
 
     pub fn remove_reader(&mut self, stream_id: StreamId, reader: SessionId) {
@@ -730,6 +733,21 @@ mod tests {
         // Assert all sessions have gone.
         assert_eq!(switchboard.writer_of(stream), None);
         assert!(switchboard.readers_of(stream).is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_reader_twice() -> Result<()> {
+        init_app()?;
+        let mut switchboard = Switchboard::new();
+        let reader = connect(&mut switchboard, 0)?;
+
+        let stream = Uuid::new_v4();
+        switchboard.add_reader(stream, reader);
+        switchboard.add_reader(stream, reader);
+
+        assert_eq!(switchboard.readers_of(stream), &[reader]);
 
         Ok(())
     }

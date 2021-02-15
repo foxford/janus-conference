@@ -139,14 +139,17 @@ mod tests {
 
     #[test]
     fn associate() {
-        let bmm = build_bmm();
+        let mut bmm = build_bmm();
+        bmm.associate(11, 3);
 
-        assert_eq!(bmm.get_values(&11), &[1]);
+        assert_eq!(bmm.get_values(&11), &[1, 3]);
         assert_eq!(bmm.get_values(&12), &[1]);
         assert_eq!(bmm.get_values(&21), &[2]);
         assert_eq!(bmm.get_values(&22), &[2]);
         assert_eq!(bmm.get_keys(&1), &[11, 12]);
         assert_eq!(bmm.get_keys(&2), &[21, 22]);
+        assert_eq!(bmm.get_keys(&3), &[11]);
+        assert!(bmm.get_keys(&4).is_empty());
     }
 
     #[test]
