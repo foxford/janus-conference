@@ -45,11 +45,11 @@ impl JanusRtpSwitchingContext {
     }
 }
 
-pub struct JanusRtpHeader(janus_rtp_header);
+pub struct JanusRtpHeader(janus_rtp_header_bytes);
 
 impl JanusRtpHeader {
     pub fn extract(packet: &PluginRtpPacket) -> Self {
-        let mut uninit_header = MaybeUninit::<janus_rtp_header>::uninit();
+        let mut uninit_header = MaybeUninit::<janus_rtp_header_bytes>::uninit();
 
         Self(unsafe {
             std::ptr::copy(
@@ -66,6 +66,13 @@ impl JanusRtpHeader {
     }
 }
 
+pub fn rewrite_ssrc<'a>(packet: &'a mut PluginRtpPacket, ssrc: u32) {
+    let mut header =
+        unsafe { std::mem::transmute::<*mut c_char, &'a mut janus_rtp_header>(packet.buffer) };
+
+    header.ssrc = ssrc;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type gboolean = c_int;
@@ -76,7 +83,16 @@ type uint16_t = c_ushort;
 type uint32_t = c_uint;
 
 const RTP_HEADER_SIZE: usize = 12;
-type janus_rtp_header = [i8; RTP_HEADER_SIZE];
+type janus_rtp_header_bytes = [i8; RTP_HEADER_SIZE];
+
+#[derive(Debug)]
+#[repr(C)]
+struct janus_rtp_header {
+    _flags: uint16_t,
+    seq_number: uint16_t,
+    timestamp: uint32_t,
+    ssrc: uint32_t,
+}
 
 #[derive(Debug)]
 #[repr(C)]

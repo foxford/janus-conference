@@ -241,11 +241,14 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 }
             };
 
+            // SSRC to rewrite with. It must be a unique number for each track in each stream.
+            let ssrc = stream_id.as_u128() as u32 + video as u32;
+
             // Relay packet to readers.
             // For each reader we clone the packet and change the header according to his own
             // switching context to avoid sending identical packets and to maintain SSRC switching.
             for reader in switchboard.readers_of(stream_id) {
-                let result = relay_rtp_packet(&switchboard, *reader, &mut packet, &header);
+                let result = relay_rtp_packet(&switchboard, *reader, &mut packet, &header, ssrc);
 
                 if let Err(err) = result {
                     huge!(
@@ -273,13 +276,19 @@ fn relay_rtp_packet(
     reader: SessionId,
     packet: &mut PluginRtpPacket,
     original_header: &JanusRtpHeader,
+    ssrc: u32,
 ) -> Result<()> {
+    // Call janus core for updating packet header.
     let reader_state = switchboard.state(reader)?;
 
     reader_state
         .switching_context()
         .update_rtp_packet_header(packet)?;
 
+    // Rewrite SSRC.
+    janus_rtp::rewrite_ssrc(packet, ssrc);
+
+    // Relay the packet with modified header.
     let reader_session = switchboard.session(reader)?.lock().map_err(|err| {
         format_err!(
             "Failed to acquire reader session mutex id = {}: {}",
