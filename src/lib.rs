@@ -307,7 +307,7 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
     app!()?
         .switchboard_dispatcher
         .dispatch_sync(move |switchboard| {
-            let mut packet = unsafe { &mut *packet.0 };
+            let packet = unsafe { &mut *packet.0 };
             let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
             match packet.video {
@@ -321,32 +321,7 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                         send_fir(&switchboard, writer);
                     }
                 }
-                _ => {
-                    let stream_id = match switchboard.written_by(session_id) {
-                        Some(stream_id) => stream_id,
-                        None => {
-                            verb!(
-                                "Incoming RTCP packet from non-writer. Dropping.";
-                                {"handle_id": session_id}
-                            );
-
-                            return Ok(());
-                        }
-                    };
-
-                    for reader in switchboard.readers_of(stream_id) {
-                        let reader_session =
-                            switchboard.session(*reader)?.lock().map_err(|err| {
-                                format_err!(
-                                    "Failed to acquire reader session mutex for id = {}: {}",
-                                    reader,
-                                    err
-                                )
-                            })?;
-
-                        janus_callbacks::relay_rtcp(&reader_session, &mut packet);
-                    }
-                }
+                _ => (),
             }
 
             if let Some(recorder) = switchboard.state(session_id)?.recorder() {
