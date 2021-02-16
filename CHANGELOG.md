@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.10.3 (February 16, 2021)
+
+### Features
+- Add log aggregator ([0f63723](https://github.com/netology-group/janus-conference/commits/0f637233305cf15d6d2b1fc70fe9085c4c23c43e))
+
+### Changes
+- Remove relaying RTCP packets ([f7ba1e8](https://github.com/netology-group/janus-conference/commits/f7ba1e8d00f7a03c730abc919637ffe8c093ea0b))
+- Rewrite SSRC of RTP packets ([9fb7050](https://github.com/netology-group/janus-conference/commits/9fb705096e6eedba3b54663e6739b435c8ee1b06))
+
+### Fixes
+- Forbid adding readers twice ([f8bd302](https://github.com/netology-group/janus-conference/commits/f8bd302824d88b68df22dd3d40c9e3a1bed9a8d2))
+
+
 ## v0.10.2 (February 9, 2021)
 
 ### Changes
