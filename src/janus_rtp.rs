@@ -73,6 +73,13 @@ pub fn rewrite_ssrc<'a>(packet: &'a mut PluginRtpPacket, ssrc: u32) {
     header.ssrc = ssrc;
 }
 
+pub fn fetch_id<'a>(packet: &'a PluginRtpPacket) -> (u16, u32) {
+    let header =
+        unsafe { std::mem::transmute::<*const c_char, &'a janus_rtp_header>(packet.buffer) };
+
+    (header.seq_number, header.timestamp)
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type gboolean = c_int;
