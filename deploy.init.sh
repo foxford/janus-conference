@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
 
-## Initializing deploy for Travis CI
-if [[ "${TRAVIS}" ]]; then
-    if [[ "${TRAVIS_TAG}" ]]; then
-        NAMESPACE='production'
-    else
-        NAMESPACE='staging'
-    fi
-fi
-
-if [[ ! ${NAMESPACE} ]]; then echo "NAMESPACE isn't specified" 1>&2; exit 1; fi
 if [[ ! ${GITHUB_TOKEN} ]]; then echo "GITHUB_TOKEN isn't specified" 1>&2; exit 1; fi
 
+PROJECT="${PROJECT:-janus-conference}"
 SOURCE=${SOURCE:-'https://api.github.com/repos/netology-group/environment/contents/cluster/k8s'}
+BRANCH="${BRANCH:-master}"
 
 function FILE_FROM_GITHUB() {
     local DEST_DIR="${1}"; if [[ ! "${DEST_DIR}" ]]; then echo "${FUNCNAME[0]}:DEST_DIR isn't specified" 1>&2; exit 1; fi
@@ -23,12 +15,22 @@ function FILE_FROM_GITHUB() {
         -H "authorization: token ${GITHUB_TOKEN}" \
         -H 'accept: application/vnd.github.v3.raw' \
         -o "${DEST_DIR}/$(basename $URI)" \
-        "${URI}"
+        "${URI}?ref=${BRANCH}"
+}
+
+function ADD_PROJECT() {
+    local _PATH="${1}"; if [[ ! "${_PATH}" ]]; then echo "${FUNCNAME[0]}:_PATH is required" 1>&2; exit 1; fi
+    local _PROJECT="${2}"; if [[ ! "${_PROJECT}" ]]; then echo "${FUNCNAME[0]}:PROJECT is required" 1>&2; exit 1; fi
+
+    tee "${_PATH}" <<END
+PROJECT=${_PROJECT}
+$(cat "${_PATH}")
+END
 }
 
 set -ex
 
-FILE_FROM_GITHUB "deploy" "${SOURCE}/deploy/s3-docs.sh"
-
-chmod u+x deploy/s3-docs.sh
-
+## Use the same project for mdbook script.
+FILE_FROM_GITHUB "deploy" "${SOURCE}/utils/ci-mdbook.sh}"
+ADD_PROJECT "deploy/ci-mdbook.sh" "${PROJECT}"
+chmod u+x deploy/ci-mdbook.sh
