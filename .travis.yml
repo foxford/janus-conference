@@ -1,7 +1,8 @@
-dist: xenial
 language: rust
-rust:
-  - nightly
+os: linux
+dist: xenial
+rust: nightly
+
 addons:
   apt:
     packages:
@@ -14,14 +15,15 @@ addons:
       - gstreamer1.0-plugins-bad
       - gstreamer1.0-plugins-ugly
       - gstreamer1.0-libav
-cache:
-  directories:
-    - ${TRAVIS_HOME}/.cargo
-before_cache:
-  - rm -rf ${TRAVIS_HOME}/.cargo/registry
-services: docker
+
+cache: cargo
+
+services:
+  - docker
+
 git:
   depth: 1
+
 jobs:
   include:
     - stage: check
@@ -35,15 +37,22 @@ jobs:
       name: Clippy
       install: rustup component add clippy-preview
       script: cargo clippy
-    - stage: deploy
+    - stage: build
       name: Docs
-      install: cargo install mdbook --vers 0.2.3 --force
-      script: mdbook build docs && ./deploy.init.sh && PROJECT='janus-conference' ./deploy/s3-docs.sh
+      install: cargo install mdbook --vers ^0.4
+      script:
+        - ./deploy.init.sh
+        - mdbook build docs
+        - ./deploy/ci-mdbook.sh
+
 stages:
   - name: check
-  - name: deploy
+  - name: build
+    if: branch = master AND type = push
+
 notifications:
   email: false
+
 env:
   global:
     APP_UPLOADING_YANDEX_ACCESS_KEY_ID: "12345"
