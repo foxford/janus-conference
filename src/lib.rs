@@ -32,6 +32,7 @@ mod janus_callbacks;
 mod janus_recorder;
 mod janus_rtp;
 mod jsep;
+mod log_aggregator;
 mod message_handler;
 mod recorder;
 mod serde;
@@ -42,7 +43,8 @@ mod test_stubs;
 use app::App;
 use conf::Config;
 use janus_rtp::JanusRtpHeader;
-use switchboard::{SessionId, Switchboard};
+use log_aggregator::Event as LogAggregatorEvent;
+use switchboard::{SessionId, StreamId, Switchboard};
 
 const INITIAL_REMBS: u64 = 4;
 
@@ -248,7 +250,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             // For each reader we clone the packet and change the header according to his own
             // switching context to avoid sending identical packets and to maintain SSRC switching.
             for reader in switchboard.readers_of(stream_id) {
-                let result = relay_rtp_packet(&switchboard, *reader, &mut packet, &header, ssrc);
+                let result =
+                    relay_rtp_packet(&switchboard, *reader, &mut packet, &header, stream_id, ssrc);
 
                 if let Err(err) = result {
                     huge!(
@@ -276,6 +279,7 @@ fn relay_rtp_packet(
     reader: SessionId,
     packet: &mut PluginRtpPacket,
     original_header: &JanusRtpHeader,
+    stream_id: StreamId,
     ssrc: u32,
 ) -> Result<()> {
     // Call janus core for updating packet header.
@@ -287,6 +291,18 @@ fn relay_rtp_packet(
 
     // Rewrite SSRC.
     janus_rtp::rewrite_ssrc(packet, ssrc);
+
+    // Register replay event in log aggregator.
+    let (seq_number, timestamp) = janus_rtp::fetch_id(packet);
+    let app = app!()?;
+
+    app.log_aggregator.register(LogAggregatorEvent::RtpReplay {
+        stream_id,
+        handle_id: reader,
+        ssrc,
+        seq_number,
+        timestamp,
+    });
 
     // Relay the packet with modified header.
     let reader_session = switchboard.session(reader)?.lock().map_err(|err| {
@@ -357,18 +373,21 @@ extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int)
     report_error(slow_link_impl(handle, uplink, video));
 }
 
-fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
+fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, _video: c_int) -> Result<()> {
+    let app = app!()?;
     let session_id = session_id(handle)?;
     let session_id_clone = session_id.clone();
 
-    let rtc_id = app!()?
+    let maybe_stream_id = app
         .switchboard_dispatcher
         .dispatch_sync(move |switchboard| switchboard.stream_id_to(session_id_clone))?;
 
-    info!(
-        "Slow link: uplink = {}; is_video = {}", uplink, video;
-        {"handle_id": session_id, "rtc_id": rtc_id}
-    );
+    if let Some(stream_id) = maybe_stream_id {
+        app.log_aggregator.register(LogAggregatorEvent::SlowLink {
+            stream_id,
+            uplink: matches!(uplink, 1),
+        });
+    }
 
     Ok(())
 }

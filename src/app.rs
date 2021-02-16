@@ -6,11 +6,13 @@ use atom::AtomSetOnce;
 use chrono::Duration;
 
 use crate::conf::Config;
+use crate::log_aggregator::LogAggregator;
 use crate::message_handler::{JanusSender, MessageHandlingLoop};
 use crate::switchboard::Dispatcher as SwitchboardDispatcher;
 
 lazy_static! {
     pub static ref APP: AtomSetOnce<Box<App>> = AtomSetOnce::empty();
+    static ref LOG_AGGREGATOR_INTERVAL: StdDuration = StdDuration::from_secs(5);
 }
 
 macro_rules! app {
@@ -25,6 +27,7 @@ pub struct App {
     pub config: Config,
     pub switchboard_dispatcher: SwitchboardDispatcher,
     pub message_handling_loop: MessageHandlingLoop,
+    pub log_aggregator: LogAggregator,
 }
 
 impl App {
@@ -65,6 +68,17 @@ impl App {
             }
         });
 
+        thread::spawn(|| {
+            verb!("Log aggregator flush timer thread spawned");
+
+            if let Ok(app) = app!() {
+                loop {
+                    app.log_aggregator.flush();
+                    thread::sleep(*LOG_AGGREGATOR_INTERVAL);
+                }
+            }
+        });
+
         Ok(())
     }
 
@@ -73,6 +87,7 @@ impl App {
             config,
             switchboard_dispatcher: SwitchboardDispatcher::start(),
             message_handling_loop: MessageHandlingLoop::new(JanusSender::new()),
+            log_aggregator: LogAggregator::start(),
         })
     }
 }
