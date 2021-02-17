@@ -205,10 +205,21 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     app.switchboard_dispatcher
         .dispatch_sync(move |switchboard| {
             let mut packet = unsafe { &mut *packet.0 };
+            let video = packet.video;
+            let header = JanusRtpHeader::extract(&packet);
             let state = switchboard.state(session_id)?;
 
             // Touch last packet timestamp to drop timeout.
             state.touch_last_rtp_packet_timestamp();
+
+            // Push packet to the recorder.
+            if let Some(recorder) = state.recorder() {
+                let buf = unsafe {
+                    std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+                };
+
+                recorder.record_packet(buf, video == 1)?;
+            }
 
             // Send incremental initial or regular REMB to the writer if needed to control bitrate.
             if let Some(target_bitrate) = app.config.constraint.writer.bitrate {
@@ -226,9 +237,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                     }
                 }
             }
-
-            let video = packet.video;
-            let header = JanusRtpHeader::extract(&packet);
 
             // Find stream id for the writer.
             let stream_id = match switchboard.written_by(session_id) {
@@ -259,15 +267,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                         {"handle_id": reader, "rtc_id": stream_id}
                     );
                 }
-            }
-
-            // Push packet to the recorder.
-            if let Some(recorder) = state.recorder() {
-                let buf = unsafe {
-                    std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
-                };
-
-                recorder.record_packet(buf, video == 1)?;
             }
 
             Ok(())
