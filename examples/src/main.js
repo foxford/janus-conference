@@ -203,12 +203,13 @@ class Peer {
     let sdpOffer = await this._createSdpOffer(isPublisher);
     this.peerConnection.setLocalDescription(sdpOffer);
 
-    let method = isPublisher ? 'stream.create' : 'stream.read';
-    let payload = { id: STREAM_ID, agent_id: ME_AGENT_ID };
-    let response = await this.janusClient.callMethod(method, this.handleId, payload, sdpOffer);
-
+    let response = await this.janusClient.callMethod('signal.create', this.handleId, {}, sdpOffer);
     let sdpAnswer = new RTCSessionDescription(response.jsep);
     this.peerConnection.setRemoteDescription(sdpAnswer);
+
+    let method = isPublisher ? 'stream.create' : 'stream.read';
+    let payload = { id: STREAM_ID, agent_id: ME_AGENT_ID };
+    await this.janusClient.callMethod(method, this.handleId, payload);
   }
 
   async hangUp() {
