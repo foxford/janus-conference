@@ -37,7 +37,7 @@ export AWS_ENDPOINT=${!APP_UPLOADING_ENDPOINT_NAME}
 export AWS_REGION=${!APP_UPLOADING_REGION_NAME}
 
 RECORDINGS_DIR=${RECORDINGS_DIR:-/recordings}
-JANUS_PP_REC="${SCRIPT_ABS_DIR}/janus-pp-rec -d 3"
+JANUS_PP_REC="${SCRIPT_ABS_DIR}/janus-pp-rec -d 2"
 FFMPEG=${FFMPEG:-'ffmpeg -hide_banner -loglevel warning -abort_on empty_output'}
 AWS=${AWS:-"aws --endpoint-url=${AWS_ENDPOINT} --region=${AWS_REGION}"}
 
