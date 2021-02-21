@@ -348,14 +348,6 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                 _ => (),
             }
 
-            if let Some(recorder) = switchboard.state(session_id)?.recorder() {
-                let buf = unsafe {
-                    std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
-                };
-
-                recorder.record_packet(buf, packet.video == 1)?;
-            }
-
             Ok(())
         })?
 }
