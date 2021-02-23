@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.4 (February 24, 2021)
+
+### Changes
+- Remove recording RTCP packets ([53f7dfc](https://github.com/netology-group/janus-conference/commits/53f7dfc51a21206634cd3840523c38c0954e0366))
+- Lower log level for janus-pp-rec ([ca6329b](https://github.com/netology-group/janus-conference/commits/ca6329be5998703691049f48b5faf51a343df16f))
+- Update example to use signal.create ([9d115f9](https://github.com/netology-group/janus-conference/commits/9d115f9a8ab863fe82a3a5039b6dbc4333d01fce))
+
+### Fixes
+- Record original RTP packet ([2f06d39](https://github.com/netology-group/janus-conference/commits/2f06d3986ff0cc3a03c9beb01223cd6ccc7eb717))
+
+
 ## v0.10.3 (February 16, 2021)
 
 ### Features
