@@ -12,13 +12,14 @@ const JANUS_AGENT_ID = `alpha.${JANUS_ACCOUNT_ID}`;
 const ME_ACCOUNT_ID = `conference.${SVC_AUDIENCE}`;
 const ME_AGENT_LABEL = Math.random().toString(36).substr(2, 10);
 const ME_AGENT_ID = `${ME_AGENT_LABEL}.${ME_ACCOUNT_ID}`;
-const ME_CLIENT_ID = `v1/service-agents/${ME_AGENT_ID}`;
 const PUBLISH_TOPIC = `agents/${JANUS_AGENT_ID}/api/v1/in/${ME_ACCOUNT_ID}`;
 const SUBSCRIBE_TOPIC = `apps/${JANUS_ACCOUNT_ID}/api/v1/responses`;
+const EVENTS_TOPIC = `apps/${JANUS_ACCOUNT_ID}/api/v1/events`;
 const PLUGIN = 'janus.plugin.conference';
 const STREAM_ID = '3fdef418-15d3-11ea-9005-60f81db6d53e';
 const CONSTRAINTS = { audio: true, video: { width: 1280, height: 720 } };
 const BUCKET = 'origin.webinar.beta.example.org';
+const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -33,14 +34,23 @@ class JanusClient {
     return new Promise((resolve, reject) => {
       this.client = new mqtt.connect(MQTT_URL, {
         protocolVersion: 5,
-        clientId: ME_CLIENT_ID,
-        reconnectPeriod: 0
+        username: '',
+        clientId: ME_AGENT_ID,
+        reconnectPeriod: 0,
+        keepalive: 10,
+        properties: {
+          userProperties: {
+            connection_mode: 'service',
+            connection_version: 'v2',
+          },
+        },
       });
 
       this.client.on('message', this._handleMessage.bind(this))
 
       this.client.on('connect', async evt => {
         if (this.onConnect) this.onConnect(evt);
+        this.client.subscribe(EVENTS_TOPIC);
 
         this.client.subscribe(SUBSCRIBE_TOPIC, async err => {
           if (err) return reject(err);
@@ -146,6 +156,8 @@ class JanusClient {
       payload.janus === 'error' ? reject(payload) : resolve({ status: 'replied', payload });
     } else if (payload.janus === 'hangup') {
       this._resetPendingTransactions();
+    } else if (payload.janus === 'trickle' && this.onRemoteTrickleCandidate) {
+      this.onRemoteTrickleCandidate(payload.sender, payload.candidate);
     }
   }
 
@@ -164,12 +176,15 @@ class JanusClient {
 class Peer {
   constructor(janusClient) {
     this.janusClient = janusClient;
+    this.janusClient.onRemoteTrickleCandidate = this._addRemoteTrickleCandidate.bind(this);
     this.handleId = null;
     this._resetPeerConnection();
   }
 
   _resetPeerConnection() {
-    this.peerConnection = new RTCPeerConnection({ bundlePolicy: 'max-bundle' });
+    this.remoteIceCandidatesBuffer = [];
+    this.remoteDescriptionSet = false;
+    this.peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     this.peerConnection.onicecandidate = evt => {
       if (!evt.candidate) return;
@@ -208,7 +223,18 @@ class Peer {
     let response = await this.janusClient.callMethod(method, this.handleId, payload, sdpOffer);
 
     let sdpAnswer = new RTCSessionDescription(response.jsep);
-    this.peerConnection.setRemoteDescription(sdpAnswer);
+    await this.peerConnection.setRemoteDescription(sdpAnswer);
+    this.remoteDescriptionSet = true;
+
+    if (this.remoteIceCandidatesBuffer.length > 0) {
+      console.debug('Flushing buffered remote candidates');
+
+      for (let candidate of this.remoteIceCandidatesBuffer) {
+        this._applyRemoteTrickleCandidate(candidate)
+      }
+
+      this.remoteIceCandidatesBuffer = [];
+    }
   }
 
   async hangUp() {
@@ -242,6 +268,27 @@ class Peer {
         sdpOffer.sdp = transformOfferSDP(sdpOffer.sdp);
         return sdpOffer;
       });
+  }
+
+  _addRemoteTrickleCandidate(handleId, candidate) {
+    if (handleId !== this.handleId) return;
+
+    if (this.remoteDescriptionSet) {
+      this._applyRemoteTrickleCandidate(candidate);
+    } else {
+      console.debug('Buffering remote ICE candidate', candidate);
+      this.remoteIceCandidatesBuffer.push(candidate);
+    }
+  }
+
+  _applyRemoteTrickleCandidate(candidate) {
+    if (candidate.completed === true) {
+      console.debug('Got end of candidates trickle');
+      this.peerConnection.addIceCandidate(null);
+    } else {
+      console.debug('Got remote trickle candidate', candidate);
+      this.peerConnection.addIceCandidate(candidate);
+    }
   }
 }
 
@@ -294,6 +341,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     const stream = await navigator.mediaDevices.getUserMedia(CONSTRAINTS);
     videoEl.srcObject = stream;
+    videoEl.muted = true;
 
     peer.addStream(stream);
     await peer.attach(true);
