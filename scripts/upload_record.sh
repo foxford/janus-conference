@@ -61,49 +61,36 @@ ${AWS} s3 cp ${FILE} s3://${BUCKET}/${RTC_ID}_dump/${FILE} \
 done
 
 # Remove artifacts from possible previous run to avoid concat duplication.
-rm -f video_sources.txt audio_sources.txt segments.csv
+rm -f sources.txt segments.csv
 
-# Convert video .mjr dumps into .webm files.
-for FILE in *.video.mjr; do
-  OUTPUT_FILE="${FILE%.*}.webm"
-  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
+# Mux corresponding video and audio .mjrs and write video len to segments.csv
+for VIDEO_FILE in *.video.mjr; do
+  PREFIX=${VIDEO_FILE%%.*}
+  AUDIO_FILE="${PREFIX}.audio.mjr"
+  VIDEO_OUTPUT_FILE="${PREFIX}.video.webm"
+  AUDIO_OUTPUT_FILE="${PREFIX}.audio.opus"
+  OUTPUT_FILE="${PREFIX}.final.webm"
+
+  ${JANUS_PP_REC} ${VIDEO_FILE} ${VIDEO_OUTPUT_FILE}
+  ${JANUS_PP_REC} ${AUDIO_FILE} ${AUDIO_OUTPUT_FILE}
+
+  ${FFMPEG} -i ${VIDEO_OUTPUT_FILE} -i ${AUDIO_OUTPUT_FILE} -c copy ${OUTPUT_FILE}
 
   if [[ -f ${OUTPUT_FILE} ]]; then
-    echo "file '${OUTPUT_FILE}'" >> video_sources.txt
+    echo "file '${OUTPUT_FILE}'" >> sources.txt
+
+    DURATION=$(ffprobe -i ${OUTPUT_FILE} -show_entries format=duration -v quiet -of csv="p=0")
+
+    if [[ "${DURATION}" != "N/A" ]]; then
+      echo "${PREFIX},${DURATION}" >> segments.csv
+    fi
   else
     >&2 echo "[ERROR] ${OUTPUT_FILE} not created; skipping segment"
   fi
 done
 
-# Get video segments durations and write to segments.csv file.
-for FILE in *.video.webm; do
-  DURATION=$(ffprobe -i ${FILE} -show_entries format=duration -v quiet -of csv="p=0")
-
-  if [[ "${DURATION}" != "N/A" ]]; then
-    echo "${FILE%%.*},${DURATION}" >> segments.csv
-  fi
-done
-
-# Concat video segments into a single .webm file.
-${FFMPEG} -f concat -i video_sources.txt -c copy -y concat.webm
-
-# Convert audio .mjr dumps into .opus files.
-for FILE in *.audio.mjr; do
-  OUTPUT_FILE="${FILE%.*}.opus"
-  ${JANUS_PP_REC} ${FILE} ${OUTPUT_FILE}
-
-  if [[ -f ${OUTPUT_FILE} ]]; then
-    echo "file '${OUTPUT_FILE}'" >> audio_sources.txt
-  else
-    >&2 echo "[ERROR] ${OUTPUT_FILE} not created; skipping segment"
-  fi
-done
-
-# Concat audio segments into a single .opus file.
-${FFMPEG} -f concat -i audio_sources.txt -c copy -y concat.opus
-
-# Mux video & audio into a single .webm file.
-${FFMPEG} -i concat.webm -i concat.opus -c copy -y full.webm
+# Concat av segments into a single .webm file.
+${FFMPEG} -f concat -i sources.txt -c copy -y full.webm
 
 # Upload record.
 ${AWS} s3 cp full.webm s3://${BUCKET}/${OBJECT} \
