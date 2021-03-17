@@ -111,7 +111,7 @@ impl TryFrom<&Payload> for JanssonValue {
 mod tests {
     use anyhow::Result;
     use janus::JanssonEncodingFlags;
-    use serde_json::json;
+    use serde_json::{json, Value as JsonValue};
     use svc_error::Error as SvcError;
 
     use super::*;
@@ -121,10 +121,8 @@ mod tests {
         let payload = Payload::from(json!({"result": "ok"}));
         let jansson_value = JanssonValue::try_from(&payload)?;
         let json_str = jansson_value.to_libcstring(JanssonEncodingFlags::empty());
-        assert_eq!(
-            json_str.to_string_lossy(),
-            "{\"result\": \"ok\", \"status\": \"200\"}"
-        );
+        let parsed_json = serde_json::from_str::<JsonValue>(&json_str.to_string_lossy())?;
+        assert_eq!(parsed_json, json!({"result": "ok", "status": "200"}));
         Ok(())
     }
 
@@ -139,26 +137,18 @@ mod tests {
         let payload = Payload::from(error);
         let jansson_value = JanssonValue::try_from(&payload)?;
         let json_str = jansson_value.to_libcstring(JanssonEncodingFlags::empty());
+        let parsed_json = serde_json::from_str::<JsonValue>(&json_str.to_string_lossy())?;
 
         assert_eq!(
-            json_str.to_string_lossy(),
-            "{\"detail\": \"Not Found\", \"status\": \"404\", \"title\": \"Some operation error\", \"type\": \"some_operation_error\"}"
+            parsed_json,
+            json!({
+                "detail": "Not Found",
+                "status": "404",
+                "title": "Some operation error",
+                "type": "some_operation_error",
+            })
         );
 
         Ok(())
-    }
-
-    #[derive(Serialize)]
-    struct BadResponse;
-
-    #[test]
-    fn serialize_bad_response() {
-        let json_value = serde_json::to_value(BadResponse {}).unwrap();
-        let payload = Payload::from(json_value);
-
-        match JanssonValue::try_from(&payload) {
-            Ok(_) => panic!("Expected serialization to fail"),
-            Err(err) => assert!(err.to_string().starts_with("Failed to serialize response")),
-        }
     }
 }
