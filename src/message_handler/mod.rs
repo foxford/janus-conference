@@ -17,6 +17,8 @@ pub use self::generic::{Operation, OperationResult, Request};
 pub enum Method {
     #[serde(rename = "agent.leave")]
     AgentLeave(operations::agent_leave::Request),
+    #[serde(rename = "reader_config.update")]
+    ReaderConfigUpdate(operations::reader_config_update::Request),
     #[serde(rename = "stream.create")]
     StreamCreate(operations::stream_create::Request),
     #[serde(rename = "stream.read")]
@@ -29,6 +31,7 @@ impl Into<Box<dyn Operation>> for Method {
     fn into(self) -> Box<dyn Operation> {
         match self {
             Method::AgentLeave(op) => Box::new(op),
+            Method::ReaderConfigUpdate(op) => Box::new(op),
             Method::StreamCreate(op) => Box::new(op),
             Method::StreamRead(op) => Box::new(op),
             Method::StreamUpload(op) => Box::new(op),

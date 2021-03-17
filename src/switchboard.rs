@@ -22,7 +22,7 @@ pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SessionId(u64);
 
 impl SessionId {
@@ -121,6 +121,29 @@ impl SessionState {
     }
 }
 
+#[derive(Debug)]
+pub struct ReaderConfig {
+    receive_video: bool,
+    receive_audio: bool,
+}
+
+impl ReaderConfig {
+    pub fn new(receive_video: bool, receive_audio: bool) -> Self {
+        Self {
+            receive_video,
+            receive_audio,
+        }
+    }
+
+    pub fn receive_video(&self) -> bool {
+        self.receive_video
+    }
+
+    pub fn receive_audio(&self) -> bool {
+        self.receive_audio
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -130,6 +153,7 @@ pub struct Switchboard {
     agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: HashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
+    reader_configs: HashMap<(StreamId, AgentId), ReaderConfig>,
 }
 
 impl Switchboard {
@@ -140,6 +164,7 @@ impl Switchboard {
             agents: BidirectionalMultimap::new(),
             publishers: HashMap::new(),
             publishers_subscribers: BidirectionalMultimap::new(),
+            reader_configs: HashMap::new(),
         }
     }
 
@@ -237,7 +262,7 @@ impl Switchboard {
             .or_else(|| self.published_by(session_id))
     }
 
-    fn published_by(&self, session_id: SessionId) -> Option<StreamId> {
+    pub fn published_by(&self, session_id: SessionId) -> Option<StreamId> {
         self.publishers.iter().find_map(|(stream_id, publisher)| {
             if *publisher == session_id {
                 Some(*stream_id)
@@ -245,6 +270,32 @@ impl Switchboard {
                 None
             }
         })
+    }
+
+    pub fn reader_config(
+        &self,
+        stream_id: StreamId,
+        reader_id: &SessionId,
+    ) -> Option<&ReaderConfig> {
+        self.agents
+            .get_key(reader_id)
+            .and_then(|agent_id| self.reader_configs.get(&(stream_id, agent_id.to_owned())))
+    }
+
+    pub fn update_reader_config(
+        &mut self,
+        stream_id: StreamId,
+        reader_id: SessionId,
+        config: ReaderConfig,
+    ) -> Result<()> {
+        let agent_id = self
+            .agents
+            .get_key(&reader_id)
+            .ok_or_else(|| anyhow!("Agent not registered for handle {}", reader_id))?;
+
+        self.reader_configs
+            .insert((stream_id, agent_id.to_owned()), config);
+        Ok(())
     }
 
     pub fn create_stream(

@@ -184,6 +184,10 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
 
+        let stream_id = switchboard
+            .published_by(session_id)
+            .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))?;
+
         // Touch last packet timestamp to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
@@ -206,25 +210,34 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         // Retransmit packet to publishers as is.
         let mut packet = unsafe { &mut *packet };
-        let video = packet.video;
+        let is_video = matches!(packet.video, 1);
 
         for subscriber_id in switchboard.subscribers_to(session_id) {
-            let subscriber_session =
-                switchboard.session(*subscriber_id)?.lock().map_err(|err| {
-                    format_err!(
-                        "Failed to acquire subscriber session mutex id = {}: {}",
-                        subscriber_id,
-                        err
-                    )
-                })?;
+            // Check whether media is muted by the agent.
+            let is_relay_packet = switchboard
+                .reader_config(stream_id, subscriber_id)
+                .map(|reader_config| match is_video {
+                    true => reader_config.receive_video(),
+                    false => reader_config.receive_audio(),
+                })
+                .unwrap_or(true);
 
-            janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
+            if is_relay_packet {
+                let subscriber_session =
+                    switchboard.session(*subscriber_id)?.lock().map_err(|err| {
+                        format_err!(
+                            "Failed to acquire subscriber session mutex id = {}: {}",
+                            subscriber_id,
+                            err
+                        )
+                    })?;
+
+                janus_callbacks::relay_rtp(&subscriber_session, &mut packet);
+            }
         }
 
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
-            let is_video = matches!(video, 1);
-
             let buf = unsafe {
                 std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
             };
