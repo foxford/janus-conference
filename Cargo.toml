@@ -23,18 +23,13 @@ libc = "0.2"
 atom = "0.3"
 multimap = "0.8"
 http = "0.1"
-futures = "0.3"
-futures-channel = "0.3"
 svc-error = { version = "0.1", features = ["sentry-extension"] }
-sentry = "0.18"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 
-[dev-dependencies]
-rand = "0.6"
-rumqtt = "0.30"
-svc-agent = "0.7"
-tempfile = "3.0"
-janus-plugin-sys = "0.7"
+[dependencies.sentry]
+version = "0.22"
+default-features = false
+features = ["anyhow", "backtrace", "contexts", "panic", "surf"]
 
 [patch.crates-io]
 janus-plugin-sys = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "feature/api-v15" }
