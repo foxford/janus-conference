@@ -316,10 +316,11 @@ pub trait Sender {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
-    use anyhow::{bail, format_err, Result};
+    use anyhow::{bail, Result};
+    use async_std::task;
     use async_trait::async_trait;
     use serde_json::{json, Value as JsonValue};
 
@@ -335,7 +336,7 @@ mod tests {
     #[derive(Serialize)]
     struct PingResponse {
         message: String,
-        session_id: String,
+        session_id: SessionId,
     }
 
     #[async_trait]
@@ -379,13 +380,17 @@ mod tests {
 
     #[derive(Clone)]
     struct TestSender {
-        tx: crossbeam_channel::Sender<TestResponse>,
+        tx: Arc<Mutex<mpsc::Sender<TestResponse>>>,
     }
 
     impl TestSender {
-        fn new() -> (Self, async_std::channel::Receiver<TestResponse>) {
-            let (tx, rx) = async_std::channel::unbounded();
-            let object = Self { tx };
+        fn new() -> (Self, mpsc::Receiver<TestResponse>) {
+            let (tx, rx) = mpsc::channel();
+
+            let object = Self {
+                tx: Arc::new(Mutex::new(tx)),
+            };
+
             (object, rx)
         }
     }
@@ -410,22 +415,23 @@ mod tests {
                 serde_json::from_str(&json).unwrap()
             });
 
-            let tx = self.tx.lock().unwrap();
-
-            tx.send(TestResponse {
-                session_id,
-                transaction: transaction.to_owned(),
-                payload,
-                jsep_answer,
-            })
-            .map_err(|err| format_err!("Failed to send test response: {}", err))
+            self.tx
+                .lock()
+                .map_err(|err| anyhow!("Failed to obtain test sender lock: {}", err))?
+                .send(TestResponse {
+                    session_id,
+                    transaction: transaction.to_owned(),
+                    payload,
+                    jsep_answer,
+                })
+                .map_err(|err| anyhow!("Failed to send test response: {}", err))
         }
     }
 
     #[test]
     fn handle_message() -> Result<()> {
         let (sender, rx) = TestSender::new();
-        let session_id = SessionId::new();
+        let session_id = SessionId::new(123);
 
         task::spawn(async move {
             let message_handling_loop: MessageHandlingLoop<TestRouter, TestSender> =
@@ -437,7 +443,6 @@ mod tests {
 
             message_handling_loop
                 .schedule_request(session_id, "txn", &json, None)
-                .await
                 .unwrap();
 
             message_handling_loop.start();
