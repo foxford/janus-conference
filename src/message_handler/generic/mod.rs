@@ -126,7 +126,7 @@ where
             }
             Err(err) => {
                 verb!(
-                    "Bad request. Couldn't determine method";
+                    "Bad request. Wrong method or payload.";
                     {"handle_id": session_id, "transaction": transaction}
                 );
 
