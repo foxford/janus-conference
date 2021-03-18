@@ -43,12 +43,19 @@ pub struct General {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Constraint {
-    pub publisher: PublisherConstraint,
+    pub writer: WriterConstraint,
 }
 
 #[derive(Clone, Deserialize, Debug)]
-pub struct PublisherConstraint {
-    pub bitrate: Option<u32>,
+pub struct WriterConstraint {
+    pub video: MediaConstraint,
+    pub audio: MediaConstraint,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct MediaConstraint {
+    pub default_remb: u32,
+    pub max_remb: u32,
 }
 
 #[derive(Clone, Deserialize, Debug)]

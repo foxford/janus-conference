@@ -38,7 +38,7 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn is_handle_jsep(&self) -> bool {
-        true
+    fn stream_id(&self) -> Option<StreamId> {
+        Some(self.id)
     }
 }

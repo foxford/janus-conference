@@ -43,7 +43,8 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     fir_seq: AtomicI32,
     initial_rembs_counter: AtomicU64,
-    last_remb_timestamp: AtomicI64,
+    last_video_remb_timestamp: AtomicI64,
+    last_audio_remb_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<Recorder>,
 }
@@ -53,7 +54,8 @@ impl SessionState {
         Self {
             fir_seq: AtomicI32::new(0),
             initial_rembs_counter: AtomicU64::new(0),
-            last_remb_timestamp: AtomicI64::new(0),
+            last_video_remb_timestamp: AtomicI64::new(0),
+            last_audio_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
         }
@@ -71,8 +73,10 @@ impl SessionState {
         self.initial_rembs_counter.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn last_remb_timestamp(&self) -> Option<DateTime<Utc>> {
-        match self.last_remb_timestamp.load(Ordering::Relaxed) {
+    pub fn last_remb_timestamp(&self, is_video: bool) -> Option<DateTime<Utc>> {
+        let last_remb_timestamp = self.last_remb_timestamp_property(is_video);
+
+        match last_remb_timestamp.load(Ordering::Relaxed) {
             0 => None,
             timestamp => {
                 let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
@@ -81,9 +85,16 @@ impl SessionState {
         }
     }
 
-    pub fn touch_last_remb_timestamp(&self) {
-        self.last_remb_timestamp
+    pub fn touch_last_remb_timestamp(&self, is_video: bool) {
+        self.last_remb_timestamp_property(is_video)
             .store(Utc::now().timestamp(), Ordering::Relaxed);
+    }
+
+    fn last_remb_timestamp_property(&self, is_video: bool) -> &AtomicI64 {
+        match is_video {
+            true => &self.last_video_remb_timestamp,
+            false => &self.last_audio_remb_timestamp,
+        }
     }
 
     fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
@@ -121,6 +132,8 @@ impl SessionState {
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 #[derive(Debug)]
 pub struct ReaderConfig {
     receive_video: bool,
@@ -144,6 +157,73 @@ impl ReaderConfig {
     }
 }
 
+#[derive(Debug)]
+pub struct WriterConfig {
+    send_video: bool,
+    send_audio: bool,
+    video_remb: u32,
+    audio_remb: u32,
+}
+
+impl WriterConfig {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn send_video(&self) -> bool {
+        self.send_video
+    }
+
+    pub fn set_send_video(&mut self, send_video: bool) -> &mut Self {
+        self.send_video = send_video;
+        self
+    }
+
+    pub fn send_audio(&self) -> bool {
+        self.send_audio
+    }
+
+    pub fn set_send_audio(&mut self, send_audio: bool) -> &mut Self {
+        self.send_audio = send_audio;
+        self
+    }
+
+    pub fn video_remb(&self) -> u32 {
+        self.video_remb
+    }
+
+    pub fn set_video_remb(&mut self, video_remb: u32) -> &mut Self {
+        self.video_remb = video_remb;
+        self
+    }
+
+    pub fn audio_remb(&self) -> u32 {
+        self.audio_remb
+    }
+
+    pub fn set_audio_remb(&mut self, audio_remb: u32) -> &mut Self {
+        self.audio_remb = audio_remb;
+        self
+    }
+}
+
+impl Default for WriterConfig {
+    fn default() -> Self {
+        let app = app!().expect("Plugin is not initialized");
+
+        Self {
+            send_video: true,
+            send_audio: true,
+            video_remb: app.config.constraint.writer.video.default_remb,
+            audio_remb: app.config.constraint.writer.audio.default_remb,
+        }
+    }
+}
+
+lazy_static! {
+    static ref DEFAULT_WRITER_CONFIG: WriterConfig = Default::default();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
@@ -154,6 +234,7 @@ pub struct Switchboard {
     publishers: HashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
     reader_configs: HashMap<(StreamId, AgentId), ReaderConfig>,
+    writer_configs: HashMap<StreamId, WriterConfig>,
 }
 
 impl Switchboard {
@@ -165,6 +246,7 @@ impl Switchboard {
             publishers: HashMap::new(),
             publishers_subscribers: BidirectionalMultimap::new(),
             reader_configs: HashMap::new(),
+            writer_configs: HashMap::new(),
         }
     }
 
@@ -296,6 +378,17 @@ impl Switchboard {
         self.reader_configs
             .insert((stream_id, agent_id.to_owned()), config);
         Ok(())
+    }
+
+    pub fn writer_config(&self, stream_id: StreamId) -> &WriterConfig {
+        self.writer_configs
+            .get(&stream_id)
+            .unwrap_or(&DEFAULT_WRITER_CONFIG)
+    }
+
+    pub fn set_writer_config(&mut self, stream_id: StreamId, writer_config: WriterConfig) {
+        info!("SET WRITER CONFIG: {:?}", writer_config; {"rtc_id": stream_id});
+        self.writer_configs.insert(stream_id, writer_config);
     }
 
     pub fn create_stream(

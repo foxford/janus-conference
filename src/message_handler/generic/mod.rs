@@ -14,7 +14,7 @@ use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::{Payload as ResponsePayload, Response};
 use crate::jsep::Jsep;
-use crate::switchboard::SessionId;
+use crate::switchboard::{SessionId, StreamId};
 use crate::utils;
 
 pub use self::operation::{Operation, Result as OperationResult};
@@ -164,9 +164,9 @@ impl<S: Sender> MessageHandler<S> {
     async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
         huge!("Handling request"; {"transaction": request.transaction()});
 
-        let jsep_answer_result = match operation.is_handle_jsep() {
-            true => Self::handle_jsep(&request),
-            false => Ok(None),
+        let jsep_answer_result = match operation.stream_id() {
+            Some(stream_id) => Self::handle_jsep(&request, stream_id),
+            None => Ok(None),
         };
 
         match jsep_answer_result {
@@ -264,7 +264,7 @@ impl<S: Sender> MessageHandler<S> {
     }
 
     /// Parses SDP offer, returns the answer which is intended to send in the response.
-    fn handle_jsep(request: &Request) -> Result<Option<JsonValue>, SvcError> {
+    fn handle_jsep(request: &Request, stream_id: StreamId) -> Result<Option<JsonValue>, SvcError> {
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
                 .status(status)
@@ -273,7 +273,7 @@ impl<S: Sender> MessageHandler<S> {
         };
 
         let negotiation_result = match &request.jsep_offer() {
-            Some(jsep_offer) => Jsep::negotiate(jsep_offer),
+            Some(jsep_offer) => Jsep::negotiate(jsep_offer, stream_id),
             None => Err(format_err!("JSEP is empty")),
         };
 
@@ -328,7 +328,7 @@ mod tests {
     use super::Router;
     use super::{Operation, OperationResult, Request};
     use crate::janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
-    use crate::switchboard::SessionId;
+    use crate::switchboard::{SessionId, StreamId};
 
     #[derive(Clone, Debug, Deserialize)]
     struct PingRequest {}
@@ -349,8 +349,8 @@ mod tests {
             .into())
         }
 
-        fn is_handle_jsep(&self) -> bool {
-            false
+        fn stream_id(&self) -> Option<StreamId> {
+            None
         }
     }
 

@@ -4,7 +4,7 @@ use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::janus_callbacks;
-use crate::switchboard::AgentId;
+use crate::switchboard::{AgentId, StreamId};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -55,7 +55,7 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn is_handle_jsep(&self) -> bool {
-        false
+    fn stream_id(&self) -> Option<StreamId> {
+        None
     }
 }

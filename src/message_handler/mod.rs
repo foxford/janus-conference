@@ -25,6 +25,8 @@ pub enum Method {
     StreamRead(operations::stream_read::Request),
     #[serde(rename = "stream.upload")]
     StreamUpload(operations::stream_upload::Request),
+    #[serde(rename = "writer_config.update")]
+    WriterConfigUpdate(operations::writer_config_update::Request),
 }
 
 impl Into<Box<dyn Operation>> for Method {
@@ -35,6 +37,7 @@ impl Into<Box<dyn Operation>> for Method {
             Method::StreamCreate(op) => Box::new(op),
             Method::StreamRead(op) => Box::new(op),
             Method::StreamUpload(op) => Box::new(op),
+            Method::WriterConfigUpdate(op) => Box::new(op),
         }
     }
 }

@@ -5,6 +5,8 @@ use anyhow::{bail, Context, Result};
 use janus::sdp::{AudioCodec, MediaDirection, MediaType, OfferAnswerParameters, Sdp, VideoCodec};
 use serde_json::Value as JsonValue;
 
+use crate::switchboard::StreamId;
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
 pub enum Jsep {
@@ -14,7 +16,7 @@ pub enum Jsep {
 
 impl Jsep {
     /// Parses JSEP SDP offer and returns the answer.
-    pub fn negotiate(jsep_offer: &JsonValue) -> Result<Option<Self>> {
+    pub fn negotiate(jsep_offer: &JsonValue, stream_id: StreamId) -> Result<Option<Self>> {
         let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
             .context("Failed to deserialize JSEP")?;
 
@@ -33,48 +35,63 @@ impl Jsep {
             VideoCodec::Vp8.to_cstr().as_ptr(),
         );
 
-        // Set video bitrate
-        if let Some(bitrate) = app!()?.config.constraint.publisher.bitrate {
-            Self::set_publisher_bitrate_constraint(jsep_offer, &answer_sdp, bitrate)?;
-        }
+        // Set video & audio bitrates.
+        let app = app!()?;
+
+        let (video_bitrate, audio_bitrate) = app.switchboard.with_read_lock(|switchboard| {
+            let writer_config = switchboard.writer_config(stream_id);
+            Ok((writer_config.video_remb(), writer_config.audio_remb()))
+        })?;
+
+        Self::set_publisher_bitrate_constraints(
+            jsep_offer,
+            &answer_sdp,
+            video_bitrate,
+            audio_bitrate,
+        )?;
 
         verb!("SDP answer: {:?}", answer_sdp);
         let answer = Jsep::Answer { sdp: answer_sdp };
         Ok(Some(answer))
     }
 
-    fn set_publisher_bitrate_constraint(
+    fn set_publisher_bitrate_constraints(
         jsep_offer: &JsonValue,
         answer_sdp: &Sdp,
-        bitrate: u32,
+        video_bitrate: u32,
+        audio_bitrate: u32,
     ) -> Result<()> {
         let mut m_lines = answer_sdp.get_mlines();
-
-        let video_m_lines = match m_lines.get_mut(&MediaType::JANUS_SDP_VIDEO) {
-            None => return Ok(()),
-            Some(video_m_lines) => video_m_lines,
-        };
 
         let is_firefox = {
             let serialized_offer = jsep_offer.to_string();
             serialized_offer.contains("mozilla") || serialized_offer.contains("Mozilla")
         };
 
-        let (b_name, b_value) = if is_firefox {
-            // Use TIAS (bps) instead of AS (kbps) for the b= attribute, as explained here:
-            // https://github.com/meetecho/janus-gateway/issues/1277#issuecomment-397677746
-            // (taken from videoroom plugin)
-            ("TIAS", bitrate)
-        } else {
-            ("AS", bitrate / 1000)
-        };
+        let media_types_with_bitrates = [
+            (MediaType::JANUS_SDP_VIDEO, video_bitrate),
+            (MediaType::JANUS_SDP_AUDIO, audio_bitrate),
+        ];
 
-        for m_line in video_m_lines {
-            if m_line.direction == MediaDirection::JANUS_SDP_SENDRECV
-                || m_line.direction == MediaDirection::JANUS_SDP_SENDONLY
-            {
-                m_line.b_name = CString::new(b_name.to_string())?.into_raw();
-                m_line.b_value = b_value as c_int;
+        for (media_type, bitrate) in &media_types_with_bitrates {
+            if let Some(m_lines) = m_lines.get_mut(&media_type) {
+                let (b_name, b_value) = if is_firefox {
+                    // Use TIAS (bps) instead of AS (kbps) for the b= attribute, as explained here:
+                    // https://github.com/meetecho/janus-gateway/issues/1277#issuecomment-397677746
+                    // (taken from videoroom plugin)
+                    ("TIAS", *bitrate)
+                } else {
+                    ("AS", bitrate / 1000)
+                };
+
+                for m_line in m_lines {
+                    if m_line.direction == MediaDirection::JANUS_SDP_SENDRECV
+                        || m_line.direction == MediaDirection::JANUS_SDP_SENDONLY
+                    {
+                        m_line.b_name = CString::new(b_name.to_string())?.into_raw();
+                        m_line.b_value = b_value as c_int;
+                    }
+                }
             }
         }
 

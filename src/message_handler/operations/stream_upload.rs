@@ -99,8 +99,8 @@ impl super::Operation for Request {
         }
     }
 
-    fn is_handle_jsep(&self) -> bool {
-        false
+    fn stream_id(&self) -> Option<StreamId> {
+        None
     }
 }
 

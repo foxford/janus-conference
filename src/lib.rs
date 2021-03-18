@@ -181,37 +181,51 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let app = app!()?;
 
     app.switchboard.with_read_lock(|switchboard| {
+        let mut packet = unsafe { &mut *packet };
+        let is_video = matches!(packet.video, 1);
+
+        // Touch last packet timestamp to drop timeout.
         let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
+        state.touch_last_rtp_packet_timestamp();
 
+        // Check whether publisher media is muted and drop the packet if it is.
         let stream_id = switchboard
             .published_by(session_id)
             .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))?;
 
-        // Touch last packet timestamp to drop timeout.
-        state.touch_last_rtp_packet_timestamp();
+        let writer_config = switchboard.writer_config(stream_id);
+
+        let is_media_allowed = match is_video {
+            true => writer_config.send_video(),
+            false => writer_config.send_audio(),
+        };
+
+        if !is_media_allowed {
+            return Ok(());
+        }
 
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
-        if let Some(target_bitrate) = app.config.constraint.publisher.bitrate {
-            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
+        let target_bitrate = match is_video {
+            true => writer_config.video_remb(),
+            false => writer_config.audio_remb(),
+        };
 
-            if initial_rembs_left > 0 {
-                let bitrate = target_bitrate / initial_rembs_left as u32;
-                send_remb(session_id, bitrate);
-                state.touch_last_remb_timestamp();
-                state.increment_initial_rembs_counter();
-            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
-                    send_remb(session_id, target_bitrate);
-                    state.touch_last_remb_timestamp();
-                }
+        let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
+
+        if initial_rembs_left > 0 {
+            let bitrate = target_bitrate / initial_rembs_left as u32;
+            send_remb(session_id, is_video, bitrate);
+            state.touch_last_remb_timestamp(is_video);
+            state.increment_initial_rembs_counter();
+        } else if let Some(last_remb_timestamp) = state.last_remb_timestamp(is_video) {
+            if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                send_remb(session_id, is_video, target_bitrate);
+                state.touch_last_remb_timestamp(is_video);
             }
         }
 
         // Retransmit packet to publishers as is.
-        let mut packet = unsafe { &mut *packet };
-        let is_video = matches!(packet.video, 1);
-
         for subscriber_id in switchboard.subscribers_to(session_id) {
             // Check whether media is muted by the agent.
             let is_relay_packet = switchboard
@@ -414,11 +428,12 @@ fn send_fir_impl(publisher: SessionId) -> Result<()> {
     })
 }
 
-fn send_remb(publisher: SessionId, bitrate: u32) {
-    report_error(send_remb_impl(publisher, bitrate));
+fn send_remb(publisher: SessionId, is_video: bool, bitrate: u32) {
+    info!("Sending REMB is_video = {}, bitrate = {}", is_video, bitrate; {"handle_id": publisher});
+    report_error(send_remb_impl(publisher, is_video, bitrate));
 }
 
-fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
+fn send_remb_impl(publisher: SessionId, is_video: bool, bitrate: u32) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
         let session = switchboard.session(publisher)?.lock().map_err(|err| {
             format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
@@ -427,7 +442,7 @@ fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
         let mut remb = janus::rtcp::gen_remb(bitrate);
 
         let mut packet = PluginRtcpPacket {
-            video: 1,
+            video: is_video as i8,
             buffer: remb.as_mut_ptr(),
             length: remb.len() as i16,
         };
