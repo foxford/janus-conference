@@ -1,7 +1,7 @@
 dist: xenial
 language: rust
 rust:
-  - stable
+  - nightly
 addons:
   apt:
     packages:
@@ -37,11 +37,16 @@ jobs:
       script: cargo clippy
     - stage: deploy
       name: Docs
-      install: cargo install mdbook --vers 0.2.3 --force
+      install: cargo install mdbook --vers 0.4.7 --force
       script: mdbook build docs && ./deploy.init.sh && PROJECT='janus-conference' ./deploy/s3-docs.sh
 stages:
   - name: check
   - name: deploy
 notifications:
   email: false
-
+env:
+  global:
+    APP_UPLOADING_YANDEX_ACCESS_KEY_ID: "12345"
+    APP_UPLOADING_YANDEX_SECRET_ACCESS_KEY: "secret"
+    APP_UPLOADING_YANDEX_ENDPOINT: "https://storage.yandexcloud.net"
+    APP_UPLOADING_YANDEX_REGION: "ru-central1"
