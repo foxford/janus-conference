@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.5 (March 18, 2021)
+
+### Changes
+- Replace tokio with async-std ([af74164](https://github.com/netology-group/janus-conference/commits/af74164ed81ab439812b6e6a89efbedff097f5a9))
+- Clean up dependencies ([3b7b52f](https://github.com/netology-group/janus-conference/commits/3b7b52f9127bda8e18349e3b2b2db7427aaef737))
+
+
 ## v0.8.4 (December 16, 2020)
 
 ### Features
