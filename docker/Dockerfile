@@ -129,8 +129,13 @@ RUN set -xe \
     && apt-get -y --no-install-recommends install libjansson-dev 
 
 WORKDIR /build
-COPY . .
+
+COPY Cargo.* ./
+RUN mkdir ./src && touch src/lib.rs
 RUN cargo build --release
+
+COPY src/ ./src/
+RUN touch src/lib.rs && cargo build --release
 
 ## -----------------------------------------------------------------------------
 ## Build image ready to deploy
