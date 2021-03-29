@@ -43,8 +43,7 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     fir_seq: AtomicI32,
     initial_rembs_counter: AtomicU64,
-    last_video_remb_timestamp: AtomicI64,
-    last_audio_remb_timestamp: AtomicI64,
+    last_remb_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<Recorder>,
 }
@@ -54,8 +53,7 @@ impl SessionState {
         Self {
             fir_seq: AtomicI32::new(0),
             initial_rembs_counter: AtomicU64::new(0),
-            last_video_remb_timestamp: AtomicI64::new(0),
-            last_audio_remb_timestamp: AtomicI64::new(0),
+            last_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
         }
@@ -73,10 +71,8 @@ impl SessionState {
         self.initial_rembs_counter.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn last_remb_timestamp(&self, is_video: bool) -> Option<DateTime<Utc>> {
-        let last_remb_timestamp = self.last_remb_timestamp_property(is_video);
-
-        match last_remb_timestamp.load(Ordering::Relaxed) {
+    pub fn last_remb_timestamp(&self) -> Option<DateTime<Utc>> {
+        match self.last_remb_timestamp.load(Ordering::Relaxed) {
             0 => None,
             timestamp => {
                 let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
@@ -85,16 +81,9 @@ impl SessionState {
         }
     }
 
-    pub fn touch_last_remb_timestamp(&self, is_video: bool) {
-        self.last_remb_timestamp_property(is_video)
+    pub fn touch_last_remb_timestamp(&self) {
+        self.last_remb_timestamp
             .store(Utc::now().timestamp(), Ordering::Relaxed);
-    }
-
-    fn last_remb_timestamp_property(&self, is_video: bool) -> &AtomicI64 {
-        match is_video {
-            true => &self.last_video_remb_timestamp,
-            false => &self.last_audio_remb_timestamp,
-        }
     }
 
     fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
@@ -162,7 +151,6 @@ pub struct WriterConfig {
     send_video: bool,
     send_audio: bool,
     video_remb: u32,
-    audio_remb: u32,
 }
 
 impl WriterConfig {
@@ -196,15 +184,6 @@ impl WriterConfig {
         self.video_remb = video_remb;
         self
     }
-
-    pub fn audio_remb(&self) -> u32 {
-        self.audio_remb
-    }
-
-    pub fn set_audio_remb(&mut self, audio_remb: u32) -> &mut Self {
-        self.audio_remb = audio_remb;
-        self
-    }
 }
 
 impl Default for WriterConfig {
@@ -214,8 +193,7 @@ impl Default for WriterConfig {
         Self {
             send_video: true,
             send_audio: true,
-            video_remb: app.config.constraint.writer.video.default_remb,
-            audio_remb: app.config.constraint.writer.audio.default_remb,
+            video_remb: app.config.constraint.writer.default_video_bitrate,
         }
     }
 }

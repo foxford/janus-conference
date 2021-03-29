@@ -16,7 +16,6 @@ pub struct ConfigItem {
     send_video: bool,
     send_audio: bool,
     video_remb: Option<u32>,
-    audio_remb: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -31,21 +30,11 @@ impl super::Operation for Request {
         // Validate REMBs.
         for config_item in &self.configs {
             if let Some(video_remb) = config_item.video_remb {
-                if video_remb > app.config.constraint.writer.video.max_remb {
+                if video_remb > app.config.constraint.writer.max_video_remb {
                     return Err(bad_request_error(anyhow!(
                         "Invalid video_remb: {} > {}",
                         video_remb,
-                        app.config.constraint.writer.video.max_remb,
-                    )));
-                }
-            }
-
-            if let Some(audio_remb) = config_item.audio_remb {
-                if audio_remb > app.config.constraint.writer.audio.max_remb {
-                    return Err(bad_request_error(anyhow!(
-                        "Invalid audio_remb: {} > {}",
-                        audio_remb,
-                        app.config.constraint.writer.audio.max_remb,
+                        app.config.constraint.writer.max_video_remb,
                     )));
                 }
             }
@@ -61,10 +50,6 @@ impl super::Operation for Request {
 
                     if let Some(video_remb) = config_item.video_remb {
                         writer_config.set_video_remb(video_remb);
-                    }
-
-                    if let Some(audio_remb) = config_item.audio_remb {
-                        writer_config.set_audio_remb(audio_remb);
                     }
 
                     switchboard.set_writer_config(config_item.stream_id, writer_config);
