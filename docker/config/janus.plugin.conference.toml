@@ -6,13 +6,10 @@ enabled = true
 directory = "/recordings"
 delete_records = true
 
-[constraint.writer.video]
-default_remb = 300000
-max_remb = 1000000
-
-[constraint.writer.audio]
-default_remb = 30000
-max_remb = 60000
+[constraint.writer]
+default_video_bitrate = 300000
+max_video_remb = 1000000
+audio_bitrate = 30000
 
 [upload]
 backends = ["yandex"]

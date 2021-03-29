@@ -48,14 +48,9 @@ pub struct Constraint {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct WriterConstraint {
-    pub video: MediaConstraint,
-    pub audio: MediaConstraint,
-}
-
-#[derive(Clone, Deserialize, Debug)]
-pub struct MediaConstraint {
-    pub default_remb: u32,
-    pub max_remb: u32,
+    pub default_video_bitrate: u32,
+    pub max_video_remb: u32,
+    pub audio_bitrate: u32,
 }
 
 #[derive(Clone, Deserialize, Debug)]

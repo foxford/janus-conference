@@ -20,7 +20,6 @@ stream_id  | string | _required_  | ID of a stream which the writer is [writing]
 send_video | bool   | _required_  | Whether to relay or drop video RTP packets sent by the writer.
 send_audio | bool   | _required_  | Whether to relay or drop audio RTP packets sent by the writer.
 video_remb | int    | from config | Maximum video bitrate allowed for the publisher.
-audio_remb | int    | from config | Maximum audio bitrate allowed for the publisher.
 
 ## Response
 

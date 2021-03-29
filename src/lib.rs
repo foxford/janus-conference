@@ -206,22 +206,22 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         }
 
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
-        let target_bitrate = match is_video {
-            true => writer_config.video_remb(),
-            false => writer_config.audio_remb(),
-        };
+        // Do it only for video because Windows and Linux don't make a difference for media types
+        // and apply audio limitation to video while only MacOS does.
+        if is_video {
+            let target_bitrate = writer_config.video_remb();
+            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
 
-        let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
-
-        if initial_rembs_left > 0 {
-            let bitrate = target_bitrate / initial_rembs_left as u32;
-            send_remb(session_id, is_video, bitrate);
-            state.touch_last_remb_timestamp(is_video);
-            state.increment_initial_rembs_counter();
-        } else if let Some(last_remb_timestamp) = state.last_remb_timestamp(is_video) {
-            if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
-                send_remb(session_id, is_video, target_bitrate);
-                state.touch_last_remb_timestamp(is_video);
+            if initial_rembs_left > 0 {
+                let bitrate = target_bitrate / initial_rembs_left as u32;
+                send_remb(session_id, bitrate);
+                state.touch_last_remb_timestamp();
+                state.increment_initial_rembs_counter();
+            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
+                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                    send_remb(session_id, target_bitrate);
+                    state.touch_last_remb_timestamp();
+                }
             }
         }
 
@@ -428,12 +428,12 @@ fn send_fir_impl(publisher: SessionId) -> Result<()> {
     })
 }
 
-fn send_remb(publisher: SessionId, is_video: bool, bitrate: u32) {
-    info!("Sending REMB is_video = {}, bitrate = {}", is_video, bitrate; {"handle_id": publisher});
-    report_error(send_remb_impl(publisher, is_video, bitrate));
+fn send_remb(publisher: SessionId, bitrate: u32) {
+    verb!("Sending REMB bitrate = {}", bitrate; {"handle_id": publisher});
+    report_error(send_remb_impl(publisher, bitrate));
 }
 
-fn send_remb_impl(publisher: SessionId, is_video: bool, bitrate: u32) -> Result<()> {
+fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
         let session = switchboard.session(publisher)?.lock().map_err(|err| {
             format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
@@ -442,7 +442,7 @@ fn send_remb_impl(publisher: SessionId, is_video: bool, bitrate: u32) -> Result<
         let mut remb = janus::rtcp::gen_remb(bitrate);
 
         let mut packet = PluginRtcpPacket {
-            video: is_video as i8,
+            video: 1,
             buffer: remb.as_mut_ptr(),
             length: remb.len() as i16,
         };

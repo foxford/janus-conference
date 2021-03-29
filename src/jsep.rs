@@ -35,19 +35,19 @@ impl Jsep {
             VideoCodec::Vp8.to_cstr().as_ptr(),
         );
 
-        // Set video & audio bitrates.
+        // Set video bitrate.
         let app = app!()?;
 
-        let (video_bitrate, audio_bitrate) = app.switchboard.with_read_lock(|switchboard| {
+        let video_bitrate = app.switchboard.with_read_lock(|switchboard| {
             let writer_config = switchboard.writer_config(stream_id);
-            Ok((writer_config.video_remb(), writer_config.audio_remb()))
+            Ok(writer_config.video_remb())
         })?;
 
         Self::set_publisher_bitrate_constraints(
             jsep_offer,
             &answer_sdp,
             video_bitrate,
-            audio_bitrate,
+            app.config.constraint.writer.audio_bitrate,
         )?;
 
         verb!("SDP answer: {:?}", answer_sdp);
