@@ -1006,7 +1006,7 @@ source = "git+https://github.com/netology-group/janus-plugin-rs?branch=feature/a
 
 [[package]]
 name = "janus-conference"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "anyhow",
  "async-std",

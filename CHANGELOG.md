@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.6 (April 1, 2021)
+
+### Features
+- Add reader config endpoint ([1b22e9f](https://github.com/netology-group/janus-conference/commits/1b22e9f6df310cb9e694cc775d7da6e5601697a6))
+- Add writer config endpoint ([a2553b2](https://github.com/netology-group/janus-conference/commits/a2553b2c72c37a56eb0c5393c8daae92e4e07584), [09b1716](https://github.com/netology-group/janus-conference/commits/de909b1716fec5ab3f0ecfdc4433ce8e1f4e66eb))
+
+
 ## v0.8.5 (March 18, 2021)
 
 ### Changes
