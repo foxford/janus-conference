@@ -71,8 +71,10 @@ for VIDEO_FILE in *.video.mjr; do
   AUDIO_OUTPUT_FILE="${PREFIX}.audio.opus"
   OUTPUT_FILE="${PREFIX}.final.webm"
 
-  ${JANUS_PP_REC} ${VIDEO_FILE} ${VIDEO_OUTPUT_FILE}
-  ${JANUS_PP_REC} ${AUDIO_FILE} ${AUDIO_OUTPUT_FILE}
+  # -S 40 (msecs) enables audio skew compensation
+  # see point#2 here: https://github.com/meetecho/janus-gateway/pull/1153
+  ${JANUS_PP_REC} -S 40 ${VIDEO_FILE} ${VIDEO_OUTPUT_FILE}
+  ${JANUS_PP_REC} -S 40 ${AUDIO_FILE} ${AUDIO_OUTPUT_FILE}
 
   # Extract first audio pkt write timestamp (in micros) from dump
   A_STARTED_AT=$(${JANUS_PP_REC} -H ${AUDIO_FILE}  | grep Written | awk -F ': ' '{print $2}')
