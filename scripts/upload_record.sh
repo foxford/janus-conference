@@ -63,9 +63,12 @@ done
 # Remove artifacts from possible previous run to avoid concat duplication.
 rm -f sources.txt segments.csv
 
+# Select all uniq prefixes where both audio.mjr and video.mjr larger than 8 bytes
+PREFIXES=$(sort <(find . -type f -name '*.mjr' -size +8 | sed -E "s/.((audio)|(video)).mjr$//") | uniq -d)
+
 # Mux corresponding video and audio .mjrs and write video len to segments.csv
-for VIDEO_FILE in *.video.mjr; do
-  PREFIX=${VIDEO_FILE%%.*}
+for PREFIX in $PREFIXES; do
+  VIDEO_FILE="${PREFIX}.video.mjr"
   AUDIO_FILE="${PREFIX}.audio.mjr"
   VIDEO_OUTPUT_FILE="${PREFIX}.video.webm"
   AUDIO_OUTPUT_FILE="${PREFIX}.audio.opus"
