@@ -1,6 +1,6 @@
 [package]
 name = "janus-conference"
-version = "0.8.8"
+version = "0.8.9"
 authors = ["Andrei Nesterov <ae.nesterov@gmail.com>"]
 edition = "2018"
 
