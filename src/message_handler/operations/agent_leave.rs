@@ -41,11 +41,11 @@ impl super::Operation for Request {
                     })?;
 
                     info!(
-                        "Agent left; finishing session";
-                        {"agent_id": self.agent_id, "session_id": session_id}
+                        "Agent left; freeing handle";
+                        {"agent_id": self.agent_id, "handle_id": session_id}
                     );
 
-                    janus_callbacks::end_session(&session);
+                    janus_callbacks::close_pc(&session);
                 }
 
                 Ok(())

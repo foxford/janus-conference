@@ -233,19 +233,18 @@ impl Switchboard {
         info!("Connecting session"; {"handle_id": session_id});
         let locked_session = Arc::new(Mutex::new(session));
         self.sessions.insert(session_id, locked_session);
-        self.states.insert(session_id, SessionState::new());
         Ok(())
     }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
-        info!("Disconnecting session asynchronously"; {"handle_id": id});
+        info!("Asking the core to close PC asynchronously"; {"handle_id": id});
 
         let session = self
             .session(id)?
             .lock()
             .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
 
-        janus_callbacks::end_session(&session);
+        janus_callbacks::close_pc(&session);
         Ok(())
     }
 
@@ -365,7 +364,6 @@ impl Switchboard {
     }
 
     pub fn set_writer_config(&mut self, stream_id: StreamId, writer_config: WriterConfig) {
-        info!("SET WRITER CONFIG: {:?}", writer_config; {"rtc_id": stream_id});
         self.writer_configs.insert(stream_id, writer_config);
     }
 
@@ -376,6 +374,7 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<()> {
         info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
+        self.states.insert(publisher, SessionState::new());
 
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
@@ -398,6 +397,7 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
+        self.states.insert(subscriber, SessionState::new());
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
