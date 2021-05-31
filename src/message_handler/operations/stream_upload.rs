@@ -23,7 +23,7 @@ struct Response {
     id: StreamId,
     started_at: u64,
     time: Vec<(u64, u64)>,
-    dumps_uris: Vec<String>,
+    mjr_dumps_uris: Vec<String>,
 }
 
 #[async_trait]
@@ -94,7 +94,7 @@ impl super::Operation for Request {
                     id: self.id,
                     started_at,
                     time: segments,
-                    dumps_uris: dumps,
+                    mjr_dumps_uris: dumps,
                 }
                 .into())
             }
