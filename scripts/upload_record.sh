@@ -58,7 +58,7 @@ fi
 rm -f sources.txt segments.csv dumps.txt
 
 for FILE in *.mjr; do
-  DUMP_FILE = s3://${BUCKET}/${RTC_ID}_dump/${FILE}
+  DUMP_FILE="s3://${BUCKET}/${RTC_ID}_dump/${FILE}"
   ${AWS} s3 cp ${FILE} ${DUMP_FILE} \
     --only-show-errors \
     --cache-control 'no-cache'
