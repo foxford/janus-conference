@@ -10,4 +10,5 @@
     - [stream.upload](api.stream.upload.md)
 - [Data Types](datatypes.md)
     - [Error object](datatypes.error.md)
-- [Configuraion](configuration.md)
+- [Configuration](configuration.md)
+- [Implementation](implementation.md)
