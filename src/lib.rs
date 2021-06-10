@@ -9,10 +9,13 @@ extern crate serde_derive;
 #[macro_use]
 extern crate lazy_static;
 
-use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
+use std::{
+    convert::TryFrom,
+    ffi::{CStr, CString},
+};
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::{Duration, Utc};
@@ -31,7 +34,7 @@ mod conf;
 mod janus_callbacks;
 mod janus_recorder;
 mod jsep;
-mod message_handler;
+pub mod message_handler;
 mod recorder;
 mod serde;
 mod switchboard;
@@ -40,6 +43,7 @@ mod test_stubs;
 
 use app::App;
 use conf::Config;
+use message_handler::Response;
 use switchboard::SessionId;
 
 const INITIAL_REMBS: u64 = 4;
@@ -115,7 +119,10 @@ extern "C" fn handle_message(
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
     match handle_message_impl(handle, transaction, message, jsep) {
-        Ok(()) => PluginResult::ok_wait(None).into_raw(),
+        Ok(None) => PluginResult::ok_wait(None).into_raw(),
+        Ok(Some(resp)) => {
+            PluginResult::ok(JanssonValue::try_from(resp.payload()).unwrap()).into_raw()
+        }
         Err(err) => {
             err!("Message handling error: {}", err);
             PluginResult::error(c_str!("Failed to handle message")).into_raw()
@@ -128,7 +135,7 @@ fn handle_message_impl(
     transaction: *mut c_char,
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
-) -> Result<()> {
+) -> Result<Option<Response>> {
     let session_id = session_id(handle)?;
     verb!("Incoming message"; {"handle_id": session_id});
 
@@ -140,13 +147,13 @@ fn handle_message_impl(
     if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
 
-        app!()?
+        return Ok(app!()?
             .message_handling_loop
             .schedule_request(session_id, &transaction, &json, jsep_offer)
-            .context("Failed to schedule message handling")?;
+            .context("Failed to schedule message handling")?);
     }
 
-    Ok(())
+    Ok(None)
 }
 
 extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJanssonValue {

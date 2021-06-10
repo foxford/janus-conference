@@ -1,6 +1,6 @@
 mod operation;
 mod request;
-mod response;
+pub mod response;
 
 use std::convert::TryFrom;
 use std::marker::PhantomData;
@@ -13,14 +13,21 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::{Payload as ResponsePayload, Response};
-use crate::jsep::Jsep;
-use crate::switchboard::{SessionId, StreamId};
 use crate::utils;
+use crate::{jsep::Jsep, message_handler::operations::stream_create};
+use crate::{
+    message_handler::operations::stream_upload,
+    switchboard::{SessionId, StreamId},
+};
 
 pub use self::operation::{Operation, Result as OperationResult};
 pub use self::request::Request;
 
-pub trait Router: serde::de::DeserializeOwned + Into<Box<dyn Operation>> {}
+pub trait Router: serde::de::DeserializeOwned + Into<Box<dyn Operation>> {
+    fn sync(&self) -> bool {
+        false
+    }
+}
 
 enum Message {
     Request(Box<dyn Operation>, Request),
@@ -32,6 +39,7 @@ pub struct MessageHandlingLoop<R, S> {
     rx: async_std::channel::Receiver<Message>,
     router: PhantomData<R>,
     sender: S,
+    handler: MessageHandler<S>,
 }
 
 /// R is for Router. It's an enum that can convert into operation.
@@ -45,18 +53,17 @@ where
         let (tx, rx) = async_std::channel::bounded(1000);
 
         Self {
-            tx,
+            tx: tx.clone(),
             rx,
             router: PhantomData,
-            sender,
+            sender: sender.clone(),
+            handler: MessageHandler::new(tx, sender),
         }
     }
 
     pub fn start(&self) {
-        let tx = self.tx.to_owned();
         let rx = &self.rx;
-        let sender = self.sender.to_owned();
-        let handler: MessageHandler<S> = MessageHandler::new(tx, sender);
+        let handler: MessageHandler<S> = self.handler.clone();
 
         task::block_on(async {
             loop {
@@ -66,7 +73,7 @@ where
                         let handler = handler.clone();
 
                         task::spawn(async move {
-                            handler.handle_request(operation, request).await;
+                            handler.send_request(operation, request).await;
                         });
                     }
                     Ok(Message::Response(response)) => {
@@ -88,7 +95,7 @@ where
         transaction: &str,
         payload: &JanssonValue,
         jsep_offer: Option<JanssonValue>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<Response>> {
         huge!("Scheduling request"; {"handle_id": session_id, "transaction": transaction});
 
         let request = Request::new(session_id, &transaction);
@@ -110,19 +117,26 @@ where
                 };
 
                 let tx = self.tx.clone();
-                let message = Message::Request(route.into(), request);
-                let transaction = transaction.to_owned();
+                if route.sync() {
+                    let op: Box<dyn Operation> = route.into();
+                    let resp = task::block_on(self.handler.handle_request(op, request));
+                    return Ok(Some(resp));
+                } else {
+                    let message = Message::Request(route.into(), request);
 
-                task::spawn(async move {
-                    if let Err(err) = tx.send(message).await {
-                        err!(
-                            "Failed to schedule request: {}", err;
-                            {"handle_id": session_id, "transaction": transaction}
-                        );
-                    }
-                });
+                    let transaction = transaction.to_owned();
 
-                Ok(())
+                    task::spawn(async move {
+                        if let Err(err) = tx.send(message).await {
+                            err!(
+                                "Failed to schedule request: {}", err;
+                                {"handle_id": session_id, "transaction": transaction}
+                            );
+                        }
+                    });
+
+                    Ok(None)
+                }
             }
             Err(err) => {
                 verb!(
@@ -143,7 +157,7 @@ where
                     async move { handler.schedule_response(request, err.into(), None).await },
                 );
 
-                Ok(())
+                Ok(None)
             }
         }
     }
@@ -160,8 +174,7 @@ impl<S: Sender> MessageHandler<S> {
         Self { tx, sender }
     }
 
-    /// Handles JSEP if needed, calls the operation and schedules its response.
-    async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) {
+    async fn handle_request(&self, operation: Box<dyn Operation>, request: Request) -> Response {
         huge!("Handling request"; {"transaction": request.transaction()});
 
         let jsep_answer_result = match operation.stream_id() {
@@ -181,13 +194,29 @@ impl<S: Sender> MessageHandler<S> {
                     }
                 };
 
-                self.schedule_response(request, payload, jsep_answer).await;
+                self.schedule_response(request, payload, jsep_answer).await
             }
             Err(err) => {
                 self.notify_error(&err);
                 self.schedule_response(request, err.into(), None).await
             }
         }
+    }
+
+    /// Handles JSEP if needed, calls the operation and schedules its response.
+    async fn send_request(&self, operation: Box<dyn Operation>, request: Request) {
+        let response = self.handle_request(operation, request).await;
+        let session_id = response.session_id();
+        let transaction = response.transaction().to_owned();
+        self.tx
+            .send(Message::Response(response))
+            .await
+            .unwrap_or_else(move |err| {
+                err!(
+                    "Failed to schedule response: {}", err;
+                    {"handle_id": session_id, "transaction": transaction}
+                );
+            });
     }
 
     /// Serializes the response and pushes it to Janus for sending to the client.
@@ -235,12 +264,13 @@ impl<S: Sender> MessageHandler<S> {
     }
 
     /// Builds a response object for the request and pushes it to the message handling queue.
+
     async fn schedule_response(
         &self,
         request: Request,
         payload: ResponsePayload,
         jsep_answer: Option<JsonValue>,
-    ) {
+    ) -> Response {
         let response = Response::new(request, payload);
 
         let response = match jsep_answer {
@@ -251,16 +281,7 @@ impl<S: Sender> MessageHandler<S> {
         let session_id = response.session_id().to_owned();
         let transaction = response.transaction().to_owned();
         huge!("Scheduling response"; {"handle_id": session_id, "transaction": transaction});
-
-        self.tx
-            .send(Message::Response(response))
-            .await
-            .unwrap_or_else(move |err| {
-                err!(
-                    "Failed to schedule response: {}", err;
-                    {"handle_id": session_id, "transaction": transaction}
-                );
-            });
+        response
     }
 
     /// Parses SDP offer, returns the answer which is intended to send in the response.

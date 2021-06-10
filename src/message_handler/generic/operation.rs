@@ -8,7 +8,7 @@ use svc_error::Error as SvcError;
 use crate::switchboard::StreamId;
 
 #[async_trait]
-pub trait Operation: fmt::Debug + Send + Sync {
+pub trait Operation: fmt::Debug + Send + Sync + 'static {
     /// Operation implementation
     async fn call(&self, request: &super::Request) -> self::Result;
 

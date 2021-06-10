@@ -10,7 +10,7 @@ use self::generic::{MessageHandlingLoop as GenericLoop, Router, Sender};
 use crate::janus_callbacks;
 use crate::switchboard::SessionId;
 
-pub use self::generic::{Operation, OperationResult, Request};
+pub use self::generic::{response::Response, Operation, OperationResult, Request};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "method")]
@@ -42,7 +42,15 @@ impl Into<Box<dyn Operation>> for Method {
     }
 }
 
-impl Router for Method {}
+impl Router for Method {
+    fn sync(&self) -> bool {
+        match self {
+            Method::StreamCreate(_) => true,
+            Method::StreamRead(_) => true,
+            _ => false,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct JanusSender;
