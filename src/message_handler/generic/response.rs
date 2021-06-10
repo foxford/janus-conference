@@ -37,6 +37,13 @@ impl Response {
         &self.payload
     }
 
+    pub fn full_payload(self) -> Payload {
+        Payload {
+            jsep: self.jsep_answer,
+            ..self.payload
+        }
+    }
+
     pub fn jsep_answer(&self) -> Option<&JsonValue> {
         self.jsep_answer.as_ref()
     }
@@ -58,6 +65,8 @@ pub struct Payload {
     response: Option<JsonValue>,
     #[serde(flatten)]
     error: Option<SvcError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jsep: Option<JsonValue>,
 }
 
 impl Payload {
@@ -66,6 +75,7 @@ impl Payload {
             status,
             response: None,
             error: None,
+            jsep: None,
         }
     }
 

@@ -121,7 +121,7 @@ extern "C" fn handle_message(
     match handle_message_impl(handle, transaction, message, jsep) {
         Ok(None) => PluginResult::ok_wait(None).into_raw(),
         Ok(Some(resp)) => {
-            PluginResult::ok(JanssonValue::try_from(resp.payload()).unwrap()).into_raw()
+            PluginResult::ok(JanssonValue::try_from(&resp.full_payload()).unwrap()).into_raw()
         }
         Err(err) => {
             err!("Message handling error: {}", err);
