@@ -121,7 +121,22 @@ extern "C" fn handle_message(
     match handle_message_impl(handle, transaction, message, jsep) {
         Ok(None) => PluginResult::ok_wait(None).into_raw(),
         Ok(Some(resp)) => {
-            PluginResult::ok(JanssonValue::try_from(&resp.full_payload()).unwrap()).into_raw()
+            let jsep_answer = match resp.jsep_answer() {
+                None => None,
+                Some(json_value) => match utils::serde_to_jansson(&json_value) {
+                    Ok(jansson_value) => Some(jansson_value),
+                    Err(err) => {
+                        err!(
+                            "Failed to serialize JSEP answer: {}", err;
+                            {"handle_id": resp.session_id(), "transaction": resp.transaction()}
+                        );
+
+                        return PluginResult::error(c_str!("Failed to handle message")).into_raw();
+                    }
+                },
+            };
+
+            PluginResult::ok(jsep_answer.unwrap()).into_raw()
         }
         Err(err) => {
             err!("Message handling error: {}", err);
