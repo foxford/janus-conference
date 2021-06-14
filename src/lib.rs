@@ -7,12 +7,9 @@ extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
 
+use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::{
-    convert::TryInto,
-    os::raw::{c_char, c_int},
-};
 use std::{
     ffi::{CStr, CString},
     time::Duration,

@@ -199,7 +199,7 @@ impl Default for WriterConfig {
     }
 }
 
-static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(|| Default::default());
+static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 
 ///////////////////////////////////////////////////////////////////////////////
 
