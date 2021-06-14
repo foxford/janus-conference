@@ -74,7 +74,7 @@ impl Jsep {
         ];
 
         for (media_type, bitrate) in &media_types_with_bitrates {
-            if let Some(m_lines) = m_lines.get_mut(&media_type) {
+            if let Some(m_lines) = m_lines.get_mut(media_type) {
                 let (b_name, b_value) = if is_firefox {
                     // Use TIAS (bps) instead of AS (kbps) for the b= attribute, as explained here:
                     // https://github.com/meetecho/janus-gateway/issues/1277#issuecomment-397677746

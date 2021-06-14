@@ -81,7 +81,7 @@ impl super::Operation for Request {
             .check_existence()
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
-        match upload_record(&self).await.map_err(internal_error)? {
+        match upload_record(self).await.map_err(internal_error)? {
             UploadStatus::AlreadyRunning => {
                 Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
             }

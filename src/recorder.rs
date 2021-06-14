@@ -159,10 +159,10 @@ impl Recorder {
         let now = Utc::now().timestamp_millis();
 
         let video_filename = format!("{}.video", now);
-        let video = JanusRecorder::create(&dir, &video_filename, Codec::VP8)?;
+        let video = JanusRecorder::create(dir, &video_filename, Codec::VP8)?;
 
         let audio_filename = format!("{}.audio", now);
-        let audio = JanusRecorder::create(&dir, &audio_filename, Codec::OPUS)?;
+        let audio = JanusRecorder::create(dir, &audio_filename, Codec::Opus)?;
 
         match recorders.entry(stream_id) {
             Entry::Occupied(e) => {

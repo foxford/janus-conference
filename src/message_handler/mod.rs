@@ -29,9 +29,9 @@ pub enum Method {
     WriterConfigUpdate(operations::writer_config_update::Request),
 }
 
-impl Into<Box<dyn Operation>> for Method {
-    fn into(self) -> Box<dyn Operation> {
-        match self {
+impl From<Method> for Box<dyn Operation> {
+    fn from(val: Method) -> Self {
+        match val {
             Method::AgentLeave(op) => Box::new(op),
             Method::ReaderConfigUpdate(op) => Box::new(op),
             Method::StreamCreate(op) => Box::new(op),

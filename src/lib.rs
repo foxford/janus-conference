@@ -74,7 +74,7 @@ fn init_config(config_path: *const c_char) -> Result<Config> {
     let config_path = config_path.to_str()?;
     let config_path = Path::new(config_path);
 
-    Ok(Config::from_path(config_path)?)
+    Config::from_path(config_path)
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {

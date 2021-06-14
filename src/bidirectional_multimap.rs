@@ -53,7 +53,7 @@ where
 
         if let Some(ref vs) = vs {
             for v in vs {
-                self.inverse_mapping.remove(&v);
+                self.inverse_mapping.remove(v);
             }
         }
 

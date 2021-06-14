@@ -91,7 +91,7 @@ where
     ) -> anyhow::Result<()> {
         huge!("Scheduling request"; {"handle_id": session_id, "transaction": transaction});
 
-        let request = Request::new(session_id, &transaction);
+        let request = Request::new(session_id, transaction);
 
         match utils::jansson_to_serde::<R>(payload) {
             Ok(route) => {
@@ -199,7 +199,7 @@ impl<S: Sender> MessageHandler<S> {
 
         let jsep_answer = match response.jsep_answer() {
             None => None,
-            Some(json_value) => match utils::serde_to_jansson(&json_value) {
+            Some(json_value) => match utils::serde_to_jansson(json_value) {
                 Ok(jansson_value) => Some(jansson_value),
                 Err(err) => {
                     err!(
