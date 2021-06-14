@@ -1,11 +1,17 @@
-use std::error::Error as StdError;
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::{fs, io, thread};
+use std::{
+    collections::hash_map::Entry,
+    path::{Path, PathBuf},
+};
+use std::{collections::HashMap, fmt};
+use std::{
+    error::Error as StdError,
+    time::{Duration, Instant},
+};
+use std::{fs, io};
 
-use anyhow::{bail, format_err, Context, Error, Result};
+use anyhow::{bail, Context, Error, Result};
 use chrono::Utc;
+use crossbeam_channel::{Receiver, Sender};
 
 use crate::janus_recorder::{Codec, JanusRecorder};
 use crate::switchboard::StreamId;
@@ -36,18 +42,157 @@ impl Config {
 
 #[derive(Debug)]
 enum RecorderMsg {
-    Stop,
-    Packet { buf: Vec<i8>, is_video: bool },
+    Stop {
+        stream_id: StreamId,
+    },
+    Packet {
+        buf: Vec<i8>,
+        is_video: bool,
+        stream_id: StreamId,
+    },
+    Start {
+        stream_id: StreamId,
+        dir: String,
+    },
+}
+
+pub struct RecorderHandlesCreator {
+    sender: Sender<RecorderMsg>,
+    config: Config,
+}
+
+impl RecorderHandlesCreator {
+    fn new(sender: Sender<RecorderMsg>, config: Config) -> Self {
+        Self { sender, config }
+    }
+
+    pub fn new_handle(&self, stream_id: StreamId) -> RecorderHandle {
+        RecorderHandle::new(&self.config, stream_id, self.sender.clone())
+    }
+}
+
+pub struct Recorder {
+    messages: Receiver<RecorderMsg>,
+}
+
+impl Recorder {
+    fn new(messages: Receiver<RecorderMsg>) -> Self {
+        Self { messages }
+    }
+
+    pub fn start(self) {
+        let mut recorders = HashMap::new();
+        let mut now = Instant::now();
+        let log_interval = Duration::from_secs(15);
+        loop {
+            let msg = self.messages.recv().expect("All senders dropped");
+            if now.elapsed() > log_interval {
+                now = Instant::now();
+                info!("Messages in channel: {}", self.messages.len())
+            }
+            match msg {
+                RecorderMsg::Stop { stream_id } => {
+                    if let Err(err) = Self::handle_stop(&mut recorders, stream_id).context("Stop") {
+                        err!("Recording stopping error: {:?}", err; {"rtc_id": stream_id});
+                    } else {
+                        info!("Recording stopped"; {"rtc_id": stream_id});
+                    }
+                }
+                RecorderMsg::Packet {
+                    buf,
+                    is_video,
+                    stream_id,
+                } => {
+                    if let Err(err) =
+                        Self::handle_packet(&mut recorders, stream_id, buf.as_slice(), is_video)
+                            .context("Packet")
+                    {
+                        err!("Failed to record frame: {:?}", err; {"rtc_id": stream_id});
+                    }
+                }
+                RecorderMsg::Start { dir, stream_id } => {
+                    if let Err(err) =
+                        Self::handle_start(&mut recorders, stream_id, &dir).context("Start")
+                    {
+                        err!("Failed to create recorders: {:?}", err; {"rtc_id": stream_id})
+                    } else {
+                        info!("Recording to {}", dir; {"rtc_id": stream_id});
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_stop(
+        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        stream_id: StreamId,
+    ) -> Result<()> {
+        let mut recorders = recorders
+            .remove(&stream_id)
+            .ok_or_else(|| anyhow!("Recorders missing"))?;
+        recorders.audio.close()?;
+        recorders.video.close()?;
+        Ok(())
+    }
+
+    fn handle_packet(
+        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        stream_id: StreamId,
+        packet: &[i8],
+        is_video: bool,
+    ) -> Result<()> {
+        let recorders = recorders
+            .get_mut(&stream_id)
+            .ok_or_else(|| anyhow!("Recorders missing"))?;
+        if is_video {
+            recorders.video.save_frame(packet)
+        } else {
+            recorders.audio.save_frame(packet)
+        }
+    }
+
+    fn handle_start(
+        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        stream_id: StreamId,
+        dir: &str,
+    ) -> Result<()> {
+        let now = Utc::now().timestamp_millis();
+
+        let video_filename = format!("{}.video", now);
+        let video = JanusRecorder::create(&dir, &video_filename, Codec::VP8)?;
+
+        let audio_filename = format!("{}.audio", now);
+        let audio = JanusRecorder::create(&dir, &audio_filename, Codec::OPUS)?;
+
+        match recorders.entry(stream_id) {
+            Entry::Occupied(e) => {
+                e.remove();
+                Err(anyhow!("Recorder already exists"))
+            }
+            Entry::Vacant(e) => {
+                e.insert(Recorders { audio, video });
+                Ok(())
+            }
+        }
+    }
+}
+
+struct Recorders<'a> {
+    audio: JanusRecorder<'a>,
+    video: JanusRecorder<'a>,
+}
+
+pub fn recorder(config: Config) -> (Recorder, RecorderHandlesCreator) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    (Recorder::new(rx), RecorderHandlesCreator::new(tx, config))
 }
 
 #[derive(Debug)]
-pub struct Recorder {
-    sender: mpsc::Sender<RecorderMsg>,
-    receiver_for_recorder_thread: Option<mpsc::Receiver<RecorderMsg>>,
-    recorder_thread_handle: Option<thread::JoinHandle<Result<()>>>,
+pub struct RecorderHandle {
+    sender: Sender<RecorderMsg>,
     stream_id: StreamId,
-    filename: Option<String>,
     save_root_dir: String,
+
     is_deletion_enabled: bool,
 }
 
@@ -61,18 +206,13 @@ pub struct Recorder {
 ///
 /// Recorder runs in separate thread.
 /// You're able to write buffers using `record_packet` method.
-impl Recorder {
-    pub fn new(config: &Config, stream_id: StreamId) -> Self {
-        let (sender, recv): (mpsc::Sender<RecorderMsg>, _) = mpsc::channel();
-
+impl RecorderHandle {
+    fn new(config: &Config, stream_id: StreamId, messages: Sender<RecorderMsg>) -> Self {
         Self {
-            sender,
-            receiver_for_recorder_thread: Some(recv),
-            recorder_thread_handle: None,
             stream_id,
             save_root_dir: config.directory.clone(),
-            filename: None,
             is_deletion_enabled: config.delete_records,
+            sender: messages,
         }
     }
 
@@ -80,6 +220,7 @@ impl Recorder {
         let msg = RecorderMsg::Packet {
             buf: buf.to_vec(),
             is_video,
+            stream_id: self.stream_id,
         };
 
         self.sender.send(msg).context("Failed to send packet")
@@ -90,69 +231,20 @@ impl Recorder {
 
         let dir = self.create_records_dir().to_string_lossy().into_owned();
 
-        // Handle the pipeline in a separate thread.
-        let recv = self
-            .receiver_for_recorder_thread
-            .take()
-            .ok_or_else(|| format_err!("Empty receiver in recorder"))?;
-
-        let stream_id = self.stream_id;
-
-        let handle = thread::spawn(move || {
-            verb!("Recorder thread started"; {"rtc_id": stream_id});
-
-            // Initialize recorders.
-            let now = Utc::now().timestamp_millis();
-
-            let video_filename = format!("{}.video", now);
-            let mut video_recorder = JanusRecorder::create(&dir, &video_filename, Codec::VP8)?;
-
-            let audio_filename = format!("{}.audio", now);
-            let mut audio_recorder = JanusRecorder::create(&dir, &audio_filename, Codec::OPUS)?;
-
-            info!("Recording to {}", dir; {"rtc_id": stream_id});
-
-            // Push RTP packets into the pipeline until stop message.
-            for msg in recv.iter() {
-                match msg {
-                    RecorderMsg::Stop => break,
-                    RecorderMsg::Packet { is_video, buf } => {
-                        let res = if is_video {
-                            video_recorder.save_frame(buf.as_slice())
-                        } else {
-                            audio_recorder.save_frame(buf.as_slice())
-                        };
-
-                        if let Err(err) = res {
-                            err!("Failed to record frame: {}", err; {"rtc_id": stream_id});
-                        }
-                    }
-                }
-            }
-
-            video_recorder.close()?;
-            audio_recorder.close()?;
-            info!("Recording stopped"; {"rtc_id": stream_id});
-            Ok(())
-        });
-
-        self.recorder_thread_handle = Some(handle);
-        Ok(())
+        self.sender
+            .send(RecorderMsg::Start {
+                stream_id: self.stream_id,
+                dir,
+            })
+            .context("Failed to start recording")
     }
 
-    pub fn stop_recording(&mut self) -> Result<()> {
-        self.sender.send(RecorderMsg::Stop)?;
-
-        if let Some(handle) = self.recorder_thread_handle.take() {
-            if let Err(err) = handle.join() {
-                err!(
-                    "Error during finalization of current record part: {:?}", err;
-                    {"rtc_id": self.stream_id}
-                );
-            }
-        }
-
-        Ok(())
+    pub fn stop_recording(&self) -> Result<()> {
+        self.sender
+            .send(RecorderMsg::Stop {
+                stream_id: self.stream_id,
+            })
+            .context("Failed to stop recording")
     }
 
     pub fn get_records_dir(&self) -> PathBuf {

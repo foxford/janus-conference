@@ -4,9 +4,12 @@ use anyhow::Result;
 use atom::AtomSetOnce;
 use chrono::Duration;
 
-use crate::conf::Config;
-use crate::message_handler::{JanusSender, MessageHandlingLoop};
 use crate::switchboard::LockedSwitchboard as Switchboard;
+use crate::{conf::Config, recorder::recorder};
+use crate::{
+    message_handler::{JanusSender, MessageHandlingLoop},
+    recorder::RecorderHandlesCreator,
+};
 
 lazy_static! {
     pub static ref APP: AtomSetOnce<Box<App>> = AtomSetOnce::empty();
@@ -24,6 +27,7 @@ pub struct App {
     pub config: Config,
     pub switchboard: Switchboard,
     pub message_handling_loop: MessageHandlingLoop,
+    pub recorders_creator: RecorderHandlesCreator,
 }
 
 impl App {
@@ -32,9 +36,12 @@ impl App {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
         }
+        let (recorder, handles_creator) = recorder(config.recordings.clone());
 
-        let app = App::new(config)?;
+        let app = App::new(config, handles_creator)?;
         APP.set_if_none(Box::new(app));
+
+        thread::spawn(|| recorder.start());
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
@@ -55,11 +62,12 @@ impl App {
         Ok(())
     }
 
-    pub fn new(config: Config) -> Result<Self> {
+    pub fn new(config: Config, recorders_creator: RecorderHandlesCreator) -> Result<Self> {
         Ok(Self {
             config,
             switchboard: Switchboard::new(),
             message_handling_loop: MessageHandlingLoop::new(JanusSender::new()),
+            recorders_creator,
         })
     }
 }

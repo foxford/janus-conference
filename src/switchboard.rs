@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
-use crate::recorder::Recorder;
+use crate::recorder::RecorderHandle;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,7 +45,7 @@ pub struct SessionState {
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
-    recorder: Option<Recorder>,
+    recorder: Option<RecorderHandle>,
 }
 
 impl SessionState {
@@ -102,15 +102,15 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    pub fn recorder(&self) -> Option<&Recorder> {
+    pub fn recorder(&self) -> Option<&RecorderHandle> {
         self.recorder.as_ref()
     }
 
-    pub fn recorder_mut(&mut self) -> Option<&mut Recorder> {
+    pub fn recorder_mut(&mut self) -> Option<&mut RecorderHandle> {
         self.recorder.as_mut()
     }
 
-    pub fn set_recorder(&mut self, recorder: Recorder) -> &mut Self {
+    pub fn set_recorder(&mut self, recorder: RecorderHandle) -> &mut Self {
         self.recorder = Some(recorder);
         self
     }
