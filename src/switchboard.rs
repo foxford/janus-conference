@@ -7,6 +7,7 @@ use anyhow::{bail, format_err, Context, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
+use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
@@ -198,9 +199,7 @@ impl Default for WriterConfig {
     }
 }
 
-lazy_static! {
-    static ref DEFAULT_WRITER_CONFIG: WriterConfig = Default::default();
-}
+static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(|| Default::default());
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -481,6 +480,7 @@ impl Switchboard {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct LockedSwitchboard(RwLock<Switchboard>);
 
 impl LockedSwitchboard {

@@ -1,8 +1,8 @@
 use std::thread;
 
 use anyhow::Result;
-use atom::AtomSetOnce;
 use chrono::Duration;
+use once_cell::sync::OnceCell;
 
 use crate::switchboard::LockedSwitchboard as Switchboard;
 use crate::{conf::Config, recorder::recorder};
@@ -11,9 +11,7 @@ use crate::{
     recorder::RecorderHandlesCreator,
 };
 
-lazy_static! {
-    pub static ref APP: AtomSetOnce<Box<App>> = AtomSetOnce::empty();
-}
+pub static APP: OnceCell<App> = OnceCell::new();
 
 macro_rules! app {
     () => {
@@ -23,6 +21,7 @@ macro_rules! app {
     };
 }
 
+#[derive(Debug)]
 pub struct App {
     pub config: Config,
     pub switchboard: Switchboard,
@@ -39,7 +38,7 @@ impl App {
         let (recorder, handles_creator) = recorder(config.recordings.clone());
 
         let app = App::new(config, handles_creator)?;
-        APP.set_if_none(Box::new(app));
+        APP.set(app).expect("Already initialized");
 
         thread::spawn(|| recorder.start());
 

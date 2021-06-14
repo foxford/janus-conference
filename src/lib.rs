@@ -6,16 +6,20 @@ extern crate anyhow;
 extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
-extern crate lazy_static;
 
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
+use std::{
+    convert::TryInto,
+    os::raw::{c_char, c_int},
+};
+use std::{
+    ffi::{CStr, CString},
+    time::Duration,
+};
 
 use anyhow::{bail, format_err, Context, Result};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
     PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
@@ -44,9 +48,7 @@ use switchboard::SessionId;
 
 const INITIAL_REMBS: u64 = 4;
 
-lazy_static! {
-    static ref REMB_INTERVAL: Duration = Duration::seconds(5);
-}
+static REMB_INTERVAL: Duration = Duration::from_secs(5);
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -218,7 +220,9 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 state.touch_last_remb_timestamp();
                 state.increment_initial_rembs_counter();
             } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                if Utc::now() - last_remb_timestamp
+                    >= chrono::Duration::from_std(REMB_INTERVAL).expect("Must be in range")
+                {
                     send_remb(session_id, target_bitrate);
                     state.touch_last_remb_timestamp();
                 }

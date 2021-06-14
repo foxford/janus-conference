@@ -44,7 +44,7 @@ impl From<Method> for Box<dyn Operation> {
 
 impl Router for Method {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JanusSender;
 
 impl JanusSender {

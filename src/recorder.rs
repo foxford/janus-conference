@@ -57,6 +57,7 @@ enum RecorderMsg {
     },
 }
 
+#[derive(Debug)]
 pub struct RecorderHandlesCreator {
     sender: Sender<RecorderMsg>,
     config: Config,

@@ -27,6 +27,7 @@ enum Message {
     Response(Response),
 }
 
+#[derive(Debug)]
 pub struct MessageHandlingLoop<R, S> {
     tx: async_std::channel::Sender<Message>,
     rx: async_std::channel::Receiver<Message>,
