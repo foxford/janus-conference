@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -6,6 +5,7 @@ use std::thread;
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
 use uuid::Uuid;
 
@@ -206,25 +206,25 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct Switchboard {
-    sessions: HashMap<SessionId, LockedSession>,
-    states: HashMap<SessionId, SessionState>,
+    sessions: FnvHashMap<SessionId, LockedSession>,
+    states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
-    publishers: HashMap<StreamId, SessionId>,
+    publishers: FnvHashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
-    reader_configs: HashMap<(StreamId, AgentId), ReaderConfig>,
-    writer_configs: HashMap<StreamId, WriterConfig>,
+    reader_configs: FnvHashMap<(StreamId, AgentId), ReaderConfig>,
+    writer_configs: FnvHashMap<StreamId, WriterConfig>,
 }
 
 impl Switchboard {
     pub fn new() -> Self {
         Self {
-            sessions: HashMap::new(),
-            states: HashMap::new(),
+            sessions: FnvHashMap::default(),
+            states: FnvHashMap::default(),
             agents: BidirectionalMultimap::new(),
-            publishers: HashMap::new(),
+            publishers: FnvHashMap::default(),
             publishers_subscribers: BidirectionalMultimap::new(),
-            reader_configs: HashMap::new(),
-            writer_configs: HashMap::new(),
+            reader_configs: FnvHashMap::default(),
+            writer_configs: FnvHashMap::default(),
         }
     }
 

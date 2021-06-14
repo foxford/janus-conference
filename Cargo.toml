@@ -27,6 +27,7 @@ svc-error = { version = "0.1", features = ["sentry-extension"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 bytes = "1"
 crossbeam-channel = "0.5"
+fnv = "1"
 
 [dependencies.sentry]
 version = "0.22"

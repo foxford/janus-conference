@@ -1,8 +1,8 @@
+use std::fmt;
 use std::{
     collections::hash_map::Entry,
     path::{Path, PathBuf},
 };
-use std::{collections::HashMap, fmt};
 use std::{
     error::Error as StdError,
     time::{Duration, Instant},
@@ -12,6 +12,7 @@ use std::{fs, io};
 use anyhow::{bail, Context, Error, Result};
 use chrono::Utc;
 use crossbeam_channel::{Receiver, Sender};
+use fnv::FnvHashMap;
 
 use crate::janus_recorder::{Codec, JanusRecorder};
 use crate::switchboard::StreamId;
@@ -81,7 +82,7 @@ impl Recorder {
     }
 
     pub fn start(self) {
-        let mut recorders = HashMap::new();
+        let mut recorders = FnvHashMap::default();
         let mut now = Instant::now();
         let log_interval = Duration::from_secs(15);
         loop {
@@ -124,7 +125,7 @@ impl Recorder {
     }
 
     fn handle_stop(
-        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        recorders: &mut FnvHashMap<StreamId, Recorders<'_>>,
         stream_id: StreamId,
     ) -> Result<()> {
         let mut recorders = recorders
@@ -136,7 +137,7 @@ impl Recorder {
     }
 
     fn handle_packet(
-        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        recorders: &mut FnvHashMap<StreamId, Recorders<'_>>,
         stream_id: StreamId,
         packet: &[i8],
         is_video: bool,
@@ -152,7 +153,7 @@ impl Recorder {
     }
 
     fn handle_start(
-        recorders: &mut HashMap<StreamId, Recorders<'_>>,
+        recorders: &mut FnvHashMap<StreamId, Recorders<'_>>,
         stream_id: StreamId,
         dir: &str,
     ) -> Result<()> {

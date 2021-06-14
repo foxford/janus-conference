@@ -1,14 +1,14 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use fnv::FnvHashMap;
 use multimap::MultiMap;
 
 #[derive(Debug)]
 pub struct BidirectionalMultimap<K: Eq + Hash, V: Eq + Hash> {
     forward_mapping: MultiMap<K, V>,
-    inverse_mapping: HashMap<V, K>,
+    inverse_mapping: FnvHashMap<V, K>,
 }
 
 #[allow(dead_code)]
@@ -20,7 +20,7 @@ where
     pub fn new() -> Self {
         Self {
             forward_mapping: MultiMap::new(),
-            inverse_mapping: HashMap::new(),
+            inverse_mapping: FnvHashMap::default(),
         }
     }
 

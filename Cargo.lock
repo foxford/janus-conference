@@ -1026,6 +1026,7 @@ dependencies = [
  "chrono",
  "config",
  "crossbeam-channel 0.5.1",
+ "fnv",
  "http 0.1.21",
  "janus-plugin",
  "janus-plugin-sys",
