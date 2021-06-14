@@ -34,7 +34,7 @@ impl super::Operation for Request {
 
             let mut start_recording = || {
                 if app.config.recordings.enabled {
-                    let mut recorder = app.recorders_creator.new_handle(self.id);
+                    let recorder = app.recorders_creator.new_handle(self.id);
                     recorder.start_recording()?;
                     verb!("Attaching recorder"; {"handle_id": request.session_id()});
                     switchboard.state_mut(request.session_id())?.set_recorder(recorder);

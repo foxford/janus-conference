@@ -84,19 +84,18 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 }
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
+    let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
+    let session_id = SessionId::new(ice_handle.handle_id);
+    verb!("Initializing session"; {"handle_id": session_id});
+    // WARNING: If this variable gets dropped the memory would be freed by C.
+    //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
+    //          which would cause segfault on drop.
+    //          To prevent this we have to store this variable as is and make sure it won't
+    //          be dropped until there're no callbacks possible to call for this handle.
+    let session = unsafe { SessionWrapper::associate(handle, session_id) }
+        .context("Session associate error")?;
+
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
-        let session_id = SessionId::new(ice_handle.handle_id);
-        verb!("Initializing session"; {"handle_id": session_id});
-
-        // WARNING: If this variable gets dropped the memory would be freed by C.
-        //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
-        //          which would cause segfault on drop.
-        //          To prevent this we have to store this variable as is and make sure it won't
-        //          be dropped until there're no callbacks possible to call for this handle.
-        let session = unsafe { SessionWrapper::associate(handle, session_id) }
-            .context("Session associate error")?;
-
         switchboard.connect(session)?;
         Ok(())
     })
@@ -159,9 +158,8 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 }
 
 fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
+    let session_id = session_id(handle)?;
     app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-
         if let Some(publisher) = switchboard.publisher_to(session_id) {
             send_fir(publisher);
         }
@@ -178,13 +176,12 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     let app = app!()?;
+    let mut packet = unsafe { &mut *packet };
+    let is_video = matches!(packet.video, 1);
 
+    // Touch last packet timestamp to drop timeout.
+    let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
-        let mut packet = unsafe { &mut *packet };
-        let is_video = matches!(packet.video, 1);
-
-        // Touch last packet timestamp to drop timeout.
-        let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
         state.touch_last_rtp_packet_timestamp();
 
@@ -269,11 +266,11 @@ extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpP
 }
 
 fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) -> Result<()> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-        let mut packet = unsafe { &mut *packet };
-        let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
+    let session_id = session_id(handle)?;
+    let mut packet = unsafe { &mut *packet };
+    let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
+    app!()?.switchboard.with_read_lock(|switchboard| {
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {

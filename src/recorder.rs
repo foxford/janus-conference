@@ -228,7 +228,7 @@ impl RecorderHandle {
         self.sender.send(msg).context("Failed to send packet")
     }
 
-    pub fn start_recording(&mut self) -> Result<()> {
+    pub fn start_recording(&self) -> Result<()> {
         info!("Start recording"; {"rtc_id": self.stream_id});
 
         let dir = self.create_records_dir().to_string_lossy().into_owned();
