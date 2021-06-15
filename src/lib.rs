@@ -7,13 +7,10 @@ extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
 
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
-use std::{
-    ffi::{CStr, CString},
-    time::Duration,
-};
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::Utc;
@@ -46,8 +43,6 @@ use switchboard::SessionId;
 use crate::message_handler::{handle_request, prepare_request, send_response};
 
 const INITIAL_REMBS: u64 = 4;
-
-static REMB_INTERVAL: Duration = Duration::from_secs(5);
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -207,6 +202,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
         // Do it only for video because Windows and Linux don't make a difference for media types
         // and apply audio limitation to video while only MacOS does.
+        let remb_interval = chrono::Duration::seconds(5);
         if is_video {
             let target_bitrate = writer_config.video_remb();
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
@@ -217,9 +213,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 state.touch_last_remb_timestamp();
                 state.increment_initial_rembs_counter();
             } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp
-                    >= chrono::Duration::from_std(REMB_INTERVAL).expect("Must be in range")
-                {
+                if Utc::now() - last_remb_timestamp >= remb_interval {
                     send_remb(session_id, target_bitrate);
                     state.touch_last_remb_timestamp();
                 }
