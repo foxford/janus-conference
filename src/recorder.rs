@@ -7,7 +7,7 @@ use std::{
 use std::{fs, io};
 
 use anyhow::{bail, Context, Error, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use crossbeam_channel::{Receiver, Sender};
 use fnv::FnvHashMap;
 
@@ -51,6 +51,7 @@ enum RecorderMsg {
     Start {
         stream_id: StreamId,
         dir: String,
+        start_time: DateTime<Utc>,
     },
 }
 
@@ -103,9 +104,14 @@ impl Recorder {
                         err!("Failed to record frame: {:?}", err; {"rtc_id": stream_id});
                     }
                 }
-                RecorderMsg::Start { dir, stream_id } => {
+                RecorderMsg::Start {
+                    dir,
+                    stream_id,
+                    start_time,
+                } => {
                     if let Err(err) =
-                        Self::handle_start(&mut recorders, stream_id, &dir).context("Start")
+                        Self::handle_start(&mut recorders, stream_id, &dir, start_time)
+                            .context("Start")
                     {
                         err!("Failed to create recorders: {:?}", err; {"rtc_id": stream_id})
                     } else {
@@ -148,13 +154,12 @@ impl Recorder {
         recorders: &mut FnvHashMap<StreamId, Recorders<'_>>,
         stream_id: StreamId,
         dir: &str,
+        start_time: DateTime<Utc>,
     ) -> Result<()> {
-        let now = Utc::now().timestamp_millis();
-
-        let video_filename = format!("{}.video", now);
+        let video_filename = format!("{}.video", start_time);
         let video = JanusRecorder::create(dir, &video_filename, Codec::VP8)?;
 
-        let audio_filename = format!("{}.audio", now);
+        let audio_filename = format!("{}.audio", start_time);
         let audio = JanusRecorder::create(dir, &audio_filename, Codec::Opus)?;
 
         match recorders.entry(stream_id) {
@@ -228,6 +233,7 @@ impl RecorderHandle {
             .send(RecorderMsg::Start {
                 stream_id: self.stream_id,
                 dir,
+                start_time: Utc::now(),
             })
             .context("Failed to start recording")
     }
