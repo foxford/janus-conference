@@ -156,10 +156,10 @@ impl Recorder {
         dir: &str,
         start_time: DateTime<Utc>,
     ) -> Result<()> {
-        let video_filename = format!("{}.video", start_time);
+        let video_filename = format!("{}.video", start_time.timestamp_millis());
         let video = JanusRecorder::create(dir, &video_filename, Codec::VP8)?;
 
-        let audio_filename = format!("{}.audio", start_time);
+        let audio_filename = format!("{}.audio", start_time.timestamp_millis());
         let audio = JanusRecorder::create(dir, &audio_filename, Codec::Opus)?;
 
         match recorders.entry(stream_id) {
