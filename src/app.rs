@@ -6,10 +6,7 @@ use once_cell::sync::OnceCell;
 
 use crate::switchboard::LockedSwitchboard as Switchboard;
 use crate::{conf::Config, recorder::recorder};
-use crate::{
-    message_handler::{JanusSender, MessageHandlingLoop},
-    recorder::RecorderHandlesCreator,
-};
+use crate::{message_handler::JanusSender, recorder::RecorderHandlesCreator};
 
 pub static APP: OnceCell<App> = OnceCell::new();
 
@@ -25,8 +22,8 @@ macro_rules! app {
 pub struct App {
     pub config: Config,
     pub switchboard: Switchboard,
-    pub message_handling_loop: MessageHandlingLoop,
     pub recorders_creator: RecorderHandlesCreator,
+    pub janus_sender: JanusSender,
 }
 
 impl App {
@@ -41,12 +38,6 @@ impl App {
         APP.set(app).expect("Already initialized");
 
         thread::spawn(|| recorder.start());
-
-        thread::spawn(|| {
-            if let Ok(app) = app!() {
-                app.message_handling_loop.start();
-            }
-        });
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
@@ -65,8 +56,8 @@ impl App {
         Ok(Self {
             config,
             switchboard: Switchboard::new(),
-            message_handling_loop: MessageHandlingLoop::new(JanusSender::new()),
             recorders_creator,
+            janus_sender: JanusSender::new(),
         })
     }
 }

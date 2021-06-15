@@ -4,13 +4,17 @@ mod operations;
 use std::ffi::CString;
 
 use anyhow::{format_err, Context, Result};
+use async_trait::async_trait;
 use janus::JanssonValue;
 
-use self::generic::{MessageHandlingLoop as GenericLoop, Router, Sender};
+use self::generic::Sender;
 use crate::janus_callbacks;
 use crate::switchboard::SessionId;
 
-pub use self::generic::{Operation, OperationResult, Request};
+pub use self::generic::{
+    handle_request, prepare_request, send_response, Operation, OperationResult, PreparedRequest,
+    Request,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "method")]
@@ -29,20 +33,30 @@ pub enum Method {
     WriterConfigUpdate(operations::writer_config_update::Request),
 }
 
-impl From<Method> for Box<dyn Operation> {
-    fn from(val: Method) -> Self {
-        match val {
-            Method::AgentLeave(op) => Box::new(op),
-            Method::ReaderConfigUpdate(op) => Box::new(op),
-            Method::StreamCreate(op) => Box::new(op),
-            Method::StreamRead(op) => Box::new(op),
-            Method::StreamUpload(op) => Box::new(op),
-            Method::WriterConfigUpdate(op) => Box::new(op),
+#[async_trait]
+impl Operation for Method {
+    async fn call(&self, request: &generic::Request) -> OperationResult {
+        match self {
+            Method::AgentLeave(x) => x.call(request).await,
+            Method::ReaderConfigUpdate(x) => x.call(request).await,
+            Method::StreamCreate(x) => x.call(request).await,
+            Method::StreamRead(x) => x.call(request).await,
+            Method::StreamUpload(x) => x.call(request).await,
+            Method::WriterConfigUpdate(x) => x.call(request).await,
+        }
+    }
+
+    fn stream_id(&self) -> Option<crate::switchboard::StreamId> {
+        match self {
+            Method::AgentLeave(x) => x.stream_id(),
+            Method::ReaderConfigUpdate(x) => x.stream_id(),
+            Method::StreamCreate(x) => x.stream_id(),
+            Method::StreamRead(x) => x.stream_id(),
+            Method::StreamUpload(x) => x.stream_id(),
+            Method::WriterConfigUpdate(x) => x.stream_id(),
         }
     }
 }
-
-impl Router for Method {}
 
 #[derive(Clone, Debug)]
 pub struct JanusSender;
@@ -78,5 +92,3 @@ impl Sender for JanusSender {
         })
     }
 }
-
-pub type MessageHandlingLoop = GenericLoop<Method, JanusSender>;

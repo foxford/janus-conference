@@ -43,6 +43,8 @@ use app::App;
 use conf::Config;
 use switchboard::SessionId;
 
+use crate::message_handler::{handle_request, prepare_request, send_response};
+
 const INITIAL_REMBS: u64 = 4;
 
 static REMB_INTERVAL: Duration = Duration::from_secs(5);
@@ -136,12 +138,13 @@ fn handle_message_impl(
     };
 
     if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
+        let janus_sender = app!()?.janus_sender.clone();
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
-
-        app!()?
-            .message_handling_loop
-            .schedule_request(session_id, &transaction, &json, jsep_offer)
-            .context("Failed to schedule message handling")?;
+        let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
+        async_std::task::spawn(async move {
+            let response = handle_request(request).await;
+            send_response(janus_sender, response);
+        });
     }
 
     Ok(())
