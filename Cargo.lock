@@ -1021,7 +1021,6 @@ dependencies = [
  "anyhow",
  "async-std",
  "async-trait",
- "bytes 1.0.1",
  "chrono",
  "config",
  "crossbeam-channel 0.5.1",

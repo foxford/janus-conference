@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 async-trait = "0.1"
-async-std = { version = "1.9", features = ["unstable"] }
+async-std = { version="1.9", features=["unstable"] }
 anyhow = "1.0"
 chrono = "0.4"
 janus-plugin-sys = "0.7"
@@ -21,9 +21,8 @@ config = "0.10"
 libc = "0.2"
 multimap = "0.8"
 http = "0.1"
-svc-error = { version = "0.1", features = ["sentry-extension"] }
-uuid = { version = "0.8", features = ["serde", "v4"] }
-bytes = "1"
+svc-error = { version="0.1", features=["sentry-extension"] }
+uuid = { version="0.8", features=["serde", "v4"] }
 crossbeam-channel = "0.5"
 fnv = "1"
 once_cell = "1"
@@ -34,5 +33,5 @@ default-features = false
 features = ["anyhow", "backtrace", "contexts", "panic", "surf"]
 
 [patch.crates-io]
-janus-plugin-sys = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "feature/api-v15" }
-janus-plugin = { git = "https://github.com/netology-group/janus-plugin-rs", branch = "feature/api-v15" }
+janus-plugin-sys = { git="https://github.com/netology-group/janus-plugin-rs", branch="feature/api-v15" }
+janus-plugin = { git="https://github.com/netology-group/janus-plugin-rs", branch="feature/api-v15" }
