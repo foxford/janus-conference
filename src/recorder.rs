@@ -1,11 +1,8 @@
+use std::error::Error as StdError;
 use std::fmt;
 use std::{
     collections::hash_map::Entry,
     path::{Path, PathBuf},
-};
-use std::{
-    error::Error as StdError,
-    time::{Duration, Instant},
 };
 use std::{fs, io};
 
@@ -84,14 +81,8 @@ impl Recorder {
 
     pub fn start(self) {
         let mut recorders = FnvHashMap::default();
-        let mut now = Instant::now();
-        let log_interval = Duration::from_secs(15);
         loop {
             let msg = self.messages.recv().expect("All senders dropped");
-            if now.elapsed() > log_interval {
-                now = Instant::now();
-                info!("Messages in channel: {}", self.messages.len())
-            }
             match msg {
                 RecorderMsg::Stop { stream_id } => {
                     if let Err(err) = Self::handle_stop(&mut recorders, stream_id).context("Stop") {
