@@ -479,6 +479,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06ed27e177f16d65f0f0c22a213e17c696ace5dd64b14258b52f9417ccb52db4"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-utils 0.8.3",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1011,15 +1021,16 @@ dependencies = [
  "anyhow",
  "async-std",
  "async-trait",
- "atom",
  "chrono",
  "config",
+ "crossbeam-channel 0.5.1",
+ "fnv",
  "http 0.1.21",
  "janus-plugin",
  "janus-plugin-sys",
- "lazy_static",
  "libc",
  "multimap",
+ "once_cell",
  "sentry",
  "serde 1.0.124",
  "serde_derive",
@@ -1957,7 +1968,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8e5a94f778534fc4221c0505fba86e17360d5d18d82bcec9c77d4b7983a826c"
 dependencies = [
  "atom",
- "crossbeam-channel",
+ "crossbeam-channel 0.4.4",
  "http 0.1.21",
  "lazy_static",
  "sentry",

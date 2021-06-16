@@ -13,7 +13,7 @@ use libc::{pthread_mutex_t, FILE};
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum Codec {
     VP8,
-    OPUS,
+    Opus,
     H264,
     G711,
     VP9,
@@ -23,7 +23,7 @@ impl Codec {
     fn as_str(self) -> &'static str {
         match self {
             Self::VP8 => "vp8",
-            Self::OPUS => "opus",
+            Self::Opus => "opus",
             Self::H264 => "h264",
             Self::G711 => "g711",
             Self::VP9 => "vp9",

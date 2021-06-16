@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -6,12 +5,14 @@ use std::thread;
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
+use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
-use crate::recorder::Recorder;
+use crate::recorder::RecorderHandle;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,7 +46,7 @@ pub struct SessionState {
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
-    recorder: Option<Recorder>,
+    recorder: Option<RecorderHandle>,
 }
 
 impl SessionState {
@@ -102,15 +103,15 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    pub fn recorder(&self) -> Option<&Recorder> {
+    pub fn recorder(&self) -> Option<&RecorderHandle> {
         self.recorder.as_ref()
     }
 
-    pub fn recorder_mut(&mut self) -> Option<&mut Recorder> {
+    pub fn recorder_mut(&mut self) -> Option<&mut RecorderHandle> {
         self.recorder.as_mut()
     }
 
-    pub fn set_recorder(&mut self, recorder: Recorder) -> &mut Self {
+    pub fn set_recorder(&mut self, recorder: RecorderHandle) -> &mut Self {
         self.recorder = Some(recorder);
         self
     }
@@ -198,33 +199,31 @@ impl Default for WriterConfig {
     }
 }
 
-lazy_static! {
-    static ref DEFAULT_WRITER_CONFIG: WriterConfig = Default::default();
-}
+static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
 pub struct Switchboard {
-    sessions: HashMap<SessionId, LockedSession>,
-    states: HashMap<SessionId, SessionState>,
+    sessions: FnvHashMap<SessionId, LockedSession>,
+    states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
-    publishers: HashMap<StreamId, SessionId>,
+    publishers: FnvHashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
-    reader_configs: HashMap<(StreamId, AgentId), ReaderConfig>,
-    writer_configs: HashMap<StreamId, WriterConfig>,
+    reader_configs: FnvHashMap<(StreamId, AgentId), ReaderConfig>,
+    writer_configs: FnvHashMap<StreamId, WriterConfig>,
 }
 
 impl Switchboard {
     pub fn new() -> Self {
         Self {
-            sessions: HashMap::new(),
-            states: HashMap::new(),
+            sessions: FnvHashMap::default(),
+            states: FnvHashMap::default(),
             agents: BidirectionalMultimap::new(),
-            publishers: HashMap::new(),
+            publishers: FnvHashMap::default(),
             publishers_subscribers: BidirectionalMultimap::new(),
-            reader_configs: HashMap::new(),
-            writer_configs: HashMap::new(),
+            reader_configs: FnvHashMap::default(),
+            writer_configs: FnvHashMap::default(),
         }
     }
 
@@ -481,6 +480,7 @@ impl Switchboard {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct LockedSwitchboard(RwLock<Switchboard>);
 
 impl LockedSwitchboard {

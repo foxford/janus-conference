@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::recorder::Recorder;
+use crate::recorder::RecorderHandle;
 use crate::switchboard::StreamId;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -73,15 +73,16 @@ impl super::Operation for Request {
                 Ok(())
             })
             .map_err(internal_error)?;
-
-        let recorder_config = app!().map_err(internal_error)?.config.recordings.clone();
-        let recorder = Recorder::new(&recorder_config, self.id);
+        let recorder = app!()
+            .map_err(internal_error)?
+            .recorders_creator
+            .new_handle(self.id);
 
         recorder
             .check_existence()
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
-        match upload_record(&self).await.map_err(internal_error)? {
+        match upload_record(self).await.map_err(internal_error)? {
             UploadStatus::AlreadyRunning => {
                 Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
             }
@@ -173,7 +174,7 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
         })
 }
 
-fn get_dump_uris(recorder: &Recorder) -> Result<Vec<String>> {
+fn get_dump_uris(recorder: &RecorderHandle) -> Result<Vec<String>> {
     let mut path = recorder.get_records_dir();
     path.push("dumps.txt");
     Ok(BufReader::new(File::open(path)?)
@@ -181,7 +182,7 @@ fn get_dump_uris(recorder: &Recorder) -> Result<Vec<String>> {
         .collect::<Result<Vec<_>, _>>()?)
 }
 
-fn parse_segments(recorder: &Recorder) -> Result<(u64, Vec<(u64, u64)>)> {
+fn parse_segments(recorder: &RecorderHandle) -> Result<(u64, Vec<(u64, u64)>)> {
     let mut path = recorder.get_records_dir();
     path.push("segments.csv");
 

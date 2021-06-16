@@ -6,8 +6,6 @@ extern crate anyhow;
 extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
-#[macro_use]
-extern crate lazy_static;
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
@@ -15,7 +13,7 @@ use std::path::Path;
 use std::slice;
 
 use anyhow::{bail, format_err, Context, Result};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
     PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
@@ -42,11 +40,9 @@ use app::App;
 use conf::Config;
 use switchboard::SessionId;
 
-const INITIAL_REMBS: u64 = 4;
+use crate::message_handler::{handle_request, prepare_request, send_response};
 
-lazy_static! {
-    static ref REMB_INTERVAL: Duration = Duration::seconds(5);
-}
+const INITIAL_REMBS: u64 = 4;
 
 extern "C" fn init(callbacks: *mut PluginCallbacks, config_path: *const c_char) -> c_int {
     let config = match init_config(config_path) {
@@ -74,7 +70,7 @@ fn init_config(config_path: *const c_char) -> Result<Config> {
     let config_path = config_path.to_str()?;
     let config_path = Path::new(config_path);
 
-    Ok(Config::from_path(config_path)?)
+    Config::from_path(config_path)
 }
 
 extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -85,19 +81,18 @@ extern "C" fn create_session(handle: *mut PluginSession, error: *mut c_int) {
 }
 
 fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
+    let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
+    let session_id = SessionId::new(ice_handle.handle_id);
+    verb!("Initializing session"; {"handle_id": session_id});
+    // WARNING: If this variable gets dropped the memory would be freed by C.
+    //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
+    //          which would cause segfault on drop.
+    //          To prevent this we have to store this variable as is and make sure it won't
+    //          be dropped until there're no callbacks possible to call for this handle.
+    let session = unsafe { SessionWrapper::associate(handle, session_id) }
+        .context("Session associate error")?;
+
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        let ice_handle = unsafe { &*((*handle).gateway_handle as *mut utils::janus_ice_handle) };
-        let session_id = SessionId::new(ice_handle.handle_id);
-        verb!("Initializing session"; {"handle_id": session_id});
-
-        // WARNING: If this variable gets dropped the memory would be freed by C.
-        //          Any future calls to `SessionWrapper::from_ptr` would return an invalid result
-        //          which would cause segfault on drop.
-        //          To prevent this we have to store this variable as is and make sure it won't
-        //          be dropped until there're no callbacks possible to call for this handle.
-        let session = unsafe { SessionWrapper::associate(handle, session_id) }
-            .context("Session associate error")?;
-
         switchboard.connect(session)?;
         Ok(())
     })
@@ -138,12 +133,13 @@ fn handle_message_impl(
     };
 
     if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
+        let janus_sender = app!()?.janus_sender.clone();
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
-
-        app!()?
-            .message_handling_loop
-            .schedule_request(session_id, &transaction, &json, jsep_offer)
-            .context("Failed to schedule message handling")?;
+        let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
+        async_std::task::spawn(async move {
+            let response = handle_request(request).await;
+            send_response(janus_sender, response);
+        });
     }
 
     Ok(())
@@ -160,9 +156,8 @@ extern "C" fn setup_media(handle: *mut PluginSession) {
 }
 
 fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
+    let session_id = session_id(handle)?;
     app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-
         if let Some(publisher) = switchboard.publisher_to(session_id) {
             send_fir(publisher);
         }
@@ -179,13 +174,12 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     let app = app!()?;
+    let mut packet = unsafe { &mut *packet };
+    let is_video = matches!(packet.video, 1);
 
+    // Touch last packet timestamp to drop timeout.
+    let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
-        let mut packet = unsafe { &mut *packet };
-        let is_video = matches!(packet.video, 1);
-
-        // Touch last packet timestamp to drop timeout.
-        let session_id = session_id(handle)?;
         let state = switchboard.state(session_id)?;
         state.touch_last_rtp_packet_timestamp();
 
@@ -208,6 +202,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
         // Do it only for video because Windows and Linux don't make a difference for media types
         // and apply audio limitation to video while only MacOS does.
+        let remb_interval = chrono::Duration::seconds(5);
         if is_video {
             let target_bitrate = writer_config.video_remb();
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
@@ -218,7 +213,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 state.touch_last_remb_timestamp();
                 state.increment_initial_rembs_counter();
             } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= *REMB_INTERVAL {
+                if Utc::now() - last_remb_timestamp >= remb_interval {
                     send_remb(session_id, target_bitrate);
                     state.touch_last_remb_timestamp();
                 }
@@ -268,11 +263,11 @@ extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpP
 }
 
 fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) -> Result<()> {
-    app!()?.switchboard.with_read_lock(|switchboard| {
-        let session_id = session_id(handle)?;
-        let mut packet = unsafe { &mut *packet };
-        let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
+    let session_id = session_id(handle)?;
+    let mut packet = unsafe { &mut *packet };
+    let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
+    app!()?.switchboard.with_read_lock(|switchboard| {
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {

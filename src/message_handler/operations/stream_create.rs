@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::recorder::Recorder;
 use crate::switchboard::{AgentId, StreamId};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -35,7 +34,7 @@ impl super::Operation for Request {
 
             let mut start_recording = || {
                 if app.config.recordings.enabled {
-                    let mut recorder = Recorder::new(&app.config.recordings, self.id);
+                    let recorder = app.recorders_creator.new_handle(self.id);
                     recorder.start_recording()?;
                     verb!("Attaching recorder"; {"handle_id": request.session_id()});
                     switchboard.state_mut(request.session_id())?.set_recorder(recorder);
