@@ -54,14 +54,17 @@ else
   exit 251
 fi
 
+# Remove artifacts from possible previous run to avoid concat duplication.
+rm -f sources.txt segments.csv dumps.txt
+
 for FILE in *.mjr; do
-${AWS} s3 cp ${FILE} s3://${BUCKET}/${RTC_ID}_dump/${FILE} \
-  --only-show-errors \
-  --cache-control 'no-cache'
+  DUMP_FILE="s3://${BUCKET}/${RTC_ID}_dump/${FILE}"
+  ${AWS} s3 cp ${FILE} ${DUMP_FILE} \
+    --only-show-errors \
+    --cache-control 'no-cache'
+  echo ${DUMP_FILE} >> dumps.txt
 done
 
-# Remove artifacts from possible previous run to avoid concat duplication.
-rm -f sources.txt segments.csv
 
 # Select all uniq prefixes where both audio.mjr and video.mjr larger than 8 bytes
 PREFIXES=$(sort <(find . -type f -name '*.mjr' -size +8 | sed "s|^\./||" | sed -E "s/.((audio)|(video)).mjr$//") | uniq -d)
