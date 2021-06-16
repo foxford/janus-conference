@@ -23,6 +23,7 @@ struct Response {
     id: StreamId,
     started_at: u64,
     time: Vec<(u64, u64)>,
+    mjr_dumps_uris: Vec<String>,
 }
 
 #[async_trait]
@@ -87,13 +88,14 @@ impl super::Operation for Request {
             }
             UploadStatus::Done => {
                 let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
-
+                let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
                 recorder.delete_record().map_err(internal_error)?;
 
                 Ok(Response {
                     id: self.id,
                     started_at,
                     time: segments,
+                    mjr_dumps_uris: dumps,
                 }
                 .into())
             }
@@ -170,6 +172,14 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
                 }
             }
         })
+}
+
+fn get_dump_uris(recorder: &RecorderHandle) -> Result<Vec<String>> {
+    let mut path = recorder.get_records_dir();
+    path.push("dumps.txt");
+    Ok(BufReader::new(File::open(path)?)
+        .lines()
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 fn parse_segments(recorder: &RecorderHandle) -> Result<(u64, Vec<(u64, u64)>)> {
