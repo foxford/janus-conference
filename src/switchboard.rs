@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
+use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -42,6 +43,7 @@ impl fmt::Display for SessionId {
 
 #[derive(Debug)]
 pub struct SessionState {
+    switching_context: JanusRtpSwitchingContext,
     fir_seq: AtomicI32,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
@@ -52,12 +54,17 @@ pub struct SessionState {
 impl SessionState {
     fn new() -> Self {
         Self {
+            switching_context: JanusRtpSwitchingContext::new(),
             fir_seq: AtomicI32::new(0),
             initial_rembs_counter: AtomicU64::new(0),
             last_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
         }
+    }
+
+    pub fn switching_context(&self) -> &JanusRtpSwitchingContext {
+        &self.switching_context
     }
 
     pub fn increment_fir_seq(&self) -> i32 {
