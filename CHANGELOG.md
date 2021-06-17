@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.10 (June 17, 2021)
+
+### Features
+- Add own switching context for each handle ([f1e77b7](f1e77b74e109dbf9c1de547ed4d01f46597344a6))
+- Add dumps uris to response ([be87e9f](be87e9f9b7791a4f4b6fc0085a461481fecba544))
+
+### Changes
+- Single thread for recorder and small refactoring ([4df477a](4df477a0dd4f288eeab0bd0f7ba9c02518cc6f4b))
+
+
 ## v0.8.6 (April 1, 2021)
 
 ### Features
