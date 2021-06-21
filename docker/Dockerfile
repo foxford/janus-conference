@@ -7,38 +7,38 @@ FROM debian:buster as build-janus
 RUN set -xe \
     && apt-get update \
     && apt-get -y --no-install-recommends install \
-        autoconf \
-        automake \
-        awscli \
-        ca-certificates \
-        curl \
-        ffmpeg \
-        gengetopt \
-        git \
-        libavformat-dev \
-        libavcodec-dev \
-        libconfig-dev \
-        libcurl4-openssl-dev \
-        libglib2.0-dev \
-        libjansson-dev \
-        libmicrohttpd-dev \
-        libogg-dev \
-        libopus-dev \
-        libsofia-sip-ua-dev \
-        libssl-dev \
-        libtool \
-        libwebsockets-dev \
-        m4 \
-        make \
-        pkg-config \
-        wget
+    autoconf \
+    automake \
+    awscli \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    gengetopt \
+    git \
+    libavformat-dev \
+    libavcodec-dev \
+    libconfig-dev \
+    libcurl4-openssl-dev \
+    libglib2.0-dev \
+    libjansson-dev \
+    libmicrohttpd-dev \
+    libogg-dev \
+    libopus-dev \
+    libsofia-sip-ua-dev \
+    libssl-dev \
+    libtool \
+    libwebsockets-dev \
+    m4 \
+    make \
+    pkg-config \
+    wget
 
 RUN apt-get -y --no-install-recommends install \
-        ninja-build \
-        python3 \
-        python3-pip \
-        python3-setuptools \
-        python3-wheel
+    ninja-build \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel
 
 RUN aws configure set default.s3.max_bandwidth 50MB/s
 
@@ -95,14 +95,14 @@ RUN set -xe \
 
 RUN set -xe \
     && apt-get remove -y \
-        autoconf \
-        automake \
-        git \
-        libtool \
-        m4 \
-        make \
-        ninja-build \
-        wget
+    autoconf \
+    automake \
+    git \
+    libtool \
+    m4 \
+    make \
+    ninja-build \
+    wget
 
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
@@ -149,3 +149,5 @@ COPY ./scripts/upload_record.sh /opt/janus/bin/upload_record.sh
 COPY --from=netologygroup/janus-conference-logger:v0.1.1 \
     /build/target/release/libjanus_conference_logger.so \
     /opt/janus/lib/janus/loggers/libjanus_conference_logger.so
+
+EXPOSE 8088
