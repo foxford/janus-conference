@@ -89,6 +89,14 @@ where
             .unwrap_or(&[])
     }
 
+    pub fn contains_key<T>(&self, k: &T) -> bool
+    where
+        K: Borrow<T>,
+        T: Hash + Eq,
+    {
+        self.forward_mapping.contains_key(k)
+    }
+
     pub fn get_key<U>(&self, v: &U) -> Option<&K>
     where
         V: Borrow<U>,

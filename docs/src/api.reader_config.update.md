@@ -16,7 +16,7 @@ Reader config object:
 
 Name          | Type   | Default    | Description
 ------------- | ------ | ---------- | ----------------------------------------------
-reader_id     | int    | _required_ | Agent ID of a reader to apply the config for.
+reader_id     | String | _required_ | Agent ID of a reader to apply the config for.
 stream_id     | string | _required_ | ID of a stream which the reader is [reading](apu.stream.read.md).
 receive_video | bool   | _required_ | Whether to relay video RTP packets from the stream publisher to the reader.
 receive_audio | bool   | _required_ | Whether to audio video RTP packets from the stream publisher to the reader.

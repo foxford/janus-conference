@@ -351,16 +351,15 @@ impl Switchboard {
     pub fn update_reader_config(
         &mut self,
         stream_id: StreamId,
-        reader_id: SessionId,
+        reader_id: &AgentId,
         config: ReaderConfig,
     ) -> Result<()> {
-        let agent_id = self
-            .agents
-            .get_key(&reader_id)
-            .ok_or_else(|| anyhow!("Agent not registered for handle {}", reader_id))?;
+        if !self.agents.contains_key(reader_id) {
+            return Err(anyhow!("Agent {} not registered", reader_id));
+        }
 
         self.reader_configs
-            .insert((stream_id, agent_id.to_owned()), config);
+            .insert((stream_id, reader_id.to_owned()), config);
         Ok(())
     }
 

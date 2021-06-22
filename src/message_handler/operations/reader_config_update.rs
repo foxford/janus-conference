@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::switchboard::{ReaderConfig, SessionId, StreamId};
+use crate::switchboard::{AgentId, ReaderConfig, StreamId};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -12,7 +12,7 @@ pub struct Request {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ConfigItem {
-    reader_id: SessionId,
+    reader_id: AgentId,
     stream_id: StreamId,
     receive_video: bool,
     receive_audio: bool,
@@ -33,7 +33,7 @@ impl super::Operation for Request {
                 for config_item in &self.configs {
                     switchboard.update_reader_config(
                         config_item.stream_id,
-                        config_item.reader_id,
+                        &config_item.reader_id,
                         ReaderConfig::new(config_item.receive_video, config_item.receive_audio),
                     )?;
                 }
