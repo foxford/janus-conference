@@ -58,10 +58,8 @@ impl Metrics {
             HistogramOpts::new("request_duration", "Request duration"),
             &["method"],
         )?;
-        let request_stats = IntCounterVec::new(
-            Opts::new("request_stats", "Request stats"),
-            &["method", "status"],
-        )?;
+        let request_stats =
+            IntCounterVec::new(Opts::new("request_stats", "Request stats"), &["status"])?;
         let switchboard_stats = IntGaugeVec::new(
             Opts::new("switchboard_stats", "Switchboard stats"),
             &["field"],
