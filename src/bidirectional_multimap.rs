@@ -24,6 +24,10 @@ where
         }
     }
 
+    pub fn keys_count(&self) -> usize {
+        self.forward_mapping.len()
+    }
+
     pub fn associate(&mut self, k: K, v: V) {
         let kk = k.clone();
         let vv = v.clone();

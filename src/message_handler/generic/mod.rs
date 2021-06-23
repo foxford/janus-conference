@@ -15,12 +15,17 @@ use crate::switchboard::{SessionId, StreamId};
 use crate::utils;
 use crate::{jsep::Jsep, message_handler::Method};
 
-pub use self::operation::{Operation, Result as OperationResult};
+pub use self::operation::{MethodKind, Operation, Result as OperationResult};
 pub use self::request::Request;
 
 pub struct PreparedRequest<O> {
     request: Request,
     operation: O,
+}
+impl<O: Operation> PreparedRequest<O> {
+    pub fn method_kind(&self) -> Option<MethodKind> {
+        self.operation.method_kind()
+    }
 }
 
 pub fn prepare_request(
@@ -203,6 +208,10 @@ mod tests {
         }
 
         fn stream_id(&self) -> Option<StreamId> {
+            None
+        }
+
+        fn method_kind(&self) -> Option<super::MethodKind> {
             None
         }
     }

@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::recorder::RecorderHandle;
 use crate::switchboard::StreamId;
+use crate::{message_handler::generic::MethodKind, recorder::RecorderHandle};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -104,6 +104,10 @@ impl super::Operation for Request {
 
     fn stream_id(&self) -> Option<StreamId> {
         None
+    }
+
+    fn method_kind(&self) -> Option<MethodKind> {
+        Some(MethodKind::StreamUpload)
     }
 }
 

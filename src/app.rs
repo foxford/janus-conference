@@ -1,12 +1,13 @@
-use std::thread;
+use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
 use chrono::Duration;
 use once_cell::sync::OnceCell;
+use prometheus::{Encoder, Registry, TextEncoder};
 
-use crate::switchboard::LockedSwitchboard as Switchboard;
 use crate::{conf::Config, recorder::recorder};
 use crate::{message_handler::JanusSender, recorder::RecorderHandlesCreator};
+use crate::{metrics::Metrics, switchboard::LockedSwitchboard as Switchboard};
 
 pub static APP: OnceCell<App> = OnceCell::new();
 
@@ -24,6 +25,7 @@ pub struct App {
     pub switchboard: Switchboard,
     pub recorders_creator: RecorderHandlesCreator,
     pub janus_sender: JanusSender,
+    pub metrics: Metrics,
 }
 
 impl App {
@@ -33,11 +35,25 @@ impl App {
             info!("Sentry initialized");
         }
         let (recorder, handles_creator) = recorder(config.recordings.clone());
+        let metrics_registry = Registry::new();
+        let metrics = Metrics::new(&metrics_registry)?;
+        async_std::task::spawn(start_metrics_collector(
+            metrics_registry,
+            config.metrics.bind_addr,
+        ));
 
-        let app = App::new(config, handles_creator)?;
+        let app = App::new(config, handles_creator, metrics)?;
         APP.set(app).expect("Already initialized");
-
         thread::spawn(|| recorder.start());
+
+        thread::spawn(|| loop {
+            if let Ok(app) = app!() {
+                let _ = app
+                    .switchboard
+                    .with_read_lock(|switchboard| Ok(Metrics::observe_switchboard(&switchboard)));
+                thread::sleep(app.config.metrics.switchboard_metrics_load_interval)
+            }
+        });
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
@@ -52,12 +68,43 @@ impl App {
         Ok(())
     }
 
-    pub fn new(config: Config, recorders_creator: RecorderHandlesCreator) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        recorders_creator: RecorderHandlesCreator,
+        metrics: Metrics,
+    ) -> Result<Self> {
         Ok(Self {
             config,
             switchboard: Switchboard::new(),
             recorders_creator,
             janus_sender: JanusSender::new(),
+            metrics,
         })
     }
+}
+
+async fn start_metrics_collector(
+    registry: Registry,
+    bind_addr: SocketAddr,
+) -> async_std::io::Result<()> {
+    let mut app = tide::with_state(registry);
+    app.at("/metrics")
+        .get(|req: tide::Request<Registry>| async move {
+            let registry = req.state();
+            let mut buffer = vec![];
+            let encoder = TextEncoder::new();
+            let metric_families = registry.gather();
+            match encoder.encode(&metric_families, &mut buffer) {
+                Ok(_) => {
+                    let mut response = tide::Response::new(200);
+                    response.set_body(buffer);
+                    Ok(response)
+                }
+                Err(err) => {
+                    warn!("Metrics not gathered: {:#}", err);
+                    Ok(tide::Response::new(500))
+                }
+            }
+        });
+    app.listen(bind_addr).await
 }

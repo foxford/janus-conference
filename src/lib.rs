@@ -7,10 +7,13 @@ extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
 
-use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
+use std::{
+    ffi::{CStr, CString},
+    time::Instant,
+};
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::Utc;
@@ -31,6 +34,7 @@ mod janus_recorder;
 mod janus_rtp;
 mod jsep;
 mod message_handler;
+mod metrics;
 mod recorder;
 mod serde;
 mod switchboard;
@@ -42,7 +46,10 @@ use conf::Config;
 use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
-use crate::message_handler::{handle_request, prepare_request, send_response};
+use crate::{
+    message_handler::{handle_request, prepare_request, send_response},
+    metrics::Metrics,
+};
 
 const INITIAL_REMBS: u64 = 4;
 
@@ -112,8 +119,12 @@ extern "C" fn handle_message(
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
     match handle_message_impl(handle, transaction, message, jsep) {
-        Ok(()) => PluginResult::ok_wait(None).into_raw(),
+        Ok(()) => {
+            Metrics::observe_success_request();
+            PluginResult::ok_wait(None).into_raw()
+        }
         Err(err) => {
+            Metrics::observe_failed_request();
             err!("Message handling error: {}", err);
             PluginResult::error(c_str!("Failed to handle message")).into_raw()
         }
@@ -126,6 +137,7 @@ fn handle_message_impl(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> Result<()> {
+    let now = Instant::now();
     let session_id = session_id(handle)?;
     verb!("Incoming message"; {"handle_id": session_id});
 
@@ -139,8 +151,12 @@ fn handle_message_impl(
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
         let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
         async_std::task::spawn(async move {
+            let method_kind = request.method_kind();
             let response = handle_request(request).await;
             send_response(janus_sender, response);
+            if let Some(method) = method_kind {
+                Metrics::observe_request(now, method)
+            }
         });
     }
 

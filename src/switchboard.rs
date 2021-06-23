@@ -1,7 +1,7 @@
-use std::fmt;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
+use std::{fmt, usize};
 
 use anyhow::{bail, format_err, Context, Result};
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
@@ -232,6 +232,30 @@ impl Switchboard {
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
         }
+    }
+
+    pub fn sessions_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub fn agents_count(&self) -> usize {
+        self.agents.keys_count()
+    }
+
+    pub fn publishers_count(&self) -> usize {
+        self.publishers.len()
+    }
+
+    pub fn publishers_subscribers_count(&self) -> usize {
+        self.publishers_subscribers.keys_count()
+    }
+
+    pub fn reader_configs_count(&self) -> usize {
+        self.reader_configs.len()
+    }
+
+    pub fn writer_configs_count(&self) -> usize {
+        self.writer_configs.len()
     }
 
     pub fn connect(&mut self, session: Session) -> Result<()> {

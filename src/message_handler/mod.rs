@@ -12,8 +12,8 @@ use crate::janus_callbacks;
 use crate::switchboard::SessionId;
 
 pub use self::generic::{
-    handle_request, prepare_request, send_response, Operation, OperationResult, PreparedRequest,
-    Request,
+    handle_request, prepare_request, send_response, MethodKind, Operation, OperationResult,
+    PreparedRequest, Request,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,6 +54,17 @@ impl Operation for Method {
             Method::StreamRead(x) => x.stream_id(),
             Method::StreamUpload(x) => x.stream_id(),
             Method::WriterConfigUpdate(x) => x.stream_id(),
+        }
+    }
+
+    fn method_kind(&self) -> Option<MethodKind> {
+        match self {
+            Method::AgentLeave(x) => x.method_kind(),
+            Method::ReaderConfigUpdate(x) => x.method_kind(),
+            Method::StreamCreate(x) => x.method_kind(),
+            Method::StreamRead(x) => x.method_kind(),
+            Method::StreamUpload(x) => x.method_kind(),
+            Method::WriterConfigUpdate(x) => x.method_kind(),
         }
     }
 }
