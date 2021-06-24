@@ -34,7 +34,8 @@ impl App {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
         }
-        let (recorder, handles_creator) = recorder(config.recordings.clone());
+        let (recorder, handles_creator) =
+            recorder(config.recordings.clone(), config.metrics.clone());
         let metrics_registry = Registry::new();
         let metrics = Metrics::new(&metrics_registry)?;
         async_std::task::spawn(start_metrics_collector(

@@ -46,6 +46,8 @@ pub struct General {
 pub struct Metrics {
     #[serde(with = "humantime_serde")]
     pub switchboard_metrics_load_interval: Duration,
+    #[serde(with = "humantime_serde")]
+    pub recorders_metrics_load_interval: Duration,
     pub bind_addr: SocketAddr,
 }
 

@@ -40,10 +40,21 @@ make_static_metric! {
     }
 }
 
+make_static_metric! {
+    pub struct RecorderStats: IntGauge {
+        "field" => {
+            recorders,
+            waiters,
+            queue
+        },
+    }
+}
+
 pub struct Metrics {
     request_duration: RequestDuration,
     request_stats: RequestStats,
     switchboard_stats: SwitchboardStats,
+    recorder_stats: RecorderStats,
 }
 
 impl std::fmt::Debug for Metrics {
@@ -64,13 +75,18 @@ impl Metrics {
             Opts::new("switchboard_stats", "Switchboard stats"),
             &["field"],
         )?;
+        let recorder_stats =
+            IntGaugeVec::new(Opts::new("recorder_stats", "Recorder stats"), &["field"])?;
+
         registry.register(Box::new(request_duration.clone()))?;
         registry.register(Box::new(request_stats.clone()))?;
         registry.register(Box::new(switchboard_stats.clone()))?;
+        registry.register(Box::new(recorder_stats.clone()))?;
         Ok(Self {
             request_duration: RequestDuration::from(&request_duration),
             request_stats: RequestStats::from(&request_stats),
             switchboard_stats: SwitchboardStats::from(&switchboard_stats),
+            recorder_stats: RecorderStats::from(&recorder_stats),
         })
     }
 
@@ -127,6 +143,16 @@ impl Metrics {
                     request_duration.writer_config_update.observe(elapsed)
                 }
             }
+        }
+    }
+
+    pub fn observe_recorder(recorders_count: usize, queue_size: usize) {
+        if let Ok(app) = app!() {
+            app.metrics
+                .recorder_stats
+                .recorders
+                .set(recorders_count as i64);
+            app.metrics.recorder_stats.queue.set(queue_size as i64);
         }
     }
 
