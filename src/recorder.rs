@@ -156,6 +156,7 @@ impl Recorder {
         dir: &str,
         start_time: DateTime<Utc>,
     ) -> Result<()> {
+        Self::create_records_dir(dir)?;
         let video_filename = format!("{}.video", start_time.timestamp_millis());
         let video = JanusRecorder::create(dir, &video_filename, Codec::VP8)?;
 
@@ -171,6 +172,17 @@ impl Recorder {
                 e.insert(Recorders { audio, video });
                 Ok(())
             }
+        }
+    }
+
+    fn create_records_dir(dir: &str) -> Result<(), std::io::Error> {
+        if let Err(err) = fs::create_dir(&dir) {
+            match err.kind() {
+                std::io::ErrorKind::AlreadyExists => Ok(()),
+                _ => Err(err),
+            }
+        } else {
+            Ok(())
         }
     }
 }
@@ -227,7 +239,7 @@ impl RecorderHandle {
     pub fn start_recording(&self) -> Result<()> {
         info!("Start recording"; {"rtc_id": self.stream_id});
 
-        let dir = self.create_records_dir().to_string_lossy().into_owned();
+        let dir = self.get_records_dir().to_string_lossy().into_owned();
 
         self.sender
             .send(RecorderMsg::Start {
@@ -250,19 +262,6 @@ impl RecorderHandle {
         let mut path = PathBuf::new();
         path.push(&self.save_root_dir);
         path.push(&self.stream_id.to_string());
-        path
-    }
-
-    fn create_records_dir(&self) -> PathBuf {
-        let path = self.get_records_dir();
-
-        if let Err(err) = fs::create_dir(&path) {
-            match err.kind() {
-                ::std::io::ErrorKind::AlreadyExists => {}
-                err => panic!("Failed to create directory for record: {:?}", err),
-            }
-        }
-
         path
     }
 
