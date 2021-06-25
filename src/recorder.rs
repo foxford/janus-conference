@@ -53,6 +53,10 @@ enum RecorderMsg {
         dir: String,
         start_time: DateTime<Utc>,
     },
+    WaitStop {
+        waiter: async_oneshot::Sender<()>,
+        stream_id: StreamId,
+    },
 }
 
 #[derive(Debug)]
@@ -82,6 +86,7 @@ impl Recorder {
 
     pub fn start(self) {
         let mut recorders = FnvHashMap::default();
+        let mut waiters: FnvHashMap<_, Vec<async_oneshot::Sender<()>>> = FnvHashMap::default();
         loop {
             let msg = self.messages.recv().expect("All senders dropped");
             match msg {
@@ -90,6 +95,11 @@ impl Recorder {
                         err!("Recording stopping error: {:?}", err; {"rtc_id": stream_id});
                     } else {
                         info!("Recording stopped"; {"rtc_id": stream_id});
+                    }
+                    if let Some(waiters) = waiters.remove(&stream_id) {
+                        for mut waiter in waiters {
+                            let _ = waiter.send(());
+                        }
                     }
                 }
                 RecorderMsg::Packet {
@@ -118,6 +128,19 @@ impl Recorder {
                         info!("Recording to {}", dir; {"rtc_id": stream_id});
                     }
                 }
+                RecorderMsg::WaitStop {
+                    mut waiter,
+                    stream_id,
+                } => {
+                    if recorders.contains_key(&stream_id) {
+                        waiters
+                            .entry(stream_id)
+                            .or_insert_with(Vec::new)
+                            .push(waiter);
+                    } else {
+                        let _ = waiter.send(());
+                    }
+                }
             }
         }
     }
@@ -126,11 +149,10 @@ impl Recorder {
         recorders: &mut FnvHashMap<StreamId, Recorders<'_>>,
         stream_id: StreamId,
     ) -> Result<()> {
-        let mut recorders = recorders
-            .remove(&stream_id)
-            .ok_or_else(|| anyhow!("Recorders missing"))?;
-        recorders.audio.close()?;
-        recorders.video.close()?;
+        if let Some(mut recorders) = recorders.remove(&stream_id) {
+            recorders.audio.close()?;
+            recorders.video.close()?;
+        }
         Ok(())
     }
 
@@ -256,6 +278,18 @@ impl RecorderHandle {
                 stream_id: self.stream_id,
             })
             .context("Failed to stop recording")
+    }
+
+    pub async fn wait_stop(&self) -> Result<()> {
+        let (tx, rx) = async_oneshot::oneshot();
+        self.sender
+            .send(RecorderMsg::WaitStop {
+                waiter: tx,
+                stream_id: self.stream_id,
+            })
+            .context("Failed to wait stop")?;
+        let _ = rx.await;
+        Ok(())
     }
 
     pub fn get_records_dir(&self) -> PathBuf {
