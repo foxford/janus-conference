@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::switchboard::{AgentId, StreamId};
+use crate::{
+    message_handler::generic::MethodKind,
+    switchboard::{AgentId, StreamId},
+};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -40,5 +43,9 @@ impl super::Operation for Request {
 
     fn stream_id(&self) -> Option<StreamId> {
         Some(self.id)
+    }
+
+    fn method_kind(&self) -> Option<MethodKind> {
+        Some(MethodKind::StreamRead)
     }
 }

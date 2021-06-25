@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
-use crate::switchboard::{StreamId, WriterConfig};
+use crate::{
+    message_handler::generic::MethodKind,
+    switchboard::{StreamId, WriterConfig},
+};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -64,6 +67,10 @@ impl super::Operation for Request {
 
     fn stream_id(&self) -> Option<StreamId> {
         None
+    }
+
+    fn method_kind(&self) -> Option<MethodKind> {
+        Some(MethodKind::WriterConfigUpdate)
     }
 }
 

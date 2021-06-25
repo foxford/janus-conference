@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 use anyhow::Result;
 
@@ -13,6 +13,7 @@ pub struct Config {
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,
+    pub metrics: Metrics,
 }
 
 impl Config {
@@ -39,6 +40,15 @@ impl Config {
 #[derive(Clone, Deserialize, Debug)]
 pub struct General {
     pub vacuum_interval: i64,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct Metrics {
+    #[serde(with = "humantime_serde")]
+    pub switchboard_metrics_load_interval: Duration,
+    #[serde(with = "humantime_serde")]
+    pub recorders_metrics_load_interval: Duration,
+    pub bind_addr: SocketAddr,
 }
 
 #[derive(Clone, Deserialize, Debug)]

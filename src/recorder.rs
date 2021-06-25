@@ -1,9 +1,9 @@
-use std::error::Error as StdError;
-use std::fmt;
 use std::{
     collections::hash_map::Entry,
     path::{Path, PathBuf},
 };
+use std::{error::Error as StdError, time::Duration};
+use std::{fmt, time::Instant};
 use std::{fs, io};
 
 use anyhow::{bail, Context, Error, Result};
@@ -11,8 +11,11 @@ use chrono::{DateTime, Utc};
 use crossbeam_channel::{Receiver, Sender};
 use fnv::FnvHashMap;
 
-use crate::janus_recorder::{Codec, JanusRecorder};
 use crate::switchboard::StreamId;
+use crate::{
+    janus_recorder::{Codec, JanusRecorder},
+    metrics::Metrics,
+};
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
@@ -77,18 +80,28 @@ impl RecorderHandlesCreator {
 
 pub struct Recorder {
     messages: Receiver<RecorderMsg>,
+    metrics_update_interval: Duration,
 }
 
 impl Recorder {
-    fn new(messages: Receiver<RecorderMsg>) -> Self {
-        Self { messages }
+    fn new(messages: Receiver<RecorderMsg>, metrics_update_interval: Duration) -> Self {
+        Self {
+            messages,
+            metrics_update_interval,
+        }
     }
 
     pub fn start(self) {
         let mut recorders = FnvHashMap::default();
+        let mut now = Instant::now();
         let mut waiters: FnvHashMap<_, Vec<async_oneshot::Sender<()>>> = FnvHashMap::default();
         loop {
             let msg = self.messages.recv().expect("All senders dropped");
+            if now.elapsed() > self.metrics_update_interval {
+                Metrics::observe_recorder(recorders.len(), self.messages.len(), waiters.len());
+                now = Instant::now();
+            }
+
             match msg {
                 RecorderMsg::Stop { stream_id } => {
                     if let Err(err) = Self::handle_stop(&mut recorders, stream_id).context("Stop") {
@@ -214,9 +227,15 @@ struct Recorders<'a> {
     video: JanusRecorder<'a>,
 }
 
-pub fn recorder(config: Config) -> (Recorder, RecorderHandlesCreator) {
+pub fn recorder(
+    config: Config,
+    metrics: crate::conf::Metrics,
+) -> (Recorder, RecorderHandlesCreator) {
     let (tx, rx) = crossbeam_channel::unbounded();
-    (Recorder::new(rx), RecorderHandlesCreator::new(tx, config))
+    (
+        Recorder::new(rx, metrics.recorders_metrics_load_interval),
+        RecorderHandlesCreator::new(tx, config),
+    )
 }
 
 #[derive(Debug)]
