@@ -77,6 +77,7 @@ impl super::Operation for Request {
             .map_err(internal_error)?
             .recorders_creator
             .new_handle(self.id);
+        recorder.wait_stop().await.map_err(internal_error)?;
 
         recorder
             .check_existence()

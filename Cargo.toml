@@ -30,6 +30,7 @@ prometheus = "0.12"
 prometheus-static-metric = "0.5"
 humantime-serde = "1"
 tide = "0.16"
+async-oneshot = "0.5"
 
 [dependencies.sentry]
 version = "0.22"
