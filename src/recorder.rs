@@ -199,9 +199,11 @@ impl Recorder {
         let audio = JanusRecorder::create(dir, &audio_filename, Codec::Opus)?;
 
         match recorders.entry(stream_id) {
-            Entry::Occupied(e) => {
-                e.remove();
-                Err(anyhow!("Recorder already exists"))
+            Entry::Occupied(mut e) => {
+                let mut v = e.insert(Recorders { audio, video });
+                v.audio.close()?;
+                v.video.close()?;
+                Ok(())
             }
             Entry::Vacant(e) => {
                 e.insert(Recorders { audio, video });
