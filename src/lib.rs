@@ -284,6 +284,7 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
     let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
     app!()?.switchboard.with_read_lock(|switchboard| {
+        let state = switchboard.state(session_id)?;
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {
@@ -309,6 +310,14 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                     janus_callbacks::relay_rtcp(&subscriber_session, &mut packet);
                 }
             }
+        }
+        // Push packet to the recorder.
+        if let Some(recorder) = state.recorder() {
+            let buf = unsafe {
+                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+            };
+
+            recorder.record_packet(buf, packet.video == 1)?;
         }
 
         Ok(())
