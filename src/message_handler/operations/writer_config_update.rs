@@ -62,7 +62,7 @@ impl super::Operation for Request {
                             if (config_item.send_audio && !prev_config.send_audio())
                                 || (config_item.send_video && !prev_config.send_video())
                             {
-                                send_fir(session_id);
+                                send_fir(session_id, &switchboard);
                             }
                         }
                         _ => {}
