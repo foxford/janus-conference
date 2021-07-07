@@ -23,7 +23,7 @@ jobs:
       with: 
         cache-on-failure: true
     - name: clippy
-      run: cargo clippy  -- -D warnings
+      run: cargo clippy -- -D warnings
     - name: fmt
       run: cargo fmt -- --check
     - name: Run tests
