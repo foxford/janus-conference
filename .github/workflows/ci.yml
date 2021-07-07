@@ -26,5 +26,7 @@ jobs:
       run: cargo clippy -- -D warnings
     - name: fmt
       run: cargo fmt -- --check
+    - name: install deps
+      run: sudo apt update && sudo apt install -y libjansson-dev
     - name: Run tests
       run: cargo test --verbose
