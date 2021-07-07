@@ -372,6 +372,7 @@ impl Switchboard {
             .and_then(|agent_id| self.reader_configs.get(&(stream_id, agent_id.to_owned())))
     }
 
+    #[allow(clippy::ptr_arg)]
     pub fn update_reader_config(
         &mut self,
         stream_id: StreamId,

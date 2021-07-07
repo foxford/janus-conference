@@ -49,9 +49,10 @@ impl App {
 
         thread::spawn(|| loop {
             if let Ok(app) = app!() {
-                let _ = app
-                    .switchboard
-                    .with_read_lock(|switchboard| Ok(Metrics::observe_switchboard(&switchboard)));
+                let _ = app.switchboard.with_read_lock(|switchboard| {
+                    Metrics::observe_switchboard(&switchboard);
+                    Ok(())
+                });
                 thread::sleep(app.config.metrics.switchboard_metrics_load_interval)
             }
         });
