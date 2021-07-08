@@ -57,15 +57,14 @@ impl super::Operation for Request {
                     }
                     let prev_config =
                         switchboard.set_writer_config(config_item.stream_id, writer_config);
-                    match (prev_config, switchboard.publisher_of(config_item.stream_id)) {
-                        (Some(prev_config), Some(session_id)) => {
-                            if (config_item.send_audio && !prev_config.send_audio())
-                                || (config_item.send_video && !prev_config.send_video())
-                            {
-                                send_fir(session_id, &switchboard);
-                            }
+                    if let (Some(prev_config), Some(session_id)) =
+                        (prev_config, switchboard.publisher_of(config_item.stream_id))
+                    {
+                        if (config_item.send_audio && !prev_config.send_audio())
+                            || (config_item.send_video && !prev_config.send_video())
+                        {
+                            send_fir(session_id, &switchboard);
                         }
-                        _ => {}
                     }
                 }
 
