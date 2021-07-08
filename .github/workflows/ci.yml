@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install latest nightly
+      uses: actions-rs/toolchain@v1
+      with:
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v1
+      with: 
+        cache-on-failure: true
+    - name: clippy
+      run: cargo clippy -- -D warnings
+    - name: fmt
+      run: cargo fmt -- --check
+    - name: install deps
+      run: sudo apt update && sudo apt install -y libjansson-dev
+    - name: Run tests
+      run: cargo test --verbose
