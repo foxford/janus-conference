@@ -393,9 +393,13 @@ impl Switchboard {
             .unwrap_or(&DEFAULT_WRITER_CONFIG)
     }
 
-    pub fn set_writer_config(&mut self, stream_id: StreamId, writer_config: WriterConfig) {
+    pub fn set_writer_config(
+        &mut self,
+        stream_id: StreamId,
+        writer_config: WriterConfig,
+    ) -> Option<WriterConfig> {
         info!("SET WRITER CONFIG: {:?}", writer_config; {"rtc_id": stream_id});
-        self.writer_configs.insert(stream_id, writer_config);
+        self.writer_configs.insert(stream_id, writer_config)
     }
 
     pub fn create_stream(
