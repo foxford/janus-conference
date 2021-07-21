@@ -224,10 +224,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         let remb_interval = chrono::Duration::seconds(5);
         if is_video {
             let now = Utc::now();
-            if let Some(last_fir) = state.last_fir_timestamp() {
-                if now - last_fir >= app.fir_interval {
-                    send_fir(session_id, &switchboard);
-                }
+            if now - state.last_fir_timestamp() >= app.fir_interval {
+                send_fir(session_id, &switchboard);
             }
             let target_bitrate = writer_config.video_remb();
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();

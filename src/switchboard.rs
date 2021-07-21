@@ -91,14 +91,9 @@ impl SessionState {
         }
     }
 
-    pub fn last_fir_timestamp(&self) -> Option<DateTime<Utc>> {
-        match self.last_fir_timestamp.load(Ordering::Relaxed) {
-            0 => None,
-            timestamp => {
-                let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
-                Some(DateTime::from_utc(naive_dt, Utc))
-            }
-        }
+    pub fn last_fir_timestamp(&self) -> DateTime<Utc> {
+        let naive_dt = NaiveDateTime::from_timestamp(timestamp, 0);
+        Some(DateTime::from_utc(naive_dt, Utc))
     }
 
     pub fn touch_last_remb_timestamp(&self) {
