@@ -47,6 +47,7 @@ use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
+    janus_rtp::replace_payload_with_zeros,
     message_handler::{handle_request, prepare_request, send_response},
     metrics::Metrics,
 };
@@ -215,7 +216,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         };
 
         if !is_media_allowed {
-            return Ok(());
+            replace_payload_with_zeros(&mut packet)
         }
 
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.

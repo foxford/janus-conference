@@ -66,6 +66,16 @@ impl JanusRtpHeader {
     }
 }
 
+pub fn replace_payload_with_zeros(packet: &mut PluginRtpPacket) {
+    unsafe {
+        std::ptr::write_bytes(
+            &mut packet.buffer.add(RTP_HEADER_SIZE),
+            0,
+            packet.length as usize - RTP_HEADER_SIZE,
+        )
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type gboolean = c_int;
