@@ -47,6 +47,7 @@ pub struct SessionState {
     fir_seq: AtomicI32,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
+    last_fir_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<RecorderHandle>,
 }
@@ -60,6 +61,7 @@ impl SessionState {
             last_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
+            last_fir_timestamp: AtomicI64::new(0),
         }
     }
 
@@ -89,8 +91,19 @@ impl SessionState {
         }
     }
 
+    pub fn last_fir_timestamp(&self) -> DateTime<Utc> {
+        let naive_dt =
+            NaiveDateTime::from_timestamp(self.last_fir_timestamp.load(Ordering::Relaxed), 0);
+        DateTime::from_utc(naive_dt, Utc)
+    }
+
     pub fn touch_last_remb_timestamp(&self) {
         self.last_remb_timestamp
+            .store(Utc::now().timestamp(), Ordering::Relaxed);
+    }
+
+    pub fn touch_last_fir_timestamp(&self) {
+        self.last_fir_timestamp
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 

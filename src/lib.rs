@@ -223,6 +223,10 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // and apply audio limitation to video while only MacOS does.
         let remb_interval = chrono::Duration::seconds(5);
         if is_video {
+            let now = Utc::now();
+            if now - state.last_fir_timestamp() >= app.fir_interval {
+                send_fir(session_id, &switchboard);
+            }
             let target_bitrate = writer_config.video_remb();
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
 
@@ -232,7 +236,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 state.touch_last_remb_timestamp();
                 state.increment_initial_rembs_counter();
             } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= remb_interval {
+                if now - last_remb_timestamp >= remb_interval {
                     send_remb(session_id, target_bitrate);
                     state.touch_last_remb_timestamp();
                 }
@@ -452,6 +456,7 @@ fn send_fir_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
         .map_err(|err| format_err!("Failed to acquire mutex for session {}: {}", publisher, err))?;
 
     let state = switchboard.state(publisher)?;
+    state.touch_last_fir_timestamp();
     let mut seq = state.increment_fir_seq();
     let mut fir = janus::rtcp::gen_fir(&mut seq);
 

@@ -26,6 +26,7 @@ pub struct App {
     pub recorders_creator: RecorderHandlesCreator,
     pub janus_sender: JanusSender,
     pub metrics: Metrics,
+    pub fir_interval: chrono::Duration,
 }
 
 impl App {
@@ -76,6 +77,7 @@ impl App {
         metrics: Metrics,
     ) -> Result<Self> {
         Ok(Self {
+            fir_interval: chrono::Duration::from_std(config.general.fir_interval)?,
             config,
             switchboard: Switchboard::new(),
             recorders_creator,
