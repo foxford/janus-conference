@@ -130,7 +130,7 @@ pub fn send_speaking_notification(
 ) -> anyhow::Result<()> {
     let notification = serde_json::json!({
         "agent_id": agent_id,
-        "is_speaking": is_speaking,
+        "speaking": is_speaking,
     });
     sender.send(
         session_id,
