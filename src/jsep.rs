@@ -33,6 +33,8 @@ impl Jsep {
             AudioCodec::Opus.to_cstr().as_ptr(),
             OfferAnswerParameters::VideoCodec,
             VideoCodec::Vp8.to_cstr().as_ptr(),
+            OfferAnswerParameters::AudioExtension,
+            CString::new("urn:ietf:params:rtp-hdrext:ssrc-audio-level")?.as_ptr(),
         );
 
         // Set video bitrate.

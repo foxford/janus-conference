@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::Path, time::Duration};
 
 use anyhow::Result;
 
-use crate::recorder;
+use crate::{janus_rtp::AudioLevel, recorder};
 
 const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 
@@ -10,6 +10,7 @@ const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 pub struct Config {
     pub general: General,
     pub recordings: recorder::Config,
+    pub speaking_notifications: SpeakingNotifications,
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,
@@ -76,6 +77,12 @@ struct UploadBackendConfig {
 #[derive(Clone, Deserialize, Debug)]
 pub struct UploadConfig {
     pub backends: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct SpeakingNotifications {
+    pub audio_active_packets: usize,
+    pub audio_level_average: AudioLevel,
 }
 
 impl UploadConfig {

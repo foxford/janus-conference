@@ -11,12 +11,14 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::Response;
-use crate::switchboard::{SessionId, StreamId};
+use crate::switchboard::{AgentId, SessionId, StreamId};
 use crate::utils;
 use crate::{jsep::Jsep, message_handler::Method};
 
 pub use self::operation::{MethodKind, Operation, Result as OperationResult};
 pub use self::request::Request;
+
+use super::JanusSender;
 
 pub struct PreparedRequest<O> {
     request: Request,
@@ -118,6 +120,25 @@ pub fn send_response(sender: impl Sender, response: Response) {
                 {"handle_id": response.session_id(), "transaction": response.transaction()}
             );
         });
+}
+
+pub fn send_speaking_notification(
+    sender: &JanusSender,
+    session_id: SessionId,
+    agent_id: Option<&AgentId>,
+    is_speaking: bool,
+) -> anyhow::Result<()> {
+    let notification = serde_json::json!({
+        "agent_id": agent_id,
+        "is_speaking": is_speaking,
+    });
+    sender.send(
+        session_id,
+        "\"SpeakingNotification\"",
+        Some(utils::serde_to_jansson(&notification)?),
+        None,
+    )?;
+    Ok(())
 }
 
 fn notify_error(err: &SvcError) {

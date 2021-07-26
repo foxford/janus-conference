@@ -7,12 +7,15 @@ extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
 
-use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
 use std::{
     ffi::{CStr, CString},
     time::Instant,
+};
+use std::{
+    ops::Not,
+    os::raw::{c_char, c_int},
 };
 
 use anyhow::{bail, format_err, Context, Result};
@@ -47,7 +50,8 @@ use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
-    message_handler::{handle_request, prepare_request, send_response},
+    janus_rtp::AudioLevel,
+    message_handler::{handle_request, prepare_request, send_response, send_speaking_notification},
     metrics::Metrics,
 };
 
@@ -200,6 +204,23 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
+        let is_speaking = is_video
+            .not()
+            .then(|| &packet)
+            .and_then(|packet| AudioLevel::new(&packet))
+            .and_then(|level| {
+                state.is_speaking(
+                    level,
+                    app.config.speaking_notifications.audio_active_packets,
+                    app.config.speaking_notifications.audio_level_average,
+                )
+            });
+        if let Some(speaking_not) = is_speaking {
+            let agent_id = switchboard.agent_id(session_id);
+            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, speaking_not) {
+                err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+            }
+        }
         state.touch_last_rtp_packet_timestamp();
 
         // Check whether publisher media is muted and drop the packet if it is.

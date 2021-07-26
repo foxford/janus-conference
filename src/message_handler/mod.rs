@@ -12,8 +12,8 @@ use crate::janus_callbacks;
 use crate::switchboard::SessionId;
 
 pub use self::generic::{
-    handle_request, prepare_request, send_response, MethodKind, Operation, OperationResult,
-    PreparedRequest, Request,
+    handle_request, prepare_request, send_response, send_speaking_notification, MethodKind,
+    Operation, OperationResult, PreparedRequest, Request,
 };
 
 #[derive(Debug, Clone, Deserialize)]

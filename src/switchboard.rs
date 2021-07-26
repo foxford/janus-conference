@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
@@ -10,10 +10,10 @@ use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-use crate::bidirectional_multimap::BidirectionalMultimap;
 use crate::janus_callbacks;
 use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
+use crate::{bidirectional_multimap::BidirectionalMultimap, janus_rtp::AudioLevel};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,6 +45,9 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     switching_context: JanusRtpSwitchingContext,
     fir_seq: AtomicI32,
+    is_speaking: AtomicBool,
+    packets_count: AtomicUsize,
+    audio_level_sum: AtomicUsize,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
     last_fir_timestamp: AtomicI64,
@@ -62,6 +65,38 @@ impl SessionState {
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
             last_fir_timestamp: AtomicI64::new(0),
+            is_speaking: AtomicBool::new(false),
+            packets_count: AtomicUsize::new(0),
+            audio_level_sum: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn is_speaking(
+        &self,
+        audio_level: AudioLevel,
+        packets_threshold: usize,
+        audio_threshold: AudioLevel,
+    ) -> Option<bool> {
+        let packets_count = self.packets_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.audio_level_sum
+            .fetch_add(audio_level.as_u8() as usize, Ordering::Relaxed);
+        if packets_count == packets_threshold {
+            self.packets_count.store(0, Ordering::Relaxed);
+            let level_avg =
+                self.audio_level_sum.swap(0, Ordering::Relaxed) as f64 / packets_count as f64;
+            let is_speaking = self.is_speaking.load(Ordering::Relaxed);
+            let less_than_threshold = level_avg < (audio_threshold.as_u8() as f64);
+            if !is_speaking && less_than_threshold {
+                self.is_speaking.store(true, Ordering::Relaxed);
+                return Some(true);
+            }
+            if is_speaking && !less_than_threshold {
+                self.is_speaking.store(false, Ordering::Relaxed);
+                return Some(false);
+            }
+            None
+        } else {
+            None
         }
     }
 
@@ -269,6 +304,10 @@ impl Switchboard {
 
     pub fn writer_configs_count(&self) -> usize {
         self.writer_configs.len()
+    }
+
+    pub fn agent_id(&self, session_id: SessionId) -> Option<&AgentId> {
+        self.agents.get_key(&session_id)
     }
 
     pub fn connect(&mut self, session: Session) -> Result<()> {
@@ -569,5 +608,46 @@ impl LockedSwitchboard {
 
             thread::sleep(std_interval);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::janus_rtp::AudioLevel;
+
+    use super::SessionState;
+
+    #[test]
+    fn test_speaking_notification() {
+        let state = SessionState::new();
+
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 5, AudioLevel::from_u8(10)),
+            None
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 3, AudioLevel::from_u8(10)),
+            None
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 3, AudioLevel::from_u8(5)),
+            None
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(10)),
+            None
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(15)),
+            Some(true)
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(5)),
+            None
+        );
+        assert_eq!(
+            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(15)),
+            None
+        );
     }
 }

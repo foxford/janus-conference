@@ -1,8 +1,8 @@
 #![allow(non_camel_case_types)]
 
-use std::mem::MaybeUninit;
 use std::os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort};
 use std::sync::{Arc, Mutex};
+use std::{convert::TryInto, mem::MaybeUninit};
 
 use anyhow::{anyhow, Result};
 use janus::PluginRtpPacket;
@@ -63,6 +63,24 @@ impl JanusRtpHeader {
 
     pub fn restore(&self, packet: &mut PluginRtpPacket) {
         unsafe { std::ptr::copy(&self.0 as *const i8, &mut *packet.buffer, RTP_HEADER_SIZE) };
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub struct AudioLevel(u8);
+
+impl AudioLevel {
+    pub fn new(packet: &PluginRtpPacket) -> Option<Self> {
+        packet.extensions.audio_level.try_into().ok().map(Self)
+    }
+
+    pub fn as_u8(self) -> u8 {
+        self.0
+    }
+
+    #[cfg(test)]
+    pub fn from_u8(x: u8) -> Self {
+        Self(x)
     }
 }
 
