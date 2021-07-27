@@ -134,7 +134,7 @@ pub fn send_speaking_notification(
     });
     sender.send(
         session_id,
-        "\"SpeakingNotification\"",
+        "SpeakingNotification",
         Some(utils::serde_to_jansson(&notification)?),
         None,
     )?;
