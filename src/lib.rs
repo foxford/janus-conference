@@ -203,6 +203,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     // Touch last packet timestamp to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
+        info!("Level: {}, vad: {}", packet.extensions.audio_level, packet.extensions.audio_level_vad);
+        
         let state = switchboard.state(session_id)?;
         let is_speaking = is_video
             .not()
