@@ -12,8 +12,8 @@ async-trait = "0.1"
 async-std = { version="1.9", features=["unstable"] }
 anyhow = "1.0"
 chrono = "0.4"
-janus-plugin-sys = "0.7"
-janus-plugin = "0.12"
+janus-plugin-sys = "0.8"
+janus-plugin = "0.13"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
@@ -36,7 +36,3 @@ async-oneshot = "0.5"
 version = "0.22"
 default-features = false
 features = ["anyhow", "backtrace", "contexts", "panic", "surf"]
-
-[patch.crates-io]
-janus-plugin-sys = { git="https://github.com/netology-group/janus-plugin-rs", branch="feature/api-v15" }
-janus-plugin = { git="https://github.com/netology-group/janus-plugin-rs", branch="feature/api-v15" }
