@@ -17,7 +17,7 @@ janus-plugin = "0.13"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
-config = "0.10"
+config = "0.11"
 libc = "0.2"
 multimap = "0.8"
 http = "0.1"
@@ -33,6 +33,6 @@ tide = "0.16"
 async-oneshot = "0.5"
 
 [dependencies.sentry]
-version = "0.22"
+version = "0.23"
 default-features = false
 features = ["anyhow", "backtrace", "contexts", "panic", "surf"]
