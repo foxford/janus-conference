@@ -210,7 +210,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 )
             });
         if let Some(speaking_not) = is_speaking {
-            println!("IsSpeaking: {}", speaking_not);
             let agent_id = switchboard.agent_id(session_id);
             if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, speaking_not) {
                 err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
