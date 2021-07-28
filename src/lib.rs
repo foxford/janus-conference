@@ -34,7 +34,7 @@ mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
 mod janus_recorder;
-mod janus_rtp;
+pub mod janus_rtp;
 mod jsep;
 mod message_handler;
 mod metrics;
@@ -199,7 +199,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-
     // Touch last packet timestamp to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {

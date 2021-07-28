@@ -84,7 +84,7 @@ pub fn send_response(sender: impl Sender, response: Response) {
         "Handling response";
         {"handle_id": response.session_id(), "transaction": response.transaction()}
     );
-
+    info!("Jsep answer: {:?}", response.jsep_answer());
     let jsep_answer = match response.jsep_answer() {
         None => None,
         Some(json_value) => match utils::serde_to_jansson(json_value) {

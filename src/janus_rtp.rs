@@ -143,8 +143,31 @@ struct janus_rtp_switching_context {
     v_evaluating_start_time: gint64,
 }
 
-#[cfg(not(test))]
+pub fn print_level(packet: &mut PluginRtpPacket) {
+    unsafe {
+        let mut vad = false as gboolean;
+        let mut level = -1 as c_int;
+        janus_rtp_header_extension_parse_audio_level(
+            packet.buffer,
+            packet.length as c_int,
+            1,
+            &mut vad,
+            &mut level,
+        );
+        println!("vad: {}, level: {}", vad, level);
+    }
+}
+
+// #[cfg(not(test))]
 extern "C" {
+    fn janus_rtp_header_extension_parse_audio_level(
+        packet: *mut c_char,
+        len: c_int,
+        id: c_int,
+        vad: *mut gboolean,
+        level: *mut c_int,
+    );
+
     fn janus_rtp_switching_context_reset(context: *mut janus_rtp_switching_context);
 
     fn janus_rtp_header_update(
@@ -157,17 +180,17 @@ extern "C" {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#[cfg(test)]
-#[no_mangle]
-unsafe extern "C" fn janus_rtp_switching_context_reset(_context: *mut janus_rtp_switching_context) {
-}
+// #[cfg(test)]
+// #[no_mangle]
+// unsafe extern "C" fn janus_rtp_switching_context_reset(_context: *mut janus_rtp_switching_context) {
+// }
 
-#[cfg(test)]
-#[no_mangle]
-unsafe extern "C" fn janus_rtp_header_update(
-    _header: *mut c_char,
-    _context: *mut janus_rtp_switching_context,
-    _video: gboolean,
-    _step: c_int,
-) {
-}
+// #[cfg(test)]
+// #[no_mangle]
+// unsafe extern "C" fn janus_rtp_header_update(
+//     _header: *mut c_char,
+//     _context: *mut janus_rtp_switching_context,
+//     _video: gboolean,
+//     _step: c_int,
+// ) {
+// }
