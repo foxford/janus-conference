@@ -11,9 +11,12 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::Response;
-use crate::switchboard::{AgentId, SessionId, StreamId};
 use crate::utils;
 use crate::{jsep::Jsep, message_handler::Method};
+use crate::{
+    message_handler::generic::response::Payload,
+    switchboard::{AgentId, SessionId, StreamId},
+};
 
 pub use self::operation::{MethodKind, Operation, Result as OperationResult};
 pub use self::request::Request;
@@ -132,14 +135,13 @@ pub fn send_speaking_notification(
 ) -> anyhow::Result<()> {
     let notification = serde_json::json!({
         "agent_id": agent_id,
-        "speaking": is_speaking,
+        "speaking": is_speaking
     });
-    sender.send(
-        session_id,
-        "SpeakingNotification",
-        Some(utils::serde_to_jansson(&notification)?),
-        None,
-    )?;
+    let response = Some(JanssonValue::try_from(
+        &Payload::new(StatusCode::OK).set_response(notification),
+    )?);
+
+    sender.send(session_id, "SpeakingNotification", response, None)?;
     Ok(())
 }
 
