@@ -204,7 +204,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             .then(|| &mut packet)
             .and_then(|packet| Some(AudioLevel::new(packet, state.audio_level_ext_id()?)?))
             .and_then(|level| {
-                info!("Level: {:?}", level);
                 state.is_speaking(
                     level,
                     app.config.speaking_notifications.audio_active_packets,
