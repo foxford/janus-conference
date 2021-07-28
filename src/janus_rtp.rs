@@ -1,10 +1,10 @@
 #![allow(non_camel_case_types)]
 
-use std::sync::{Arc, Mutex};
+use std::os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort};
 use std::{convert::TryInto, mem::MaybeUninit};
 use std::{
-    ffi::CString,
-    os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort},
+    ffi::CStr,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::{anyhow, Result};
@@ -12,7 +12,11 @@ use janus::PluginRtpPacket;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-pub const JANUS_RTP_EXTMAP_AUDIO_LEVEL: &str = "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
+pub static JANUS_RTP_EXTMAP_AUDIO_LEVEL: &str = "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
+
+pub fn janus_rtp_extmap_audio_level() -> &'static CStr {
+    c_str!("urn:ietf:params:rtp-hdrext:ssrc-audio-level")
+}
 
 #[derive(Debug)]
 pub struct JanusRtpSwitchingContext {
@@ -75,8 +79,19 @@ impl JanusRtpHeader {
 pub struct AudioLevel(u8);
 
 impl AudioLevel {
-    pub fn new(packet: &PluginRtpPacket) -> Option<Self> {
-        packet.extensions.audio_level.try_into().ok().map(Self)
+    pub fn new(packet: &mut PluginRtpPacket, audio_level_ext_id: u32) -> Option<Self> {
+        let mut vad = false as gboolean;
+        let mut level = -1 as c_int;
+        unsafe {
+            janus_rtp_header_extension_parse_audio_level(
+                packet.buffer,
+                packet.length as c_int,
+                audio_level_ext_id as c_int,
+                &mut vad,
+                &mut level,
+            );
+        };
+        level.try_into().ok().map(Self)
     }
 
     pub fn as_u8(self) -> u8 {
@@ -148,39 +163,15 @@ struct janus_rtp_switching_context {
     v_evaluating_start_time: gint64,
 }
 
-pub fn print_level(packet: &mut PluginRtpPacket) {
-    unsafe {
-        let mut vad = false as gboolean;
-        let mut level = -1 as c_int;
-        janus_rtp_header_extension_parse_audio_level(
-            packet.buffer,
-            packet.length as c_int,
-            1,
-            &mut vad,
-            &mut level,
-        );
-        println!("vad: {}, level: {}", vad, level);
-    }
-}
-
-pub fn get_audio_level_ext_id(sdp: &str) -> anyhow::Result<isize> {
-    let c_str = CString::new(sdp)?;
-    let c_str2 = CString::new(JANUS_RTP_EXTMAP_AUDIO_LEVEL)?;
-    let id = unsafe { janus_rtp_header_extension_get_id(c_str.as_ptr(), c_str2.as_ptr()) };
-    Ok(id as isize)
-}
-
-// #[cfg(not(test))]
+#[cfg(not(test))]
 extern "C" {
-    fn janus_rtp_header_extension_get_id(sdp: *const c_char, extension: *const c_char) -> c_int;
-
     fn janus_rtp_header_extension_parse_audio_level(
         packet: *mut c_char,
         len: c_int,
         id: c_int,
         vad: *mut gboolean,
         level: *mut c_int,
-    );
+    ) -> c_int;
 
     fn janus_rtp_switching_context_reset(context: *mut janus_rtp_switching_context);
 
@@ -194,17 +185,29 @@ extern "C" {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// #[cfg(test)]
-// #[no_mangle]
-// unsafe extern "C" fn janus_rtp_switching_context_reset(_context: *mut janus_rtp_switching_context) {
-// }
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_header_extension_parse_audio_level(
+    _packet: *mut c_char,
+    _len: c_int,
+    _id: c_int,
+    _vad: *mut gboolean,
+    _level: *mut c_int,
+) -> c_int {
+    1
+}
 
-// #[cfg(test)]
-// #[no_mangle]
-// unsafe extern "C" fn janus_rtp_header_update(
-//     _header: *mut c_char,
-//     _context: *mut janus_rtp_switching_context,
-//     _video: gboolean,
-//     _step: c_int,
-// ) {
-// }
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_switching_context_reset(_context: *mut janus_rtp_switching_context) {
+}
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_header_update(
+    _header: *mut c_char,
+    _context: *mut janus_rtp_switching_context,
+    _video: gboolean,
+    _step: c_int,
+) {
+}

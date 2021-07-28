@@ -53,7 +53,7 @@ pub struct SessionState {
     last_fir_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<RecorderHandle>,
-    audio_level_ext_id: isize,
+    audio_level_ext_id: Option<u32>,
 }
 
 impl SessionState {
@@ -69,7 +69,7 @@ impl SessionState {
             is_speaking: AtomicBool::new(false),
             packets_count: AtomicUsize::new(0),
             audio_level_sum: AtomicUsize::new(0),
-            audio_level_ext_id: -1,
+            audio_level_ext_id: None,
         }
     }
 
@@ -176,6 +176,16 @@ impl SessionState {
     fn unset_recorder(&mut self) -> &mut Self {
         self.recorder = None;
         self
+    }
+
+    /// Set the session state's audio level ext id.
+    pub fn set_audio_level_ext_id(&mut self, audio_level_ext_id: Option<u32>) {
+        self.audio_level_ext_id = audio_level_ext_id;
+    }
+
+    /// Get a reference to the session state's audio level ext id.
+    pub fn audio_level_ext_id(&self) -> Option<u32> {
+        self.audio_level_ext_id
     }
 }
 
