@@ -206,8 +206,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             .and_then(|level| {
                 state.is_speaking(
                     level,
-                    app.config.speaking_notifications.audio_active_packets,
-                    app.config.speaking_notifications.audio_level_average,
+                    &app.config.speaking_notifications,
                 )
             });
         if let Some(speaking_not) = is_speaking {

@@ -10,10 +10,10 @@ use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-use crate::janus_callbacks;
 use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
 use crate::{bidirectional_multimap::BidirectionalMultimap, janus_rtp::AudioLevel};
+use crate::{conf::SpeakingNotifications, janus_callbacks};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -76,23 +76,20 @@ impl SessionState {
     pub fn is_speaking(
         &self,
         audio_level: AudioLevel,
-        packets_threshold: usize,
-        audio_threshold: AudioLevel,
+        config: &SpeakingNotifications,
     ) -> Option<bool> {
         let packets_count = self.packets_count.fetch_add(1, Ordering::Relaxed) + 1;
         self.audio_level_sum
-            .fetch_add(audio_level.as_u8() as usize, Ordering::Relaxed);
-        if packets_count == packets_threshold {
+            .fetch_add(audio_level.as_usize() as usize, Ordering::Relaxed);
+        if packets_count == config.audio_active_packets {
             self.packets_count.store(0, Ordering::Relaxed);
-            let level_avg =
-                self.audio_level_sum.swap(0, Ordering::Relaxed) as f64 / packets_count as f64;
+            let level_avg = self.audio_level_sum.swap(0, Ordering::Relaxed) / packets_count;
             let is_speaking = self.is_speaking.load(Ordering::Relaxed);
-            let less_than_threshold = level_avg < (audio_threshold.as_u8() as f64);
-            if !is_speaking && less_than_threshold {
+            if !is_speaking && level_avg < config.speaking_average_level.as_usize() {
                 self.is_speaking.store(true, Ordering::Relaxed);
                 return Some(true);
             }
-            if is_speaking && !less_than_threshold {
+            if is_speaking && level_avg > config.not_speaking_average_level.as_usize() {
                 self.is_speaking.store(false, Ordering::Relaxed);
                 return Some(false);
             }
@@ -625,40 +622,99 @@ impl LockedSwitchboard {
 
 #[cfg(test)]
 mod tests {
-    use crate::janus_rtp::AudioLevel;
+    use std::sync::atomic::Ordering;
+
+    use crate::{conf::SpeakingNotifications, janus_rtp::AudioLevel};
 
     use super::SessionState;
 
     #[test]
     fn test_speaking_notification() {
         let state = SessionState::new();
-
+        // none when not enought packets
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 5, AudioLevel::from_u8(10)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 5,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
             None
         );
+        // none when not enought packets
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 3, AudioLevel::from_u8(10)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
             None
         );
+        // none when state didn't change
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 3, AudioLevel::from_u8(5)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
             None
         );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enought packets
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(10)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
             None
         );
+        // true when state changed
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(15)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
             Some(true)
         );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enough packets
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(5)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
             None
         );
+        //none when state didn't change
         assert_eq!(
-            state.is_speaking(AudioLevel::from_u8(10), 2, AudioLevel::from_u8(15)),
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
             None
         );
     }

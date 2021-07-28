@@ -82,7 +82,8 @@ pub struct UploadConfig {
 #[derive(Clone, Deserialize, Debug)]
 pub struct SpeakingNotifications {
     pub audio_active_packets: usize,
-    pub audio_level_average: AudioLevel,
+    pub speaking_average_level: AudioLevel,
+    pub not_speaking_average_level: AudioLevel,
 }
 
 impl UploadConfig {
