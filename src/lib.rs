@@ -49,11 +49,7 @@ use conf::Config;
 use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
-use crate::{
-    janus_rtp::AudioLevel,
-    message_handler::{handle_request, prepare_request, send_response, send_speaking_notification},
-    metrics::Metrics,
-};
+use crate::{janus_rtp::{AudioLevel, print_level}, message_handler::{handle_request, prepare_request, send_response, send_speaking_notification}, metrics::Metrics};
 
 const INITIAL_REMBS: u64 = 4;
 
@@ -198,6 +194,9 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let app = app!()?;
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
+    if !is_video {
+        print_level(&mut packet);
+    }
     let header = JanusRtpHeader::extract(packet);
     // Touch last packet timestamp to drop timeout.
     let session_id = session_id(handle)?;
