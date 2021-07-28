@@ -11,8 +11,11 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::Response;
-use crate::switchboard::{AgentId, SessionId, StreamId};
 use crate::utils;
+use crate::{
+    janus_rtp::get_audio_level_ext_id,
+    switchboard::{AgentId, SessionId, StreamId},
+};
 use crate::{jsep::Jsep, message_handler::Method};
 
 pub use self::operation::{MethodKind, Operation, Result as OperationResult};
@@ -43,7 +46,18 @@ pub fn prepare_request(
         None => request,
         Some(jansson_value) => {
             let jsep = utils::jansson_to_serde::<Jsep>(&jansson_value)?;
+            let is_offer = match &jsep {
+                Jsep::Offer { .. } => true,
+                Jsep::Answer { .. } => false,
+            };
             let json_value = serde_json::to_value(jsep)?;
+            if is_offer {
+                let sdp = json_value.get("sdp").and_then(|x| x.as_str());
+                if let Some(sdp) = sdp {
+                    let idx = get_audio_level_ext_id(&sdp);
+                    info!("Got sdp!!!!!!!!!!!: {:?}", idx);
+                }
+            }
             request.set_jsep_offer(json_value)
         }
     };

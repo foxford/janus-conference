@@ -1,13 +1,18 @@
 #![allow(non_camel_case_types)]
 
-use std::os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort};
 use std::sync::{Arc, Mutex};
 use std::{convert::TryInto, mem::MaybeUninit};
+use std::{
+    ffi::CString,
+    os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort},
+};
 
 use anyhow::{anyhow, Result};
 use janus::PluginRtpPacket;
 
 ////////////////////////////////////////////////////////////////////////////////
+
+pub const JANUS_RTP_EXTMAP_AUDIO_LEVEL: &str = "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
 
 #[derive(Debug)]
 pub struct JanusRtpSwitchingContext {
@@ -158,8 +163,17 @@ pub fn print_level(packet: &mut PluginRtpPacket) {
     }
 }
 
+pub fn get_audio_level_ext_id(sdp: &str) -> anyhow::Result<isize> {
+    let c_str = CString::new(sdp)?;
+    let c_str2 = CString::new(JANUS_RTP_EXTMAP_AUDIO_LEVEL)?;
+    let id = unsafe { janus_rtp_header_extension_get_id(c_str.as_ptr(), c_str2.as_ptr()) };
+    Ok(id as isize)
+}
+
 // #[cfg(not(test))]
 extern "C" {
+    fn janus_rtp_header_extension_get_id(sdp: *const c_char, extension: *const c_char) -> c_int;
+
     fn janus_rtp_header_extension_parse_audio_level(
         packet: *mut c_char,
         len: c_int,

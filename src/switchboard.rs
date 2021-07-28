@@ -53,6 +53,7 @@ pub struct SessionState {
     last_fir_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<RecorderHandle>,
+    audio_level_ext_id: isize,
 }
 
 impl SessionState {
@@ -68,6 +69,7 @@ impl SessionState {
             is_speaking: AtomicBool::new(false),
             packets_count: AtomicUsize::new(0),
             audio_level_sum: AtomicUsize::new(0),
+            audio_level_ext_id: -1,
         }
     }
 

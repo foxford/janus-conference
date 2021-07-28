@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use janus::sdp::{AudioCodec, MediaDirection, MediaType, OfferAnswerParameters, Sdp, VideoCodec};
 use serde_json::Value as JsonValue;
 
-use crate::switchboard::StreamId;
+use crate::{janus_rtp::JANUS_RTP_EXTMAP_AUDIO_LEVEL, switchboard::StreamId};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -34,7 +34,7 @@ impl Jsep {
             OfferAnswerParameters::VideoCodec,
             VideoCodec::Vp8.to_cstr().as_ptr(),
             OfferAnswerParameters::AcceptExtmap,
-            CString::new("urn:ietf:params:rtp-hdrext:ssrc-audio-level")?.as_ptr(),
+            CString::new(JANUS_RTP_EXTMAP_AUDIO_LEVEL)?.as_ptr(),
         );
 
         // Set video bitrate.
