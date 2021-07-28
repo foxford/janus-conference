@@ -141,7 +141,8 @@ pub fn send_speaking_notification(
         &Payload::new(StatusCode::OK).set_response(notification),
     )?);
 
-    sender.send(session_id, "SpeakingNotification", response, None)?;
+    //this strange string is "AgentSpeaking" in base64
+    sender.send(session_id, "IkFnZW50U3BlYWtpbmci", response, None)?;
     Ok(())
 }
 
