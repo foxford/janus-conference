@@ -24,6 +24,7 @@ pub struct JanusRtpSwitchingContext {
 }
 
 impl JanusRtpSwitchingContext {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut uninit_context = MaybeUninit::<janus_rtp_switching_context>::uninit();
 
@@ -81,7 +82,7 @@ pub struct AudioLevel(u8);
 impl AudioLevel {
     pub fn new(packet: &mut PluginRtpPacket, audio_level_ext_id: u32) -> Option<Self> {
         let mut vad = false as gboolean;
-        let mut level = -1 as c_int;
+        let mut level = -1_i32;
         unsafe {
             janus_rtp_header_extension_parse_audio_level(
                 packet.buffer,

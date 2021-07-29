@@ -204,7 +204,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             .filter(|_| !is_video)
             .and_then(|config| {
                 let agent_id = switchboard.agent_id(session_id)?;
-                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  &config)?;
+                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  config)?;
                 Some((agent_id, is_speaking))
             });
 

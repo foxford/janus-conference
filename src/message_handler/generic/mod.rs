@@ -127,6 +127,7 @@ pub fn send_response(sender: impl Sender, response: Response) {
         });
 }
 
+#[allow(clippy::ptr_arg)]
 pub fn send_speaking_notification(
     sender: &JanusSender,
     session_id: SessionId,
