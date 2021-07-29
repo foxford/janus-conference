@@ -10,7 +10,7 @@ const CONFIG_FILE_NAME: &str = "janus.plugin.conference.toml";
 pub struct Config {
     pub general: General,
     pub recordings: recorder::Config,
-    pub speaking_notifications: SpeakingNotifications,
+    pub speaking_notifications: Option<SpeakingNotifications>,
     pub constraint: Constraint,
     pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,

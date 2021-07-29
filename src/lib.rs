@@ -14,7 +14,6 @@ use std::{
     time::Instant,
 };
 use std::{
-    ops::Not,
     os::raw::{c_char, c_int},
 };
 
@@ -195,23 +194,23 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-    // Touch last packet timestamp to drop timeout.
+    // Touch last packet timestamp  to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {        
         let state = switchboard.state(session_id)?;
-        let is_speaking = is_video
-            .not()
-            .then(|| &mut packet)
-            .and_then(|packet| Some(AudioLevel::new(packet, state.audio_level_ext_id()?)?))
-            .and_then(|level| {
-                state.is_speaking(
-                    level,
-                    &app.config.speaking_notifications,
-                )
+        let is_speaking = 
+        app.config.speaking_notifications
+            .as_ref()
+            .filter(|_| !is_video)
+            .and_then(|config| {
+                let agent_id = switchboard.agent_id(session_id)?;
+                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  &config)?;
+                Some((agent_id, is_speaking))
             });
-        if let Some(speaking_not) = is_speaking {
-            let agent_id = switchboard.agent_id(session_id);
-            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, speaking_not) {
+
+        if let Some((agent_id, is_speaking)) = is_speaking {
+            verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
+            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
                 err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
             }
         }
