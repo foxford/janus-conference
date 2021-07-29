@@ -47,7 +47,6 @@ use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
-    janus_rtp::replace_payload_with_zeros,
     message_handler::{handle_request, prepare_request, send_response},
     metrics::Metrics,
 };
