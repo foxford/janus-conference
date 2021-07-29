@@ -210,15 +210,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         let writer_config = switchboard.writer_config(stream_id);
 
-        let is_media_allowed = match is_video {
-            true => writer_config.send_video(),
-            false => writer_config.send_audio(),
-        };
-
-        if !is_media_allowed {
-            replace_payload_with_zeros(&mut packet)
-        }
-
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
         // Do it only for video because Windows and Linux don't make a difference for media types
         // and apply audio limitation to video while only MacOS does.
