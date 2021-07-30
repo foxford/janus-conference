@@ -80,7 +80,7 @@ impl SessionState {
     ) -> Option<bool> {
         let packets_count = self.packets_count.fetch_add(1, Ordering::Relaxed) + 1;
         self.audio_level_sum
-            .fetch_add(audio_level.as_usize() as usize, Ordering::Relaxed);
+            .fetch_add(audio_level.as_usize(), Ordering::Relaxed);
         if packets_count == config.audio_active_packets {
             self.packets_count.store(0, Ordering::Relaxed);
             let level_avg = self.audio_level_sum.swap(0, Ordering::Relaxed) / packets_count;
