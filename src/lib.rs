@@ -29,7 +29,7 @@ mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
 mod janus_recorder;
-mod janus_rtp;
+pub mod janus_rtp;
 mod jsep;
 mod message_handler;
 mod metrics;
@@ -45,7 +45,8 @@ use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
-    message_handler::{handle_request, prepare_request, send_response},
+    janus_rtp::AudioLevel,
+    message_handler::{handle_request, prepare_request, send_response, send_speaking_notification},
     metrics::Metrics,
 };
 
@@ -193,11 +194,26 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-
-    // Touch last packet timestamp to drop timeout.
+    // Touch last packet timestamp  to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
+        let is_speaking =
+        app.config.speaking_notifications
+            .as_ref()
+            .filter(|_| !is_video)
+            .and_then(|config| {
+                let agent_id = switchboard.agent_id(session_id)?;
+                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  config)?;
+                Some((agent_id, is_speaking))
+            });
+
+        if let Some((agent_id, is_speaking)) = is_speaking {
+            verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
+            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
+                err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+            }
+        }
         state.touch_last_rtp_packet_timestamp();
 
         // Check whether publisher media is muted and drop the packet if it is.

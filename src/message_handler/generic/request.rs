@@ -7,6 +7,7 @@ pub struct Request {
     session_id: SessionId,
     transaction: String,
     jsep_offer: Option<JsonValue>,
+    audio_level_ext_id: Option<u32>,
 }
 
 impl Request {
@@ -15,6 +16,7 @@ impl Request {
             session_id,
             transaction: transaction.to_owned(),
             jsep_offer: None,
+            audio_level_ext_id: None,
         }
     }
 
@@ -35,5 +37,16 @@ impl Request {
 
     pub fn jsep_offer(&self) -> Option<&JsonValue> {
         self.jsep_offer.as_ref()
+    }
+
+    pub fn set_audio_level_ext_id(self, audio_level_ext_id: Option<u32>) -> Self {
+        Self {
+            audio_level_ext_id,
+            ..self
+        }
+    }
+
+    pub fn audio_level_ext_id(&self) -> Option<u32> {
+        self.audio_level_ext_id
     }
 }

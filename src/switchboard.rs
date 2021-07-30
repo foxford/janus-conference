@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
@@ -10,10 +10,10 @@ use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-use crate::bidirectional_multimap::BidirectionalMultimap;
-use crate::janus_callbacks;
 use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
+use crate::{bidirectional_multimap::BidirectionalMultimap, janus_rtp::AudioLevel};
+use crate::{conf::SpeakingNotifications, janus_callbacks};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,11 +45,15 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     switching_context: JanusRtpSwitchingContext,
     fir_seq: AtomicI32,
+    is_speaking: AtomicBool,
+    packets_count: AtomicUsize,
+    audio_level_sum: AtomicUsize,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
     last_fir_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<RecorderHandle>,
+    audio_level_ext_id: Option<u32>,
 }
 
 impl SessionState {
@@ -62,6 +66,36 @@ impl SessionState {
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
             last_fir_timestamp: AtomicI64::new(0),
+            is_speaking: AtomicBool::new(false),
+            packets_count: AtomicUsize::new(0),
+            audio_level_sum: AtomicUsize::new(0),
+            audio_level_ext_id: None,
+        }
+    }
+
+    pub fn is_speaking(
+        &self,
+        audio_level: AudioLevel,
+        config: &SpeakingNotifications,
+    ) -> Option<bool> {
+        let packets_count = self.packets_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.audio_level_sum
+            .fetch_add(audio_level.as_usize(), Ordering::Relaxed);
+        if packets_count == config.audio_active_packets {
+            self.packets_count.store(0, Ordering::Relaxed);
+            let level_avg = self.audio_level_sum.swap(0, Ordering::Relaxed) / packets_count;
+            let is_speaking = self.is_speaking.load(Ordering::Relaxed);
+            if !is_speaking && level_avg < config.speaking_average_level.as_usize() {
+                self.is_speaking.store(true, Ordering::Relaxed);
+                return Some(true);
+            }
+            if is_speaking && level_avg > config.not_speaking_average_level.as_usize() {
+                self.is_speaking.store(false, Ordering::Relaxed);
+                return Some(false);
+            }
+            None
+        } else {
+            None
         }
     }
 
@@ -139,6 +173,16 @@ impl SessionState {
     fn unset_recorder(&mut self) -> &mut Self {
         self.recorder = None;
         self
+    }
+
+    /// Set the session state's audio level ext id.
+    pub fn set_audio_level_ext_id(&mut self, audio_level_ext_id: Option<u32>) {
+        self.audio_level_ext_id = audio_level_ext_id;
+    }
+
+    /// Get a reference to the session state's audio level ext id.
+    pub fn audio_level_ext_id(&self) -> Option<u32> {
+        self.audio_level_ext_id
     }
 }
 
@@ -269,6 +313,10 @@ impl Switchboard {
 
     pub fn writer_configs_count(&self) -> usize {
         self.writer_configs.len()
+    }
+
+    pub fn agent_id(&self, session_id: SessionId) -> Option<&AgentId> {
+        self.agents.get_key(&session_id)
     }
 
     pub fn connect(&mut self, session: Session) -> Result<()> {
@@ -569,5 +617,105 @@ impl LockedSwitchboard {
 
             thread::sleep(std_interval);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use crate::{conf::SpeakingNotifications, janus_rtp::AudioLevel};
+
+    use super::SessionState;
+
+    #[test]
+    fn test_speaking_notification() {
+        let state = SessionState::new();
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 5,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // none when state didn't change
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
+            None
+        );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // true when state changed
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
+            Some(true)
+        );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enough packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
+            None
+        );
+        //none when state didn't change
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
+            None
+        );
     }
 }

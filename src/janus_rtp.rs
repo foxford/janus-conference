@@ -1,13 +1,22 @@
 #![allow(non_camel_case_types)]
 
-use std::mem::MaybeUninit;
 use std::os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort};
-use std::sync::{Arc, Mutex};
+use std::{convert::TryInto, mem::MaybeUninit};
+use std::{
+    ffi::CStr,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{anyhow, Result};
 use janus::PluginRtpPacket;
 
 ////////////////////////////////////////////////////////////////////////////////
+
+pub static JANUS_RTP_EXTMAP_AUDIO_LEVEL: &str = "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
+
+pub fn janus_rtp_extmap_audio_level() -> &'static CStr {
+    c_str!("urn:ietf:params:rtp-hdrext:ssrc-audio-level")
+}
 
 #[derive(Debug)]
 pub struct JanusRtpSwitchingContext {
@@ -15,6 +24,7 @@ pub struct JanusRtpSwitchingContext {
 }
 
 impl JanusRtpSwitchingContext {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let mut uninit_context = MaybeUninit::<janus_rtp_switching_context>::uninit();
 
@@ -63,6 +73,35 @@ impl JanusRtpHeader {
 
     pub fn restore(&self, packet: &mut PluginRtpPacket) {
         unsafe { std::ptr::copy(&self.0 as *const i8, &mut *packet.buffer, RTP_HEADER_SIZE) };
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub struct AudioLevel(u8);
+
+impl AudioLevel {
+    pub fn new(packet: &mut PluginRtpPacket, audio_level_ext_id: u32) -> Option<Self> {
+        let mut vad = false as gboolean;
+        let mut level = -1_i32;
+        unsafe {
+            janus_rtp_header_extension_parse_audio_level(
+                packet.buffer,
+                packet.length as c_int,
+                audio_level_ext_id as c_int,
+                &mut vad,
+                &mut level,
+            );
+        };
+        level.try_into().ok().map(Self)
+    }
+
+    pub fn as_usize(self) -> usize {
+        self.0 as usize
+    }
+
+    #[cfg(test)]
+    pub fn from_u8(x: u8) -> Self {
+        Self(x)
     }
 }
 
@@ -127,6 +166,14 @@ struct janus_rtp_switching_context {
 
 #[cfg(not(test))]
 extern "C" {
+    fn janus_rtp_header_extension_parse_audio_level(
+        packet: *mut c_char,
+        len: c_int,
+        id: c_int,
+        vad: *mut gboolean,
+        level: *mut c_int,
+    ) -> c_int;
+
     fn janus_rtp_switching_context_reset(context: *mut janus_rtp_switching_context);
 
     fn janus_rtp_header_update(
@@ -138,6 +185,18 @@ extern "C" {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+#[cfg(test)]
+#[no_mangle]
+unsafe extern "C" fn janus_rtp_header_extension_parse_audio_level(
+    _packet: *mut c_char,
+    _len: c_int,
+    _id: c_int,
+    _vad: *mut gboolean,
+    _level: *mut c_int,
+) -> c_int {
+    1
+}
 
 #[cfg(test)]
 #[no_mangle]
