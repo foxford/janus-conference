@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
 use std::{
@@ -360,8 +360,6 @@ impl Switchboard {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
 
         let session = self.session(id)?;
-        // .lock()
-        // .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
 
         janus_callbacks::end_session(&session);
         Ok(())
@@ -581,16 +579,14 @@ impl Switchboard {
     }
 
     pub fn vacuum_sessions(&mut self, ttl: Duration) -> Result<()> {
-        for (id, session) in self.new_sessions.iter() {
+        self.new_sessions.retain(|_id, session| {
             if session.is_timeouted(ttl) {
-                let session = session?.lock().map_err(|err| {
-                    format_err!("Failed to acquire session mutex {}: {}", id, err)
-                })?;
-
-                janus_callbacks::end_session(&session);
-                self.disconnect()?
+                janus_callbacks::end_session(&session.session);
+                false
+            } else {
+                true
             }
-        }
+        });
         Ok(())
     }
 
