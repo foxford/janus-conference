@@ -36,6 +36,7 @@ make_static_metric! {
             publishers_subscribers,
             reader_configs,
             writer_configs,
+            unused_sessions,
         },
     }
 }
@@ -123,6 +124,9 @@ impl Metrics {
             switchboard_stats
                 .writer_configs
                 .set(switchboard.writer_configs_count() as i64);
+            switchboard_stats
+                .unused_sessions
+                .set(switchboard.unused_sessions_count() as i64)
         }
     }
 

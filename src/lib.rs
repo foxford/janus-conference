@@ -101,7 +101,11 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
         .context("Session associate error")?;
 
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        switchboard.insert_new(session);
+        if switchboard.sessions_count() == 0 {
+            switchboard.insert_service_session(session)
+        } else {
+            switchboard.insert_new(session);
+        }
         Ok(())
     })
 }

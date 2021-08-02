@@ -270,12 +270,12 @@ static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct NewSession {
+pub struct UnusedSession {
     pub created_at: Instant,
     pub session: Session,
 }
 
-impl NewSession {
+impl UnusedSession {
     pub fn is_timeouted(&self, ttl: Duration) -> bool {
         self.created_at.elapsed() > ttl
     }
@@ -283,7 +283,7 @@ impl NewSession {
 
 #[derive(Debug)]
 pub struct Switchboard {
-    new_sessions: FnvHashMap<SessionId, NewSession>,
+    unused_sessions: FnvHashMap<SessionId, UnusedSession>,
     sessions: FnvHashMap<SessionId, Session>,
     states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
@@ -303,8 +303,12 @@ impl Switchboard {
             publishers_subscribers: BidirectionalMultimap::new(),
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
-            new_sessions: FnvHashMap::default(),
+            unused_sessions: FnvHashMap::default(),
         }
+    }
+
+    pub fn unused_sessions_count(&self) -> usize {
+        self.unused_sessions.len()
     }
 
     pub fn sessions_count(&self) -> usize {
@@ -335,26 +339,21 @@ impl Switchboard {
         self.agents.get_key(&session_id)
     }
 
+    pub fn insert_service_session(&mut self, session: Session) {
+        self.sessions.insert(***session, session);
+    }
+
     pub fn insert_new(&mut self, session: Session) {
         let session_id = ***session;
         info!("Inserting session"; {"handle_id": session_id});
-        self.new_sessions.insert(
+        self.unused_sessions.insert(
             session_id,
-            NewSession {
+            UnusedSession {
                 created_at: Instant::now(),
                 session,
             },
         );
     }
-
-    // pub fn connect(&mut self, session: SessionId) -> Result<()> {
-    //     let session_id = ***session;
-    //     info!("Connecting session"; {"handle_id": session_id});
-    //     let locked_session = Arc::new(Mutex::new(session));
-    //     self.sessions.insert(session_id, locked_session);
-    //     self.states.insert(session_id, SessionState::new());
-    //     Ok(())
-    // }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
@@ -496,12 +495,13 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<()> {
         info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-        if self.new_sessions.remove(&publisher).is_none() {
-            return Err(anyhow!(
+        let session = self.unused_sessions.remove(&publisher).ok_or_else(|| {
+            anyhow!(
                 "Publisher's session id: {} not present in the new_sessions set",
                 publisher
-            ));
-        }
+            )
+        })?;
+        self.sessions.insert(publisher, session.session);
         self.states.insert(publisher, SessionState::new());
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
@@ -524,12 +524,13 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
-        if self.new_sessions.remove(&subscriber).is_none() {
-            return Err(anyhow!(
+        let session = self.unused_sessions.remove(&subscriber).ok_or_else(|| {
+            anyhow!(
                 "Subscriber's session id: {} not present in the new_sessions set",
                 subscriber
-            ));
-        }
+            )
+        })?;
+        self.sessions.insert(subscriber, session.session);
         self.states.insert(subscriber, SessionState::new());
 
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
@@ -579,7 +580,7 @@ impl Switchboard {
     }
 
     pub fn vacuum_sessions(&mut self, ttl: Duration) -> Result<()> {
-        self.new_sessions.retain(|_id, session| {
+        self.unused_sessions.retain(|_id, session| {
             if session.is_timeouted(ttl) {
                 janus_callbacks::end_session(&session.session);
                 false
