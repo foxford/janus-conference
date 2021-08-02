@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
 
@@ -20,7 +20,6 @@ use crate::{conf::SpeakingNotifications, janus_callbacks};
 pub type StreamId = Uuid;
 pub type AgentId = String;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
-pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -269,7 +268,7 @@ static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 
 #[derive(Debug)]
 pub struct Switchboard {
-    sessions: FnvHashMap<SessionId, LockedSession>,
+    sessions: FnvHashMap<SessionId, Session>,
     states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: FnvHashMap<StreamId, SessionId>,
@@ -322,8 +321,8 @@ impl Switchboard {
     pub fn connect(&mut self, session: Session) -> Result<()> {
         let session_id = ***session;
         info!("Connecting session"; {"handle_id": session_id});
-        let locked_session = Arc::new(Mutex::new(session));
-        self.sessions.insert(session_id, locked_session);
+        // let locked_session = Arc::new(Mutex::new(session));
+        self.sessions.insert(session_id, session);
         self.states.insert(session_id, SessionState::new());
         Ok(())
     }
@@ -331,10 +330,9 @@ impl Switchboard {
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
 
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+        let session = self.session(id)?;
+        // .lock()
+        // .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
 
         janus_callbacks::end_session(&session);
         Ok(())
@@ -368,7 +366,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn session(&self, id: SessionId) -> Result<&LockedSession> {
+    pub fn session(&self, id: SessionId) -> Result<&Session> {
         self.sessions
             .get(&id)
             .ok_or_else(|| format_err!("Session not found for id = {}", id))
