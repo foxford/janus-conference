@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
-use chrono::Duration;
 use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
 
@@ -60,9 +59,10 @@ impl App {
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
-                let interval = Duration::seconds(app.config.general.vacuum_interval);
-
-                if let Err(err) = app.switchboard.vacuum_publishers_loop(interval) {
+                if let Err(err) = app.switchboard.vacuum_publishers_loop(
+                    app.config.general.vacuum_interval,
+                    app.config.general.sessions_ttl,
+                ) {
                     err!("Vacuum publishers loop failed: {}", err);
                 }
             }

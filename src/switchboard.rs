@@ -1,10 +1,13 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
+use std::{
+    sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
 
-use anyhow::{bail, format_err, Context, Result};
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use anyhow::{bail, format_err, Result};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
@@ -140,7 +143,7 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
+    fn since_last_rtp_packet_timestamp(&self) -> Option<chrono::Duration> {
         match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
             0 => None,
             timestamp => {
@@ -267,7 +270,20 @@ static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
+pub struct NewSession {
+    pub created_at: Instant,
+    pub session: Session,
+}
+
+impl NewSession {
+    pub fn is_timeouted(&self, ttl: Duration) -> bool {
+        self.created_at.elapsed() > ttl
+    }
+}
+
+#[derive(Debug)]
 pub struct Switchboard {
+    new_sessions: FnvHashMap<SessionId, NewSession>,
     sessions: FnvHashMap<SessionId, Session>,
     states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
@@ -287,6 +303,7 @@ impl Switchboard {
             publishers_subscribers: BidirectionalMultimap::new(),
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
+            new_sessions: FnvHashMap::default(),
         }
     }
 
@@ -318,14 +335,26 @@ impl Switchboard {
         self.agents.get_key(&session_id)
     }
 
-    pub fn connect(&mut self, session: Session) -> Result<()> {
+    pub fn insert_new(&mut self, session: Session) {
         let session_id = ***session;
-        info!("Connecting session"; {"handle_id": session_id});
-        // let locked_session = Arc::new(Mutex::new(session));
-        self.sessions.insert(session_id, session);
-        self.states.insert(session_id, SessionState::new());
-        Ok(())
+        info!("Inserting session"; {"handle_id": session_id});
+        self.new_sessions.insert(
+            session_id,
+            NewSession {
+                created_at: Instant::now(),
+                session,
+            },
+        );
     }
+
+    // pub fn connect(&mut self, session: SessionId) -> Result<()> {
+    //     let session_id = ***session;
+    //     info!("Connecting session"; {"handle_id": session_id});
+    //     let locked_session = Arc::new(Mutex::new(session));
+    //     self.sessions.insert(session_id, locked_session);
+    //     self.states.insert(session_id, SessionState::new());
+    //     Ok(())
+    // }
 
     pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
@@ -469,7 +498,13 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<()> {
         info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-
+        if self.new_sessions.remove(&publisher).is_none() {
+            return Err(anyhow!(
+                "Publisher's session id: {} not present in the new_sessions set",
+                publisher
+            ));
+        }
+        self.states.insert(publisher, SessionState::new());
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
 
@@ -491,6 +526,14 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
+        if self.new_sessions.remove(&subscriber).is_none() {
+            return Err(anyhow!(
+                "Subscriber's session id: {} not present in the new_sessions set",
+                subscriber
+            ));
+        }
+        self.states.insert(subscriber, SessionState::new());
+
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -537,7 +580,21 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
+    pub fn vacuum_sessions(&mut self, ttl: Duration) -> Result<()> {
+        for (id, session) in self.new_sessions.iter() {
+            if session.is_timeouted(ttl) {
+                let session = session?.lock().map_err(|err| {
+                    format_err!("Failed to acquire session mutex {}: {}", id, err)
+                })?;
+
+                janus_callbacks::end_session(&session);
+                self.disconnect()?
+            }
+        }
+        Ok(())
+    }
+
+    pub fn vacuum_publishers(&mut self, timeout: &chrono::Duration) -> Result<()> {
         for (stream_id, publisher) in self.publishers.clone().into_iter() {
             match self.vacuum_publisher(publisher, timeout) {
                 Ok(false) => (),
@@ -556,7 +613,11 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
+    fn vacuum_publisher(
+        &mut self,
+        publisher: SessionId,
+        timeout: &chrono::Duration,
+    ) -> Result<bool> {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
@@ -602,18 +663,17 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
+    pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
         info!("Vacuum thread spawned");
-
-        let std_interval = interval
-            .to_std()
-            .context("Failed to convert vacuum interval")?;
-
         loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
-                .unwrap_or_else(|err| err!("{}", err));
+            self.with_write_lock(|mut switchboard| {
+                switchboard.vacuum_publishers(&chrono::Duration::from_std(interval)?)?;
+                switchboard.vacuum_sessions(sessions_ttl)?;
+                Ok(())
+            })
+            .unwrap_or_else(|err| err!("{}", err));
 
-            thread::sleep(std_interval);
+            thread::sleep(interval);
         }
     }
 }
