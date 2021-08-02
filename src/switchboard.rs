@@ -355,7 +355,7 @@ impl Switchboard {
         );
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
+    pub fn disconnect(&self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
 
         let session = self.session(id)?;
@@ -384,7 +384,7 @@ impl Switchboard {
         for stream_id in stream_ids {
             self.remove_stream(stream_id)?;
         }
-
+        self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
         self.agents.remove_value(&id);
@@ -579,21 +579,18 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_sessions(&mut self, ttl: Duration) -> Result<()> {
-        self.unused_sessions.retain(|_id, session| {
+    pub fn vacuum_sessions(&self, ttl: Duration) -> Result<()> {
+        for (_, session) in self.unused_sessions.iter() {
             if session.is_timeouted(ttl) {
                 janus_callbacks::end_session(&session.session);
-                false
-            } else {
-                true
             }
-        });
+        }
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &chrono::Duration) -> Result<()> {
-        for (stream_id, publisher) in self.publishers.clone().into_iter() {
-            match self.vacuum_publisher(publisher, timeout) {
+    pub fn vacuum_publishers(&self, timeout: &chrono::Duration) -> Result<()> {
+        for (stream_id, publisher) in self.publishers.iter() {
+            match self.vacuum_publisher(*publisher, timeout) {
                 Ok(false) => (),
                 Ok(true) => warn!(
                     "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
@@ -610,11 +607,7 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(
-        &mut self,
-        publisher: SessionId,
-        timeout: &chrono::Duration,
-    ) -> Result<bool> {
+    fn vacuum_publisher(&self, publisher: SessionId, timeout: &chrono::Duration) -> Result<bool> {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
@@ -663,7 +656,7 @@ impl LockedSwitchboard {
     pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
         info!("Vacuum thread spawned");
         loop {
-            self.with_write_lock(|mut switchboard| {
+            self.with_read_lock(|switchboard| {
                 switchboard.vacuum_publishers(&chrono::Duration::from_std(interval)?)?;
                 switchboard.vacuum_sessions(sessions_ttl)?;
                 Ok(())
