@@ -39,7 +39,7 @@ impl super::Operation for Request {
                         {"agent_id": self.agent_id, "session_id": session_id}
                     );
 
-                    janus_callbacks::end_session(&session);
+                    janus_callbacks::end_session(session);
                 }
 
                 Ok(())

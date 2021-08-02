@@ -360,7 +360,7 @@ impl Switchboard {
 
         let session = self.session(id)?;
 
-        janus_callbacks::end_session(&session);
+        janus_callbacks::end_session(session);
         Ok(())
     }
 

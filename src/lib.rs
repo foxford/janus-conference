@@ -312,7 +312,7 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                 for subscriber in switchboard.subscribers_to(session_id) {
                     let subscriber_session = switchboard.session(*subscriber)?;
 
-                    janus_callbacks::relay_rtcp(&subscriber_session, &mut packet);
+                    janus_callbacks::relay_rtcp(subscriber_session, &mut packet);
                 }
             }
         }
@@ -411,7 +411,7 @@ fn relay_rtp_packet(
 
     let reader_session = switchboard.session(reader)?;
 
-    janus_callbacks::relay_rtp(&reader_session, packet);
+    janus_callbacks::relay_rtp(reader_session, packet);
 
     // Restore original header rewritten by `janus_rtp_header_update`
     // for the next iteration of the loop.
@@ -434,7 +434,7 @@ fn send_pli_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
         length: pli.len() as i16,
     };
 
-    janus_callbacks::relay_rtcp(&session, &mut packet);
+    janus_callbacks::relay_rtcp(session, &mut packet);
     Ok(())
 }
 
@@ -456,7 +456,7 @@ fn send_fir_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
         length: fir.len() as i16,
     };
 
-    janus_callbacks::relay_rtcp(&session, &mut packet);
+    janus_callbacks::relay_rtcp(session, &mut packet);
     Ok(())
 }
 
@@ -477,7 +477,7 @@ fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
             length: remb.len() as i16,
         };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
+        janus_callbacks::relay_rtcp(session, &mut packet);
         Ok(())
     })
 }
