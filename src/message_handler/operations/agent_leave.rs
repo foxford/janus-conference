@@ -1,4 +1,4 @@
-use anyhow::{format_err, Error};
+use anyhow::Error;
 use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
@@ -16,7 +16,7 @@ struct Response {}
 
 #[async_trait]
 impl super::Operation for Request {
-    async fn call(&self, request: &super::Request) -> super::OperationResult {
+    async fn call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling agent.leave operation"; {"agent_id": self.agent_id});
 
         let error = |status: StatusCode, err: Error| {
@@ -32,20 +32,14 @@ impl super::Operation for Request {
             .switchboard
             .with_read_lock(|switchboard| {
                 for session_id in switchboard.agent_sessions(&self.agent_id) {
-                    let session = switchboard.session(*session_id)?.lock().map_err(|err| {
-                        format_err!(
-                            "Failed to acquire session mutex for id = {}: {}",
-                            request.session_id(),
-                            err
-                        )
-                    })?;
+                    let session = switchboard.session(*session_id)?;
 
                     info!(
                         "Agent left; finishing session";
                         {"agent_id": self.agent_id, "session_id": session_id}
                     );
 
-                    janus_callbacks::end_session(&session);
+                    janus_callbacks::end_session(session);
                 }
 
                 Ok(())

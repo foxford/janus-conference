@@ -40,9 +40,12 @@ impl Config {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct General {
-    pub vacuum_interval: i64,
+    #[serde(with = "humantime_serde")]
+    pub vacuum_interval: Duration,
     #[serde(with = "humantime_serde")]
     pub fir_interval: Duration,
+    #[serde(with = "humantime_serde")]
+    pub sessions_ttl: Duration,
 }
 
 #[derive(Clone, Deserialize, Debug)]

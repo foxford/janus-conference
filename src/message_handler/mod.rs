@@ -3,7 +3,7 @@ mod operations;
 
 use std::ffi::CString;
 
-use anyhow::{format_err, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use janus::JanssonValue;
 
@@ -87,13 +87,7 @@ impl Sender for JanusSender {
         jsep_answer: Option<JanssonValue>,
     ) -> Result<()> {
         app!()?.switchboard.with_read_lock(move |switchboard| {
-            let session = switchboard.session(session_id)?.lock().map_err(|err| {
-                format_err!(
-                    "Failed to acquire mutex for session {}: {}",
-                    session_id,
-                    err
-                )
-            })?;
+            let session = switchboard.session(session_id)?;
 
             let txn = CString::new(transaction.to_owned())
                 .context("Failed to cast transaction to CString")?;

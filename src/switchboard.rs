@@ -1,10 +1,13 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
+use std::{
+    sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
 
-use anyhow::{bail, format_err, Context, Result};
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use anyhow::{bail, format_err, Result};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
@@ -20,7 +23,6 @@ use crate::{conf::SpeakingNotifications, janus_callbacks};
 pub type StreamId = Uuid;
 pub type AgentId = String;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
-pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -141,7 +143,7 @@ impl SessionState {
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
+    fn since_last_rtp_packet_timestamp(&self) -> Option<chrono::Duration> {
         match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
             0 => None,
             timestamp => {
@@ -268,8 +270,21 @@ static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
+pub struct UnusedSession {
+    pub created_at: Instant,
+    pub session: Session,
+}
+
+impl UnusedSession {
+    pub fn is_timeouted(&self, ttl: Duration) -> bool {
+        self.created_at.elapsed() > ttl
+    }
+}
+
+#[derive(Debug)]
 pub struct Switchboard {
-    sessions: FnvHashMap<SessionId, LockedSession>,
+    unused_sessions: FnvHashMap<SessionId, UnusedSession>,
+    sessions: FnvHashMap<SessionId, Session>,
     states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: FnvHashMap<StreamId, SessionId>,
@@ -288,7 +303,12 @@ impl Switchboard {
             publishers_subscribers: BidirectionalMultimap::new(),
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
+            unused_sessions: FnvHashMap::default(),
         }
+    }
+
+    pub fn unused_sessions_count(&self) -> usize {
+        self.unused_sessions.len()
     }
 
     pub fn sessions_count(&self) -> usize {
@@ -319,24 +339,28 @@ impl Switchboard {
         self.agents.get_key(&session_id)
     }
 
-    pub fn connect(&mut self, session: Session) -> Result<()> {
-        let session_id = ***session;
-        info!("Connecting session"; {"handle_id": session_id});
-        let locked_session = Arc::new(Mutex::new(session));
-        self.sessions.insert(session_id, locked_session);
-        self.states.insert(session_id, SessionState::new());
-        Ok(())
+    pub fn insert_service_session(&mut self, session: Session) {
+        self.sessions.insert(***session, session);
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
+    pub fn insert_new(&mut self, session: Session) {
+        let session_id = ***session;
+        info!("Inserting session"; {"handle_id": session_id});
+        self.unused_sessions.insert(
+            session_id,
+            UnusedSession {
+                created_at: Instant::now(),
+                session,
+            },
+        );
+    }
+
+    pub fn disconnect(&self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
 
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+        let session = self.session(id)?;
 
-        janus_callbacks::end_session(&session);
+        janus_callbacks::end_session(session);
         Ok(())
     }
 
@@ -360,7 +384,7 @@ impl Switchboard {
         for stream_id in stream_ids {
             self.remove_stream(stream_id)?;
         }
-
+        self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
         self.agents.remove_value(&id);
@@ -368,7 +392,7 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn session(&self, id: SessionId) -> Result<&LockedSession> {
+    pub fn session(&self, id: SessionId) -> Result<&Session> {
         self.sessions
             .get(&id)
             .ok_or_else(|| format_err!("Session not found for id = {}", id))
@@ -471,7 +495,14 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<()> {
         info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-
+        let session = self.unused_sessions.remove(&publisher).ok_or_else(|| {
+            anyhow!(
+                "Publisher's session id: {} not present in the new_sessions set",
+                publisher
+            )
+        })?;
+        self.sessions.insert(publisher, session.session);
+        self.states.insert(publisher, SessionState::new());
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
 
@@ -493,6 +524,15 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
+        let session = self.unused_sessions.remove(&subscriber).ok_or_else(|| {
+            anyhow!(
+                "Subscriber's session id: {} not present in the new_sessions set",
+                subscriber
+            )
+        })?;
+        self.sessions.insert(subscriber, session.session);
+        self.states.insert(subscriber, SessionState::new());
+
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -539,9 +579,18 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
-        for (stream_id, publisher) in self.publishers.clone().into_iter() {
-            match self.vacuum_publisher(publisher, timeout) {
+    pub fn vacuum_sessions(&self, ttl: Duration) -> Result<()> {
+        for (_, session) in self.unused_sessions.iter() {
+            if session.is_timeouted(ttl) {
+                janus_callbacks::end_session(&session.session);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn vacuum_publishers(&self, timeout: &chrono::Duration) -> Result<()> {
+        for (stream_id, publisher) in self.publishers.iter() {
+            match self.vacuum_publisher(*publisher, timeout) {
                 Ok(false) => (),
                 Ok(true) => warn!(
                     "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
@@ -558,7 +607,7 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
+    fn vacuum_publisher(&self, publisher: SessionId, timeout: &chrono::Duration) -> Result<bool> {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
@@ -604,18 +653,17 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
+    pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
         info!("Vacuum thread spawned");
-
-        let std_interval = interval
-            .to_std()
-            .context("Failed to convert vacuum interval")?;
-
         loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
-                .unwrap_or_else(|err| err!("{}", err));
+            self.with_read_lock(|switchboard| {
+                switchboard.vacuum_publishers(&chrono::Duration::from_std(interval)?)?;
+                switchboard.vacuum_sessions(sessions_ttl)?;
+                Ok(())
+            })
+            .unwrap_or_else(|err| err!("{}", err));
 
-            thread::sleep(std_interval);
+            thread::sleep(interval);
         }
     }
 }
