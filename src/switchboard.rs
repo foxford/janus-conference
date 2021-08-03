@@ -274,7 +274,7 @@ pub struct Switchboard {
     agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: FnvHashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
-    reader_configs: FnvHashMap<(StreamId, AgentId), ReaderConfig>,
+    reader_configs: FnvHashMap<AgentId, FnvHashMap<StreamId, ReaderConfig>>,
     writer_configs: FnvHashMap<StreamId, WriterConfig>,
 }
 
@@ -363,7 +363,10 @@ impl Switchboard {
 
         self.sessions.remove(&id);
         self.states.remove(&id);
-        self.agents.remove_value(&id);
+        let agent = self.agents.remove_value(&id);
+        if let Some(agent) = agent {
+            self.reader_configs.remove(&agent);
+        }
         self.publishers_subscribers.remove_value(&id);
         Ok(())
     }
@@ -428,9 +431,8 @@ impl Switchboard {
         stream_id: StreamId,
         reader_id: &SessionId,
     ) -> Option<&ReaderConfig> {
-        self.agents
-            .get_key(reader_id)
-            .and_then(|agent_id| self.reader_configs.get(&(stream_id, agent_id.to_owned())))
+        let agent_id = self.agents.get_key(reader_id)?;
+        self.reader_configs.get(agent_id)?.get(&stream_id)
     }
 
     #[allow(clippy::ptr_arg)]
@@ -445,7 +447,9 @@ impl Switchboard {
         }
 
         self.reader_configs
-            .insert((stream_id, reader_id.to_owned()), config);
+            .entry(reader_id.to_owned())
+            .or_default()
+            .insert(stream_id, config);
         Ok(())
     }
 

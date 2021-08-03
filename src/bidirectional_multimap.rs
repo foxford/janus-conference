@@ -64,7 +64,7 @@ where
         vs
     }
 
-    pub fn remove_value<U>(&mut self, v: &U)
+    pub fn remove_value<U>(&mut self, v: &U) -> Option<K>
     where
         V: Borrow<U>,
         U: Hash + Eq + Debug,
@@ -75,6 +75,7 @@ where
                 if vs.is_empty() {
                     self.forward_mapping.remove(&k);
                 }
+                return Some(k);
             } else {
                 err!(
                     "Map in inconsistent state: entry ({:?}, {:?}) has no corresponding entry.",
@@ -83,6 +84,7 @@ where
                 );
             }
         }
+        None
     }
 
     pub fn get_values<T>(&self, k: &T) -> &[V]
