@@ -72,6 +72,9 @@ where
         if let Some(k) = self.inverse_mapping.remove(v) {
             if let Some(vs) = self.forward_mapping.get_vec_mut(&k) {
                 vs.retain(|x| x.borrow() != v);
+                if vs.is_empty() {
+                    self.forward_mapping.remove(&k);
+                }
             } else {
                 err!(
                     "Map in inconsistent state: entry ({:?}, {:?}) has no corresponding entry.",
