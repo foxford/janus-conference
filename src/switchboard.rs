@@ -517,6 +517,7 @@ impl Switchboard {
         if let Some(publisher) = maybe_publisher {
             self.stop_recording(publisher)?;
             self.publishers.remove(&id);
+            self.writer_configs.remove(&id);
             self.publishers_subscribers.remove_key(&publisher);
             self.agents.remove_value(&publisher);
         }
