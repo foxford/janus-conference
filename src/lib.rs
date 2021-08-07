@@ -489,7 +489,7 @@ fn report_error(res: Result<()>) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const PLUGIN: Plugin = build_plugin!(
+static PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
         api_version: 15,
         version: 1,

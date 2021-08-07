@@ -4,6 +4,7 @@ use janus::{
     JanssonValue, JanusError, JanusResult, PluginCallbacks, PluginRtcpPacket, PluginRtpPacket,
     RawJanssonValue,
 };
+use janus_plugin::Plugin;
 
 use super::PLUGIN;
 use crate::switchboard::Session;
@@ -42,8 +43,13 @@ pub fn push_event(
     let body = unwrap_jansson_option_mut(body);
     let jsep = unwrap_jansson_option_mut(jsep);
 
-    #[allow(const_item_mutation)]
-    let res = push_event_fn(session.as_ptr(), &mut PLUGIN, transaction, body, jsep);
+    let res = push_event_fn(
+        session.as_ptr(),
+        &PLUGIN as *const Plugin as *mut Plugin,
+        transaction,
+        body,
+        jsep,
+    );
 
     JanusError::from(res)
 }
