@@ -211,7 +211,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         if let Some((agent_id, is_speaking)) = is_speaking {
             verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
             if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
-                err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+                err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
             }
         }
         state.touch_last_rtp_packet_timestamp();
