@@ -339,11 +339,7 @@ impl Switchboard {
         self.agents.get_key(&session_id)
     }
 
-    pub fn insert_service_session(&mut self, session: Session) {
-        self.sessions.insert(***session, session);
-    }
-
-    pub fn insert_new(&mut self, session: Session) {
+    pub fn insert_new_session(&mut self, session: Session) {
         let session_id = ***session;
         info!("Inserting session"; {"handle_id": session_id});
         self.unused_sessions.insert(
@@ -353,6 +349,12 @@ impl Switchboard {
                 session,
             },
         );
+    }
+
+    pub fn touch_session(&mut self, session_id: SessionId) {
+        if let Some(unused) = self.unused_sessions.remove(&session_id) {
+            self.sessions.insert(session_id, unused.session);
+        }
     }
 
     pub fn disconnect(&self, id: SessionId) -> Result<()> {

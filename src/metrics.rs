@@ -23,6 +23,7 @@ make_static_metric! {
             stream_read,
             stream_upload,
             writer_config_update,
+            service_ping,
         },
     }
 }
@@ -146,6 +147,7 @@ impl Metrics {
                 MethodKind::WriterConfigUpdate => {
                     request_duration.writer_config_update.observe(elapsed)
                 }
+                MethodKind::ServicePing => request_duration.service_ping.observe(elapsed),
             }
         }
     }
