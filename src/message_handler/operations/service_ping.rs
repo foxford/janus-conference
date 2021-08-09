@@ -37,7 +37,7 @@ impl super::Operation for Request {
 
 fn internal_error(err: Error) -> SvcError {
     SvcError::builder()
-        .kind("touch_session_error", "Error toucing session")
+        .kind("touch_session_error", "Error touching session")
         .status(StatusCode::INTERNAL_SERVER_ERROR)
         .detail(&err.to_string())
         .build()
