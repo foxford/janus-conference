@@ -194,7 +194,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-    // Touch last packet timestamp  to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
@@ -214,6 +213,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
             }
         }
+        // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
         // Check whether publisher media is muted and drop the packet if it is.
