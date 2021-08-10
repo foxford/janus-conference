@@ -24,6 +24,7 @@ pub enum MethodKind {
     StreamRead,
     StreamUpload,
     WriterConfigUpdate,
+    ServicePing,
 }
 
 pub type Result = std::result::Result<Success, SvcError>;

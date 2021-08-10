@@ -101,11 +101,7 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
         .context("Session associate error")?;
 
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        if switchboard.sessions_count() == 0 {
-            switchboard.insert_service_session(session)
-        } else {
-            switchboard.insert_new(session);
-        }
+        switchboard.insert_new_session(session);
         Ok(())
     })
 }
@@ -198,7 +194,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-    // Touch last packet timestamp  to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
@@ -215,9 +210,10 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         if let Some((agent_id, is_speaking)) = is_speaking {
             verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
             if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
-                err!("Sending spaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+                err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
             }
         }
+        // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
         // Check whether publisher media is muted and drop the packet if it is.
