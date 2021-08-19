@@ -12,6 +12,15 @@ use crate::{
 pub struct Request {
     id: StreamId,
     agent_id: AgentId,
+    writer_config: Option<WriterConfig>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct WriterConfig {
+    send_video: bool,
+    send_audio: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    video_remb: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -31,10 +40,9 @@ impl super::Operation for Request {
         };
 
         let app = app!().map_err(internal_error)?;
-
         app.switchboard.with_write_lock(|mut switchboard| {
             switchboard.create_stream(self.id, request.session_id(), self.agent_id.to_owned())?;
-
+            
             let mut start_recording = || {
                 if app.config.recordings.enabled {
                     let recorder = app.recorders_creator.new_handle(self.id);
@@ -62,6 +70,18 @@ impl super::Operation for Request {
             })
         })
         .map_err(internal_error)?;
+        if let Some(config) = &self.writer_config {
+            let config_item = super::writer_config_update::ConfigItem {
+                stream_id: self.id,
+                send_video: config.send_video,
+                send_audio: config.send_audio,
+                video_remb: config.video_remb,
+            };
+            super::writer_config_update::Request {
+                configs: vec![config_item],
+            }.call(request).await?;
+        }
+        
 
         Ok(Response {}.into())
     }

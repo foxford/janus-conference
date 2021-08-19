@@ -11,15 +11,15 @@ use crate::{
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    configs: Vec<ConfigItem>,
+    pub configs: Vec<ConfigItem>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ConfigItem {
-    stream_id: StreamId,
-    send_video: bool,
-    send_audio: bool,
-    video_remb: Option<u32>,
+    pub stream_id: StreamId,
+    pub send_video: bool,
+    pub send_audio: bool,
+    pub video_remb: Option<u32>,
 }
 
 #[derive(Serialize)]
