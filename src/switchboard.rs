@@ -509,8 +509,7 @@ impl Switchboard {
         })?;
         self.sessions.insert(publisher, session.session);
         self.states.insert(publisher, SessionState::new());
-        let maybe_old_publisher = self.publishers.remove(&id);
-        self.publishers.insert(id, publisher);
+        let maybe_old_publisher = self.publishers.insert(id, publisher);
 
         if let Some(old_publisher) = maybe_old_publisher {
             if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
@@ -518,7 +517,7 @@ impl Switchboard {
                     self.publishers_subscribers.associate(publisher, subscriber);
                 }
             }
-            self.disconnect(old_publisher);
+            self.disconnect(old_publisher)?;
         }
 
         self.agents.associate(agent_id, publisher);
