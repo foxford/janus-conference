@@ -91,7 +91,7 @@ impl super::Operation for Request {
         }
 
         if let Some(configs) = &self.reader_configs {
-            let configs = configs.into_iter().map(|c| super::reader_config_update::ConfigItem {
+            let configs = configs.iter().map(|c| super::reader_config_update::ConfigItem {
                 stream_id: self.id,
                 receive_video: c.receive_video,
                 receive_audio: c.receive_audio,
