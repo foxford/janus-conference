@@ -518,6 +518,7 @@ impl Switchboard {
                     self.publishers_subscribers.associate(publisher, subscriber);
                 }
             }
+            self.disconnect(old_publisher);
         }
 
         self.agents.associate(agent_id, publisher);

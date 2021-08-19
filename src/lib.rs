@@ -219,7 +219,8 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Check whether publisher media is muted and drop the packet if it is.
         let stream_id = switchboard
             .published_by(session_id)
-            .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))?;
+            .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))
+            .with_context(|| session_id.to_string())?;
 
         let writer_config = switchboard.writer_config(stream_id);
 
