@@ -50,7 +50,6 @@ impl super::Operation for Request {
         let app = app!().map_err(internal_error)?;
         app.switchboard.with_write_lock(|mut switchboard| {
             switchboard.create_stream(self.id, request.session_id(), self.agent_id.to_owned())?;
-            
             let mut start_recording = || {
                 if app.config.recordings.enabled {
                     let recorder = app.recorders_creator.new_handle(self.id);
