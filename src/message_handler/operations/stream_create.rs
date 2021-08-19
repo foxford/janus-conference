@@ -13,6 +13,14 @@ pub struct Request {
     id: StreamId,
     agent_id: AgentId,
     writer_config: Option<WriterConfig>,
+    reader_configs: Option<Vec<ReaderConfig>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReaderConfig {
+    reader_id: AgentId,
+    receive_video: bool,
+    receive_audio: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -79,6 +87,18 @@ impl super::Operation for Request {
             };
             super::writer_config_update::Request {
                 configs: vec![config_item],
+            }.call(request).await?;
+        }
+
+        if let Some(configs) = &self.reader_configs {
+            let configs = configs.into_iter().map(|c| super::reader_config_update::ConfigItem {
+                stream_id: self.id,
+                receive_video: c.receive_video,
+                receive_audio: c.receive_audio,
+                reader_id: c.reader_id.clone()
+            }).collect();
+            super::reader_config_update::Request {
+                configs,
             }.call(request).await?;
         }
         
