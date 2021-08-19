@@ -22,7 +22,7 @@ impl super::Operation for Request {
         let error = |status: StatusCode, err: Error| {
             SvcError::builder()
                 .kind("agent_leave_error", "Error handling left agent")
-                .status(status) 
+                .status(status)
                 .detail(&err.to_string())
                 .build()
         };

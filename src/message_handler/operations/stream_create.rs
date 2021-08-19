@@ -87,21 +87,25 @@ impl super::Operation for Request {
             };
             super::writer_config_update::Request {
                 configs: vec![config_item],
-            }.call(request).await?;
+            }
+            .call(request)
+            .await?;
         }
 
         if let Some(configs) = &self.reader_configs {
-            let configs = configs.iter().map(|c| super::reader_config_update::ConfigItem {
-                stream_id: self.id,
-                receive_video: c.receive_video,
-                receive_audio: c.receive_audio,
-                reader_id: c.reader_id.clone()
-            }).collect();
-            super::reader_config_update::Request {
-                configs,
-            }.call(request).await?;
+            let configs = configs
+                .iter()
+                .map(|c| super::reader_config_update::ConfigItem {
+                    stream_id: self.id,
+                    receive_video: c.receive_video,
+                    receive_audio: c.receive_audio,
+                    reader_id: c.reader_id.clone(),
+                })
+                .collect();
+            super::reader_config_update::Request { configs }
+                .call(request)
+                .await?;
         }
-        
 
         Ok(Response {}.into())
     }
