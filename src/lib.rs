@@ -478,7 +478,7 @@ fn report_error(res: Result<()>) {
     match res {
         Ok(_) => {}
         Err(err) => {
-            err!("{}", err);
+            err!("{:?}", err);
         }
     }
 }
