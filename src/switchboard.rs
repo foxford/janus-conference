@@ -667,7 +667,7 @@ impl LockedSwitchboard {
                 switchboard.vacuum_sessions(sessions_ttl)?;
                 Ok(())
             })
-            .unwrap_or_else(|err| err!("{}", err));
+            .unwrap_or_else(|err| err!("Vacuum errored: {:?}", err));
 
             thread::sleep(interval);
         }
