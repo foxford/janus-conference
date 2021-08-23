@@ -507,14 +507,15 @@ impl Switchboard {
                 publisher
             )
         })?;
-        let old = self.remove_stream(id)?;
         self.sessions.insert(publisher, session.session);
         self.states.insert(publisher, SessionState::new());
-        self.publishers.insert(id, publisher);
-        if let Some((old_publisher, subscribers)) = old {
-            info!("Old publisher {} for stream {} removed", old_publisher, id);
-            for subscriber in subscribers {
-                self.publishers_subscribers.associate(publisher, subscriber);
+        let maybe_old_publisher = self.publishers.insert(id, publisher);
+
+        if let Some(old_publisher) = maybe_old_publisher {
+            if let Some(subscribers) = self.publishers_subscribers.remove_key(&old_publisher) {
+                for subscriber in subscribers {
+                    self.publishers_subscribers.associate(publisher, subscriber);
+                }
             }
             self.disconnect(old_publisher)?;
         }
@@ -555,19 +556,19 @@ impl Switchboard {
         }
     }
 
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<Option<(SessionId, Vec<SessionId>)>> {
+    pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
         info!("Removing stream"; {"rtc_id": id});
-        if let Some(publisher) = self.publishers.remove(&id) {
+        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
+
+        if let Some(publisher) = maybe_publisher {
             self.stop_recording(publisher)?;
+            self.publishers.remove(&id);
             self.writer_configs.remove(&id);
+            self.publishers_subscribers.remove_key(&publisher);
             self.agents.remove_value(&publisher);
-            Ok(self
-                .publishers_subscribers
-                .remove_key(&publisher)
-                .map(|s| (publisher, s)))
-        } else {
-            Ok(None)
         }
+
+        Ok(())
     }
 
     fn stop_recording(&mut self, publisher: SessionId) -> Result<()> {

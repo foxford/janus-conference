@@ -58,8 +58,7 @@ impl super::Operation for Request {
                             "Failed to remove stream {}: {} while recovering from another error: {}",
                             self.id, remove_err, err
                         )
-                    })?;
-                Ok(())
+                    })
             })
         })
         .map_err(internal_error)?;
