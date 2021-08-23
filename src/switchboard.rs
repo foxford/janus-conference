@@ -510,6 +510,7 @@ impl Switchboard {
         self.sessions.insert(publisher, session.session);
         self.states.insert(publisher, SessionState::new());
         if let Some(&old) = self.publishers.get(&id) {
+            info!("Disconnecting old publisher {} for stream {}", old, id);
             self.disconnect(old)?;
             self.handle_disconnect(old)?;
         }
