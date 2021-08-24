@@ -513,7 +513,7 @@ impl Switchboard {
         self.publishers.insert(id, publisher);
         if let Some((old_publisher, subscribers)) = old {
             info!("Old publisher {} for stream {} removed", old_publisher, id);
-            for subscriber in subscribers {
+            for subscriber in subscribers.into_iter().flatten() {
                 self.publishers_subscribers.associate(publisher, subscriber);
             }
             self.disconnect(old_publisher)?;
@@ -556,16 +556,19 @@ impl Switchboard {
         }
     }
 
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<Option<(SessionId, Vec<SessionId>)>> {
+    pub fn remove_stream(
+        &mut self,
+        id: StreamId,
+    ) -> Result<Option<(SessionId, Option<Vec<SessionId>>)>> {
         info!("Removing stream"; {"rtc_id": id});
         if let Some(publisher) = self.publishers.remove(&id) {
             self.stop_recording(publisher)?;
             self.writer_configs.remove(&id);
             self.agents.remove_value(&publisher);
-            Ok(self
-                .publishers_subscribers
-                .remove_key(&publisher)
-                .map(|s| (publisher, s)))
+            Ok(Some((
+                publisher,
+                self.publishers_subscribers.remove_key(&publisher),
+            )))
         } else {
             Ok(None)
         }
