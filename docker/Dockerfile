@@ -27,7 +27,6 @@ RUN set -xe \
     libsofia-sip-ua-dev \
     libssl-dev \
     libtool \
-    libwebsockets-dev \
     m4 \
     make \
     pkg-config \
@@ -79,7 +78,7 @@ RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
 ## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
-ARG JANUS_GATEWAY_COMMIT='1da5aa226fb932c87fe70b35551057bd30c3713d'
+ARG JANUS_GATEWAY_COMMIT='v0.10.10'
 
 RUN set -xe \
     && JANUS_GATEWAY_BUILD_DIR=$(mktemp -d) \
@@ -117,7 +116,7 @@ RUN set -eux; \
     url="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"; \
     wget "$url"; \
     chmod +x rustup-init; \
-    ./rustup-init -y --no-modify-path --default-toolchain nightly; \
+    ./rustup-init -y --no-modify-path --default-toolchain stable; \
     rm rustup-init; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
     rustup --version; \

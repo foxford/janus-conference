@@ -4,6 +4,7 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 
 use janus_plugin_sys::sdp::janus_sdp;
+use libc::c_void;
 
 // lib.rs
 
@@ -25,7 +26,7 @@ pub extern "C" fn janus_get_api_error(_error: c_int) -> *const c_char {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn janus_vprintf(_format: *const c_char, _args: ...) {}
+pub unsafe extern "C" fn janus_vprintf(_format: *const c_char, _args: *mut c_void) {}
 
 // sdp.rs
 
@@ -41,7 +42,7 @@ pub extern "C" fn janus_sdp_parse(
 #[no_mangle]
 pub unsafe extern "C" fn janus_sdp_generate_answer(
     _offer: *mut janus_sdp,
-    _args: ...
+    _args: *mut c_void,
 ) -> *mut janus_sdp {
     ptr::null_mut()
 }

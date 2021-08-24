@@ -11,12 +11,17 @@ use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::Response;
-use crate::switchboard::{SessionId, StreamId};
 use crate::utils;
 use crate::{jsep::Jsep, message_handler::Method};
+use crate::{
+    message_handler::generic::response::Payload,
+    switchboard::{AgentId, SessionId, StreamId},
+};
 
 pub use self::operation::{MethodKind, Operation, Result as OperationResult};
 pub use self::request::Request;
+
+use super::JanusSender;
 
 pub struct PreparedRequest<O> {
     request: Request,
@@ -42,7 +47,10 @@ pub fn prepare_request(
         Some(jansson_value) => {
             let jsep = utils::jansson_to_serde::<Jsep>(&jansson_value)?;
             let json_value = serde_json::to_value(jsep)?;
-            request.set_jsep_offer(json_value)
+            let level_id = Jsep::find_audio_ext_id(&json_value);
+            request
+                .set_audio_level_ext_id(level_id)
+                .set_jsep_offer(json_value)
         }
     };
     Ok(PreparedRequest {
@@ -82,7 +90,6 @@ pub fn send_response(sender: impl Sender, response: Response) {
         "Handling response";
         {"handle_id": response.session_id(), "transaction": response.transaction()}
     );
-
     let jsep_answer = match response.jsep_answer() {
         None => None,
         Some(json_value) => match utils::serde_to_jansson(json_value) {
@@ -118,6 +125,26 @@ pub fn send_response(sender: impl Sender, response: Response) {
                 {"handle_id": response.session_id(), "transaction": response.transaction()}
             );
         });
+}
+
+#[allow(clippy::ptr_arg)]
+pub fn send_speaking_notification(
+    sender: &JanusSender,
+    session_id: SessionId,
+    agent_id: &AgentId,
+    is_speaking: bool,
+) -> anyhow::Result<()> {
+    let notification = serde_json::json!({
+        "agent_id": agent_id,
+        "speaking": is_speaking
+    });
+    let response = Some(JanssonValue::try_from(
+        &Payload::new(StatusCode::OK).set_response(notification),
+    )?);
+
+    //this strange string is "AgentSpeaking" in base64
+    sender.send(session_id, "IkFnZW50U3BlYWtpbmci", response, None)?;
+    Ok(())
 }
 
 fn notify_error(err: &SvcError) {

@@ -40,7 +40,9 @@ impl super::Operation for Request {
                     let recorder = app.recorders_creator.new_handle(self.id);
                     recorder.start_recording()?;
                     verb!("Attaching recorder"; {"handle_id": request.session_id()});
-                    switchboard.state_mut(request.session_id())?.set_recorder(recorder);
+                    let session_state = switchboard.state_mut(request.session_id())?;
+                    session_state.set_recorder(recorder);
+                    session_state.set_audio_level_ext_id(request.audio_level_ext_id());
                 }
 
                 Ok(())

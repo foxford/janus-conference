@@ -1,26 +1,28 @@
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::{fmt, usize};
+use std::{
+    sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
 
-use anyhow::{bail, format_err, Context, Result};
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use anyhow::{bail, format_err, Result};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-use crate::bidirectional_multimap::BidirectionalMultimap;
-use crate::janus_callbacks;
 use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
+use crate::{bidirectional_multimap::BidirectionalMultimap, janus_rtp::AudioLevel};
+use crate::{conf::SpeakingNotifications, janus_callbacks};
 
 ///////////////////////////////////////////////////////////////////////////////
 
 pub type StreamId = Uuid;
 pub type AgentId = String;
 pub type Session = Box<Arc<SessionWrapper<SessionId>>>;
-pub type LockedSession = Arc<Mutex<Session>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,10 +47,15 @@ impl fmt::Display for SessionId {
 pub struct SessionState {
     switching_context: JanusRtpSwitchingContext,
     fir_seq: AtomicI32,
+    is_speaking: AtomicBool,
+    packets_count: AtomicUsize,
+    audio_level_sum: AtomicUsize,
     initial_rembs_counter: AtomicU64,
     last_remb_timestamp: AtomicI64,
+    last_fir_timestamp: AtomicI64,
     last_rtp_packet_timestamp: AtomicI64,
     recorder: Option<RecorderHandle>,
+    audio_level_ext_id: Option<u32>,
 }
 
 impl SessionState {
@@ -60,6 +67,37 @@ impl SessionState {
             last_remb_timestamp: AtomicI64::new(0),
             last_rtp_packet_timestamp: AtomicI64::new(0),
             recorder: None,
+            last_fir_timestamp: AtomicI64::new(0),
+            is_speaking: AtomicBool::new(false),
+            packets_count: AtomicUsize::new(0),
+            audio_level_sum: AtomicUsize::new(0),
+            audio_level_ext_id: None,
+        }
+    }
+
+    pub fn is_speaking(
+        &self,
+        audio_level: AudioLevel,
+        config: &SpeakingNotifications,
+    ) -> Option<bool> {
+        let packets_count = self.packets_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.audio_level_sum
+            .fetch_add(audio_level.as_usize(), Ordering::Relaxed);
+        if packets_count == config.audio_active_packets {
+            self.packets_count.store(0, Ordering::Relaxed);
+            let level_avg = self.audio_level_sum.swap(0, Ordering::Relaxed) / packets_count;
+            let is_speaking = self.is_speaking.load(Ordering::Relaxed);
+            if !is_speaking && level_avg < config.speaking_average_level.as_usize() {
+                self.is_speaking.store(true, Ordering::Relaxed);
+                return Some(true);
+            }
+            if is_speaking && level_avg > config.not_speaking_average_level.as_usize() {
+                self.is_speaking.store(false, Ordering::Relaxed);
+                return Some(false);
+            }
+            None
+        } else {
+            None
         }
     }
 
@@ -89,12 +127,23 @@ impl SessionState {
         }
     }
 
+    pub fn last_fir_timestamp(&self) -> DateTime<Utc> {
+        let naive_dt =
+            NaiveDateTime::from_timestamp(self.last_fir_timestamp.load(Ordering::Relaxed), 0);
+        DateTime::from_utc(naive_dt, Utc)
+    }
+
     pub fn touch_last_remb_timestamp(&self) {
         self.last_remb_timestamp
             .store(Utc::now().timestamp(), Ordering::Relaxed);
     }
 
-    fn since_last_rtp_packet_timestamp(&self) -> Option<Duration> {
+    pub fn touch_last_fir_timestamp(&self) {
+        self.last_fir_timestamp
+            .store(Utc::now().timestamp(), Ordering::Relaxed);
+    }
+
+    fn since_last_rtp_packet_timestamp(&self) -> Option<chrono::Duration> {
         match self.last_rtp_packet_timestamp.load(Ordering::Relaxed) {
             0 => None,
             timestamp => {
@@ -126,6 +175,16 @@ impl SessionState {
     fn unset_recorder(&mut self) -> &mut Self {
         self.recorder = None;
         self
+    }
+
+    /// Set the session state's audio level ext id.
+    pub fn set_audio_level_ext_id(&mut self, audio_level_ext_id: Option<u32>) {
+        self.audio_level_ext_id = audio_level_ext_id;
+    }
+
+    /// Get a reference to the session state's audio level ext id.
+    pub fn audio_level_ext_id(&self) -> Option<u32> {
+        self.audio_level_ext_id
     }
 }
 
@@ -211,13 +270,26 @@ static DEFAULT_WRITER_CONFIG: Lazy<WriterConfig> = Lazy::new(Default::default);
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
+pub struct UnusedSession {
+    pub created_at: Instant,
+    pub session: Session,
+}
+
+impl UnusedSession {
+    pub fn is_timeouted(&self, ttl: Duration) -> bool {
+        self.created_at.elapsed() > ttl
+    }
+}
+
+#[derive(Debug)]
 pub struct Switchboard {
-    sessions: FnvHashMap<SessionId, LockedSession>,
+    unused_sessions: FnvHashMap<SessionId, UnusedSession>,
+    sessions: FnvHashMap<SessionId, Session>,
     states: FnvHashMap<SessionId, SessionState>,
     agents: BidirectionalMultimap<AgentId, SessionId>,
     publishers: FnvHashMap<StreamId, SessionId>,
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
-    reader_configs: FnvHashMap<(StreamId, AgentId), ReaderConfig>,
+    reader_configs: FnvHashMap<AgentId, FnvHashMap<StreamId, ReaderConfig>>,
     writer_configs: FnvHashMap<StreamId, WriterConfig>,
 }
 
@@ -231,7 +303,12 @@ impl Switchboard {
             publishers_subscribers: BidirectionalMultimap::new(),
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
+            unused_sessions: FnvHashMap::default(),
         }
+    }
+
+    pub fn unused_sessions_count(&self) -> usize {
+        self.unused_sessions.len()
     }
 
     pub fn sessions_count(&self) -> usize {
@@ -258,24 +335,34 @@ impl Switchboard {
         self.writer_configs.len()
     }
 
-    pub fn connect(&mut self, session: Session) -> Result<()> {
-        let session_id = ***session;
-        info!("Connecting session"; {"handle_id": session_id});
-        let locked_session = Arc::new(Mutex::new(session));
-        self.sessions.insert(session_id, locked_session);
-        self.states.insert(session_id, SessionState::new());
-        Ok(())
+    pub fn agent_id(&self, session_id: SessionId) -> Option<&AgentId> {
+        self.agents.get_key(&session_id)
     }
 
-    pub fn disconnect(&mut self, id: SessionId) -> Result<()> {
+    pub fn insert_new_session(&mut self, session: Session) {
+        let session_id = ***session;
+        info!("Inserting session"; {"handle_id": session_id});
+        self.unused_sessions.insert(
+            session_id,
+            UnusedSession {
+                created_at: Instant::now(),
+                session,
+            },
+        );
+    }
+
+    pub fn touch_session(&mut self, session_id: SessionId) {
+        if let Some(unused) = self.unused_sessions.remove(&session_id) {
+            self.sessions.insert(session_id, unused.session);
+        }
+    }
+
+    pub fn disconnect(&self, id: SessionId) -> Result<()> {
         info!("Disconnecting session asynchronously"; {"handle_id": id});
 
-        let session = self
-            .session(id)?
-            .lock()
-            .map_err(|err| format_err!("Failed to acquire session mutex {}: {}", id, err))?;
+        let session = self.session(id)?;
 
-        janus_callbacks::end_session(&session);
+        janus_callbacks::end_session(session);
         Ok(())
     }
 
@@ -299,15 +386,18 @@ impl Switchboard {
         for stream_id in stream_ids {
             self.remove_stream(stream_id)?;
         }
-
+        self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
-        self.agents.remove_value(&id);
+        let agent = self.agents.remove_value(&id);
+        if let Some(agent) = agent {
+            self.reader_configs.remove(&agent);
+        }
         self.publishers_subscribers.remove_value(&id);
         Ok(())
     }
 
-    pub fn session(&self, id: SessionId) -> Result<&LockedSession> {
+    pub fn session(&self, id: SessionId) -> Result<&Session> {
         self.sessions
             .get(&id)
             .ok_or_else(|| format_err!("Session not found for id = {}", id))
@@ -367,11 +457,11 @@ impl Switchboard {
         stream_id: StreamId,
         reader_id: &SessionId,
     ) -> Option<&ReaderConfig> {
-        self.agents
-            .get_key(reader_id)
-            .and_then(|agent_id| self.reader_configs.get(&(stream_id, agent_id.to_owned())))
+        let agent_id = self.agents.get_key(reader_id)?;
+        self.reader_configs.get(agent_id)?.get(&stream_id)
     }
 
+    #[allow(clippy::ptr_arg)]
     pub fn update_reader_config(
         &mut self,
         stream_id: StreamId,
@@ -383,7 +473,9 @@ impl Switchboard {
         }
 
         self.reader_configs
-            .insert((stream_id, reader_id.to_owned()), config);
+            .entry(reader_id.to_owned())
+            .or_default()
+            .insert(stream_id, config);
         Ok(())
     }
 
@@ -393,9 +485,13 @@ impl Switchboard {
             .unwrap_or(&DEFAULT_WRITER_CONFIG)
     }
 
-    pub fn set_writer_config(&mut self, stream_id: StreamId, writer_config: WriterConfig) {
+    pub fn set_writer_config(
+        &mut self,
+        stream_id: StreamId,
+        writer_config: WriterConfig,
+    ) -> Option<WriterConfig> {
         info!("SET WRITER CONFIG: {:?}", writer_config; {"rtc_id": stream_id});
-        self.writer_configs.insert(stream_id, writer_config);
+        self.writer_configs.insert(stream_id, writer_config)
     }
 
     pub fn create_stream(
@@ -405,7 +501,14 @@ impl Switchboard {
         agent_id: AgentId,
     ) -> Result<()> {
         info!("Creating stream"; {"rtc_id": id, "handle_id": publisher, "agent_id": agent_id});
-
+        let session = self.unused_sessions.remove(&publisher).ok_or_else(|| {
+            anyhow!(
+                "Publisher's session id: {} not present in the new_sessions set",
+                publisher
+            )
+        })?;
+        self.sessions.insert(publisher, session.session);
+        self.states.insert(publisher, SessionState::new());
         let maybe_old_publisher = self.publishers.remove(&id);
         self.publishers.insert(id, publisher);
 
@@ -427,6 +530,15 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
+        let session = self.unused_sessions.remove(&subscriber).ok_or_else(|| {
+            anyhow!(
+                "Subscriber's session id: {} not present in the new_sessions set",
+                subscriber
+            )
+        })?;
+        self.sessions.insert(subscriber, session.session);
+        self.states.insert(subscriber, SessionState::new());
+
         let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
 
         match maybe_publisher {
@@ -451,6 +563,7 @@ impl Switchboard {
         if let Some(publisher) = maybe_publisher {
             self.stop_recording(publisher)?;
             self.publishers.remove(&id);
+            self.writer_configs.remove(&id);
             self.publishers_subscribers.remove_key(&publisher);
             self.agents.remove_value(&publisher);
         }
@@ -473,9 +586,18 @@ impl Switchboard {
         Ok(())
     }
 
-    pub fn vacuum_publishers(&mut self, timeout: &Duration) -> Result<()> {
-        for (stream_id, publisher) in self.publishers.clone().into_iter() {
-            match self.vacuum_publisher(publisher, timeout) {
+    pub fn vacuum_sessions(&self, ttl: Duration) -> Result<()> {
+        for (_, session) in self.unused_sessions.iter() {
+            if session.is_timeouted(ttl) {
+                janus_callbacks::end_session(&session.session);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn vacuum_publishers(&self, timeout: &chrono::Duration) -> Result<()> {
+        for (stream_id, publisher) in self.publishers.iter() {
+            match self.vacuum_publisher(*publisher, timeout) {
                 Ok(false) => (),
                 Ok(true) => warn!(
                     "Publisher timed out; No RTP packets from PeerConnection in {} seconds",
@@ -492,7 +614,7 @@ impl Switchboard {
         Ok(())
     }
 
-    fn vacuum_publisher(&mut self, publisher: SessionId, timeout: &Duration) -> Result<bool> {
+    fn vacuum_publisher(&self, publisher: SessionId, timeout: &chrono::Duration) -> Result<bool> {
         let state = self.state(publisher)?;
 
         let is_timed_out = match state.since_last_rtp_packet_timestamp() {
@@ -538,18 +660,117 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration) -> Result<()> {
+    pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
         info!("Vacuum thread spawned");
-
-        let std_interval = interval
-            .to_std()
-            .context("Failed to convert vacuum interval")?;
-
         loop {
-            self.with_write_lock(|mut switchboard| switchboard.vacuum_publishers(&interval))
-                .unwrap_or_else(|err| err!("{}", err));
+            self.with_read_lock(|switchboard| {
+                switchboard.vacuum_publishers(&chrono::Duration::from_std(interval)?)?;
+                switchboard.vacuum_sessions(sessions_ttl)?;
+                Ok(())
+            })
+            .unwrap_or_else(|err| err!("{}", err));
 
-            thread::sleep(std_interval);
+            thread::sleep(interval);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use crate::{conf::SpeakingNotifications, janus_rtp::AudioLevel};
+
+    use super::SessionState;
+
+    #[test]
+    fn test_speaking_notification() {
+        let state = SessionState::new();
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 5,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // none when state didn't change
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 3,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
+            None
+        );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enought packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(10),
+                    not_speaking_average_level: AudioLevel::from_u8(10),
+                }
+            ),
+            None
+        );
+        // true when state changed
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
+            Some(true)
+        );
+        assert_eq!(state.packets_count.load(Ordering::Relaxed), 0);
+        // none when not enough packets
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(5),
+                    not_speaking_average_level: AudioLevel::from_u8(5),
+                }
+            ),
+            None
+        );
+        //none when state didn't change
+        assert_eq!(
+            state.is_speaking(
+                AudioLevel::from_u8(10),
+                &SpeakingNotifications {
+                    audio_active_packets: 2,
+                    speaking_average_level: AudioLevel::from_u8(15),
+                    not_speaking_average_level: AudioLevel::from_u8(15),
+                }
+            ),
+            None
+        );
     }
 }

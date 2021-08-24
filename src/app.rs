@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
-use chrono::Duration;
 use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
 
@@ -26,6 +25,7 @@ pub struct App {
     pub recorders_creator: RecorderHandlesCreator,
     pub janus_sender: JanusSender,
     pub metrics: Metrics,
+    pub fir_interval: chrono::Duration,
 }
 
 impl App {
@@ -49,18 +49,20 @@ impl App {
 
         thread::spawn(|| loop {
             if let Ok(app) = app!() {
-                let _ = app
-                    .switchboard
-                    .with_read_lock(|switchboard| Ok(Metrics::observe_switchboard(&switchboard)));
+                let _ = app.switchboard.with_read_lock(|switchboard| {
+                    Metrics::observe_switchboard(&switchboard);
+                    Ok(())
+                });
                 thread::sleep(app.config.metrics.switchboard_metrics_load_interval)
             }
         });
 
         thread::spawn(|| {
             if let Ok(app) = app!() {
-                let interval = Duration::seconds(app.config.general.vacuum_interval);
-
-                if let Err(err) = app.switchboard.vacuum_publishers_loop(interval) {
+                if let Err(err) = app.switchboard.vacuum_publishers_loop(
+                    app.config.general.vacuum_interval,
+                    app.config.general.sessions_ttl,
+                ) {
                     err!("Vacuum publishers loop failed: {}", err);
                 }
             }
@@ -75,6 +77,7 @@ impl App {
         metrics: Metrics,
     ) -> Result<Self> {
         Ok(Self {
+            fir_interval: chrono::Duration::from_std(config.general.fir_interval)?,
             config,
             switchboard: Switchboard::new(),
             recorders_creator,

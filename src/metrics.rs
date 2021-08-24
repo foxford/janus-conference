@@ -23,6 +23,7 @@ make_static_metric! {
             stream_read,
             stream_upload,
             writer_config_update,
+            service_ping,
         },
     }
 }
@@ -36,6 +37,7 @@ make_static_metric! {
             publishers_subscribers,
             reader_configs,
             writer_configs,
+            unused_sessions,
         },
     }
 }
@@ -123,6 +125,9 @@ impl Metrics {
             switchboard_stats
                 .writer_configs
                 .set(switchboard.writer_configs_count() as i64);
+            switchboard_stats
+                .unused_sessions
+                .set(switchboard.unused_sessions_count() as i64)
         }
     }
 
@@ -142,6 +147,7 @@ impl Metrics {
                 MethodKind::WriterConfigUpdate => {
                     request_duration.writer_config_update.observe(elapsed)
                 }
+                MethodKind::ServicePing => request_duration.service_ping.observe(elapsed),
             }
         }
     }

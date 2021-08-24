@@ -3,7 +3,7 @@ mod operations;
 
 use std::ffi::CString;
 
-use anyhow::{format_err, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use janus::JanssonValue;
 
@@ -12,8 +12,8 @@ use crate::janus_callbacks;
 use crate::switchboard::SessionId;
 
 pub use self::generic::{
-    handle_request, prepare_request, send_response, MethodKind, Operation, OperationResult,
-    PreparedRequest, Request,
+    handle_request, prepare_request, send_response, send_speaking_notification, MethodKind,
+    Operation, OperationResult, PreparedRequest, Request,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -31,6 +31,8 @@ pub enum Method {
     StreamUpload(operations::stream_upload::Request),
     #[serde(rename = "writer_config.update")]
     WriterConfigUpdate(operations::writer_config_update::Request),
+    #[serde(rename = "service.ping")]
+    ServicePing(operations::service_ping::Request),
 }
 
 #[async_trait]
@@ -43,6 +45,7 @@ impl Operation for Method {
             Method::StreamRead(x) => x.call(request).await,
             Method::StreamUpload(x) => x.call(request).await,
             Method::WriterConfigUpdate(x) => x.call(request).await,
+            Method::ServicePing(x) => x.call(request).await,
         }
     }
 
@@ -54,6 +57,7 @@ impl Operation for Method {
             Method::StreamRead(x) => x.stream_id(),
             Method::StreamUpload(x) => x.stream_id(),
             Method::WriterConfigUpdate(x) => x.stream_id(),
+            Method::ServicePing(x) => x.stream_id(),
         }
     }
 
@@ -65,6 +69,7 @@ impl Operation for Method {
             Method::StreamRead(x) => x.method_kind(),
             Method::StreamUpload(x) => x.method_kind(),
             Method::WriterConfigUpdate(x) => x.method_kind(),
+            Method::ServicePing(x) => x.method_kind(),
         }
     }
 }
@@ -87,13 +92,7 @@ impl Sender for JanusSender {
         jsep_answer: Option<JanssonValue>,
     ) -> Result<()> {
         app!()?.switchboard.with_read_lock(move |switchboard| {
-            let session = switchboard.session(session_id)?.lock().map_err(|err| {
-                format_err!(
-                    "Failed to acquire mutex for session {}: {}",
-                    session_id,
-                    err
-                )
-            })?;
+            let session = switchboard.session(session_id)?;
 
             let txn = CString::new(transaction.to_owned())
                 .context("Failed to cast transaction to CString")?;

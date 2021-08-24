@@ -1,7 +1,5 @@
 # Janus Conference
 
-[![Build Status][travis-img]][travis]
-
 A Janus Gateway plugin implementing Conference streams.
 
 

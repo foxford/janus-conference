@@ -1,5 +1,3 @@
-#![feature(c_variadic)]
-
 #[macro_use]
 extern crate anyhow;
 #[macro_use]
@@ -15,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, format_err, Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use janus::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
@@ -31,7 +29,7 @@ mod bidirectional_multimap;
 mod conf;
 mod janus_callbacks;
 mod janus_recorder;
-mod janus_rtp;
+pub mod janus_rtp;
 mod jsep;
 mod message_handler;
 mod metrics;
@@ -47,7 +45,8 @@ use janus_rtp::JanusRtpHeader;
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
-    message_handler::{handle_request, prepare_request, send_response},
+    janus_rtp::AudioLevel,
+    message_handler::{handle_request, prepare_request, send_response, send_speaking_notification},
     metrics::Metrics,
 };
 
@@ -102,7 +101,7 @@ fn create_session_impl(handle: *mut PluginSession) -> Result<()> {
         .context("Session associate error")?;
 
     app!()?.switchboard.with_write_lock(|mut switchboard| {
-        switchboard.connect(session)?;
+        switchboard.insert_new_session(session);
         Ok(())
     })
 }
@@ -177,7 +176,7 @@ fn setup_media_impl(handle: *mut PluginSession) -> Result<()> {
     let session_id = session_id(handle)?;
     app!()?.switchboard.with_read_lock(|switchboard| {
         if let Some(publisher) = switchboard.publisher_to(session_id) {
-            send_fir(publisher);
+            send_fir(publisher, &switchboard);
         }
 
         let rtc_id = switchboard.stream_id_to(session_id);
@@ -195,11 +194,26 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
-
-    // Touch last packet timestamp to drop timeout.
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
+        let is_speaking =
+        app.config.speaking_notifications
+            .as_ref()
+            .filter(|_| !is_video)
+            .and_then(|config| {
+                let agent_id = switchboard.agent_id(session_id)?;
+                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  config)?;
+                Some((agent_id, is_speaking))
+            });
+
+        if let Some((agent_id, is_speaking)) = is_speaking {
+            verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
+            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
+                err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+            }
+        }
+        // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
         // Check whether publisher media is muted and drop the packet if it is.
@@ -209,20 +223,15 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         let writer_config = switchboard.writer_config(stream_id);
 
-        let is_media_allowed = match is_video {
-            true => writer_config.send_video(),
-            false => writer_config.send_audio(),
-        };
-
-        if !is_media_allowed {
-            return Ok(());
-        }
-
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
         // Do it only for video because Windows and Linux don't make a difference for media types
         // and apply audio limitation to video while only MacOS does.
         let remb_interval = chrono::Duration::seconds(5);
         if is_video {
+            let now = Utc::now();
+            if now - state.last_fir_timestamp() >= app.fir_interval {
+                send_fir(session_id, &switchboard);
+            }
             let target_bitrate = writer_config.video_remb();
             let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
 
@@ -232,7 +241,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 state.touch_last_remb_timestamp();
                 state.increment_initial_rembs_counter();
             } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if Utc::now() - last_remb_timestamp >= remb_interval {
+                if now - last_remb_timestamp >= remb_interval {
                     send_remb(session_id, target_bitrate);
                     state.touch_last_remb_timestamp();
                 }
@@ -287,26 +296,19 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
         match packet.video {
             1 if janus::rtcp::has_pli(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {
-                    send_pli(publisher);
+                    send_pli(publisher, &switchboard);
                 }
             }
             1 if janus::rtcp::has_fir(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {
-                    send_fir(publisher);
+                    send_fir(publisher, &switchboard);
                 }
             }
             _ => {
                 for subscriber in switchboard.subscribers_to(session_id) {
-                    let subscriber_session =
-                        switchboard.session(*subscriber)?.lock().map_err(|err| {
-                            format_err!(
-                                "Failed to acquire subscriber session mutex for id = {}: {}",
-                                subscriber,
-                                err
-                            )
-                        })?;
+                    let subscriber_session = switchboard.session(*subscriber)?;
 
-                    janus_callbacks::relay_rtcp(&subscriber_session, &mut packet);
+                    janus_callbacks::relay_rtcp(subscriber_session, &mut packet);
                 }
             }
         }
@@ -349,15 +351,11 @@ extern "C" fn hangup_media(handle: *mut PluginSession) {
 fn hangup_media_impl(handle: *mut PluginSession) -> Result<()> {
     let session_id = session_id(handle)?;
 
-    let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
-
-    info!("Hang up"; {"handle_id": session_id, "rtc_id": rtc_id});
-
-    app!()?
-        .switchboard
-        .with_write_lock(|mut switchboard| switchboard.disconnect(session_id))
+    app!()?.switchboard.with_read_lock(|switchboard| {
+        let rtc_id = switchboard.stream_id_to(session_id);
+        info!("Hang up"; {"handle_id": session_id, "rtc_id": rtc_id});
+        switchboard.disconnect(session_id)
+    })
 }
 
 extern "C" fn destroy_session(handle: *mut PluginSession, error: *mut c_int) {
@@ -403,15 +401,9 @@ fn relay_rtp_packet(
         .switching_context()
         .update_rtp_packet_header(packet)?;
 
-    let reader_session = switchboard.session(reader)?.lock().map_err(|err| {
-        format_err!(
-            "Failed to acquire reader session mutex id = {}: {}",
-            reader,
-            err
-        )
-    })?;
+    let reader_session = switchboard.session(reader)?;
 
-    janus_callbacks::relay_rtp(&reader_session, packet);
+    janus_callbacks::relay_rtp(reader_session, packet);
 
     // Restore original header rewritten by `janus_rtp_header_update`
     // for the next iteration of the loop.
@@ -419,52 +411,45 @@ fn relay_rtp_packet(
     Ok(())
 }
 
-fn send_pli(publisher: SessionId) {
-    report_error(send_pli_impl(publisher));
+fn send_pli(publisher: SessionId, switchboard: &Switchboard) {
+    report_error(send_pli_impl(publisher, switchboard));
 }
 
-fn send_pli_impl(publisher: SessionId) -> Result<()> {
-    app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
-        })?;
+fn send_pli_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> {
+    let session = switchboard.session(publisher)?;
 
-        let mut pli = janus::rtcp::gen_pli();
+    let mut pli = janus::rtcp::gen_pli();
 
-        let mut packet = PluginRtcpPacket {
-            video: 1,
-            buffer: pli.as_mut_ptr(),
-            length: pli.len() as i16,
-        };
+    let mut packet = PluginRtcpPacket {
+        video: 1,
+        buffer: pli.as_mut_ptr(),
+        length: pli.len() as i16,
+    };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
-        Ok(())
-    })
+    janus_callbacks::relay_rtcp(session, &mut packet);
+    Ok(())
 }
 
-fn send_fir(publisher: SessionId) {
-    report_error(send_fir_impl(publisher));
+fn send_fir(publisher: SessionId, switchboard: &Switchboard) {
+    report_error(send_fir_impl(publisher, switchboard));
 }
 
-fn send_fir_impl(publisher: SessionId) -> Result<()> {
-    app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
-        })?;
+fn send_fir_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> {
+    let session = switchboard.session(publisher)?;
 
-        let state = switchboard.state(publisher)?;
-        let mut seq = state.increment_fir_seq();
-        let mut fir = janus::rtcp::gen_fir(&mut seq);
+    let state = switchboard.state(publisher)?;
+    state.touch_last_fir_timestamp();
+    let mut seq = state.increment_fir_seq();
+    let mut fir = janus::rtcp::gen_fir(&mut seq);
 
-        let mut packet = PluginRtcpPacket {
-            video: 1,
-            buffer: fir.as_mut_ptr(),
-            length: fir.len() as i16,
-        };
+    let mut packet = PluginRtcpPacket {
+        video: 1,
+        buffer: fir.as_mut_ptr(),
+        length: fir.len() as i16,
+    };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
-        Ok(())
-    })
+    janus_callbacks::relay_rtcp(session, &mut packet);
+    Ok(())
 }
 
 fn send_remb(publisher: SessionId, bitrate: u32) {
@@ -474,9 +459,7 @@ fn send_remb(publisher: SessionId, bitrate: u32) {
 
 fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
-        let session = switchboard.session(publisher)?.lock().map_err(|err| {
-            format_err!("Failed to acquire mutex for session {}: {}", publisher, err)
-        })?;
+        let session = switchboard.session(publisher)?;
 
         let mut remb = janus::rtcp::gen_remb(bitrate);
 
@@ -486,7 +469,7 @@ fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
             length: remb.len() as i16,
         };
 
-        janus_callbacks::relay_rtcp(&session, &mut packet);
+        janus_callbacks::relay_rtcp(session, &mut packet);
         Ok(())
     })
 }
@@ -502,7 +485,7 @@ fn report_error(res: Result<()>) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const PLUGIN: Plugin = build_plugin!(
+static PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
         api_version: 15,
         version: 1,

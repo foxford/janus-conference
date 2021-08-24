@@ -5,6 +5,7 @@ use svc_error::Error as SvcError;
 
 use crate::{
     message_handler::generic::MethodKind,
+    send_fir,
     switchboard::{StreamId, WriterConfig},
 };
 
@@ -54,8 +55,17 @@ impl super::Operation for Request {
                     if let Some(video_remb) = config_item.video_remb {
                         writer_config.set_video_remb(video_remb);
                     }
-
-                    switchboard.set_writer_config(config_item.stream_id, writer_config);
+                    let prev_config =
+                        switchboard.set_writer_config(config_item.stream_id, writer_config);
+                    if let (Some(prev_config), Some(session_id)) =
+                        (prev_config, switchboard.publisher_of(config_item.stream_id))
+                    {
+                        if (config_item.send_audio && !prev_config.send_audio())
+                            || (config_item.send_video && !prev_config.send_video())
+                        {
+                            send_fir(session_id, &switchboard);
+                        }
+                    }
                 }
 
                 Ok(())
