@@ -507,12 +507,16 @@ impl Switchboard {
                 publisher
             )
         })?;
+        let old = self.remove_stream(id)?;
         self.sessions.insert(publisher, session.session);
         self.states.insert(publisher, SessionState::new());
-        if let Some(&old) = self.publishers.get(&id) {
-            info!("Disconnecting old publisher {} for stream {}", old, id);
-            self.disconnect(old)?;
-            self.handle_disconnect(old)?;
+        self.publishers.insert(id, publisher);
+        if let Some((old_publisher, subscribers)) = old {
+            info!("Old publisher {} for stream {} removed", old_publisher, id);
+            for subscriber in subscribers {
+                self.publishers_subscribers.associate(publisher, subscriber);
+            }
+            self.disconnect(old_publisher)?;
         }
         self.publishers.insert(id, publisher);
 
@@ -552,19 +556,19 @@ impl Switchboard {
         }
     }
 
-    pub fn remove_stream(&mut self, id: StreamId) -> Result<()> {
+    pub fn remove_stream(&mut self, id: StreamId) -> Result<Option<(SessionId, Vec<SessionId>)>> {
         info!("Removing stream"; {"rtc_id": id});
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
-
-        if let Some(publisher) = maybe_publisher {
+        if let Some(publisher) = self.publishers.remove(&id) {
             self.stop_recording(publisher)?;
-            self.publishers.remove(&id);
             self.writer_configs.remove(&id);
-            self.publishers_subscribers.remove_key(&publisher);
             self.agents.remove_value(&publisher);
+            Ok(self
+                .publishers_subscribers
+                .remove_key(&publisher)
+                .map(|s| (publisher, s)))
+        } else {
+            Ok(None)
         }
-
-        Ok(())
     }
 
     fn stop_recording(&mut self, publisher: SessionId) -> Result<()> {
