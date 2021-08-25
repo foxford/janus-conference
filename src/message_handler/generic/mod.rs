@@ -145,7 +145,7 @@ pub fn send_speaking_notification(
     //this strange string is "AgentSpeaking" in base64
     sender.send(
         session_id,
-        "{\"kind\":\"IkFnZW50U3BlYWtpbmci\"}",
+        "\"{\\\"kind\\\":\\\"IkFnZW50U3BlYWtpbmci\\\"}\"",
         response,
         None,
     )?;
