@@ -142,7 +142,7 @@ pub fn send_speaking_notification(
         &Payload::new(StatusCode::OK).set_response(notification),
     )?);
 
-    let agent_speaking_b64enc = "\"{\\\"kind\\\":\\\"IkFnZW50U3BlYWtpbmci\\\"}\"";
+    let agent_speaking_b64enc = "{\\\"kind\\\":\\\"IkFnZW50U3BlYWtpbmci\\\"}";
     sender.send(session_id, agent_speaking_b64enc, response, None)?;
     Ok(())
 }
