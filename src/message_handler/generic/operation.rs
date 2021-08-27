@@ -17,6 +17,7 @@ pub trait Operation: fmt::Debug + Send + Sync {
     fn stream_id(&self) -> Option<StreamId>;
 }
 
+#[derive(Debug)]
 pub enum MethodKind {
     AgentLeave,
     ReaderConfigUpdate,

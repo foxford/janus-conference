@@ -1,15 +1,23 @@
 use std::time::{Duration, Instant};
 
+use crate::{message_handler::MethodKind, switchboard::Switchboard};
+use http::StatusCode;
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry};
 use prometheus_static_metric::make_static_metric;
-
-use crate::{message_handler::MethodKind, switchboard::Switchboard};
 
 make_static_metric! {
     pub struct RequestStats: IntCounter {
         "status" => {
             success,
             failure,
+        },
+    }
+
+    pub struct ResponseStats: IntCounter {
+        "status" => {
+            success,
+            client_error,
+            server_error,
         },
     }
 }
@@ -55,6 +63,7 @@ make_static_metric! {
 pub struct Metrics {
     request_duration: RequestDuration,
     request_stats: RequestStats,
+    response_stats: ResponseStats,
     switchboard_stats: SwitchboardStats,
     recorder_stats: RecorderStats,
 }
@@ -73,6 +82,10 @@ impl Metrics {
         )?;
         let request_stats =
             IntCounterVec::new(Opts::new("request_stats", "Request stats"), &["status"])?;
+
+        let response_stats =
+            IntCounterVec::new(Opts::new("response_stats", "Response stats"), &["status"])?;
+
         let switchboard_stats = IntGaugeVec::new(
             Opts::new("switchboard_stats", "Switchboard stats"),
             &["field"],
@@ -84,11 +97,13 @@ impl Metrics {
         registry.register(Box::new(request_stats.clone()))?;
         registry.register(Box::new(switchboard_stats.clone()))?;
         registry.register(Box::new(recorder_stats.clone()))?;
+        registry.register(Box::new(response_stats.clone()))?;
         Ok(Self {
             request_duration: RequestDuration::from(&request_duration),
             request_stats: RequestStats::from(&request_stats),
             switchboard_stats: SwitchboardStats::from(&switchboard_stats),
             recorder_stats: RecorderStats::from(&recorder_stats),
+            response_stats: ResponseStats::from(&response_stats),
         })
     }
 
@@ -131,9 +146,16 @@ impl Metrics {
         }
     }
 
-    pub fn observe_request(start_time: Instant, method: MethodKind) {
+    pub fn observe_request(start_time: Instant, method: MethodKind, status: StatusCode) {
         let elapsed = Self::duration_to_seconds(start_time.elapsed());
         if let Ok(app) = app!() {
+            if status.is_client_error() {
+                app.metrics.response_stats.client_error.inc()
+            } else if status.is_server_error() {
+                app.metrics.response_stats.server_error.inc()
+            } else {
+                app.metrics.response_stats.success.inc()
+            }
             let request_duration = &app.metrics.request_duration;
             match method {
                 MethodKind::AgentLeave => request_duration.agent_leave.observe(elapsed),
