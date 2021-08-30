@@ -152,9 +152,10 @@ fn handle_message_impl(
         async_std::task::spawn(async move {
             let method_kind = request.method_kind();
             let response = handle_request(request).await;
+            let status = response.payload().status();
             send_response(janus_sender, response);
             if let Some(method) = method_kind {
-                Metrics::observe_request(now, method)
+                Metrics::observe_request(now, method, status)
             }
         });
     }
