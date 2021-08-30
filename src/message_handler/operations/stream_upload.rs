@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-use anyhow::{bail, format_err, Context, Error, Result};
+use anyhow::{format_err, Context, Error, Result};
 use async_std::process::Command;
 use async_trait::async_trait;
 use http::StatusCode;
@@ -15,14 +15,11 @@ pub struct Request {
     id: StreamId,
     backend: String,
     bucket: String,
-    object: String,
 }
 
 #[derive(Serialize)]
 struct Response {
     id: StreamId,
-    started_at: u64,
-    time: Vec<(u64, u64)>,
     mjr_dumps_uris: Vec<String>,
 }
 
@@ -88,14 +85,11 @@ impl super::Operation for Request {
                 Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
             }
             UploadStatus::Done => {
-                let (started_at, segments) = parse_segments(&recorder).map_err(internal_error)?;
                 let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
                 recorder.delete_record().map_err(internal_error)?;
 
                 Ok(Response {
                     id: self.id,
-                    started_at,
-                    time: segments,
                     mjr_dumps_uris: dumps,
                 }
                 .into())
@@ -149,12 +143,7 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
 
-    command.args(&[
-        &stream_id,
-        &request.backend,
-        &request.bucket,
-        &request.object,
-    ]);
+    command.args(&[&stream_id, &request.backend, &request.bucket]);
 
     huge!("Running stream upload shell command: {:?}", command);
 
@@ -165,7 +154,7 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
         .and_then(|status| {
             if status.success() {
                 info!(
-                    "Record successfully uploaded to {}/{}", request.bucket, request.object;
+                    "Dumps successfully uploaded to {} bucket", request.bucket;
                     {"rtc_id": request.id}
                 );
 
@@ -185,52 +174,4 @@ fn get_dump_uris(recorder: &RecorderHandle) -> Result<Vec<String>> {
     Ok(BufReader::new(File::open(path)?)
         .lines()
         .collect::<Result<Vec<_>, _>>()?)
-}
-
-fn parse_segments(recorder: &RecorderHandle) -> Result<(u64, Vec<(u64, u64)>)> {
-    let mut path = recorder.get_records_dir();
-    path.push("segments.csv");
-
-    let file = File::open(&path)?;
-    let mut segments = vec![];
-
-    for read_result in BufReader::new(file).lines() {
-        let line = match read_result {
-            Ok(line) => line,
-            Err(err) => bail!(err),
-        };
-
-        // "123456789,123.45" => (123456789, 123.45)
-        match line.splitn(2, ',').collect::<Vec<&str>>().as_slice() {
-            [started_at, duration] => {
-                let parsed_started_at = started_at
-                    .parse::<u64>()
-                    .context("Failed to parse started_at")?;
-
-                let parsed_duration = duration
-                    .parse::<f32>()
-                    .context("Failed to parse duration")?;
-
-                segments.push((parsed_started_at, parsed_duration))
-            }
-            _ => bail!("Failed to split line: {}", line),
-        }
-    }
-
-    let absolute_started_at = match segments.first() {
-        None => bail!("No segments parsed"),
-        Some((started_at, _)) => started_at.to_owned(),
-    };
-
-    // [(123456789, 123.45), (123470134, 456.78)] => [(0, 12345), (13345, 59023)]
-    let relative_segments = segments
-        .into_iter()
-        .map(|(started_at, duration_sec)| {
-            let relative_started_at = started_at - absolute_started_at;
-            let duration_ms = (duration_sec * 1000.0) as u64;
-            (relative_started_at, relative_started_at + duration_ms)
-        })
-        .collect();
-
-    Ok((absolute_started_at, relative_segments))
 }
