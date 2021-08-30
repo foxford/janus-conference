@@ -82,6 +82,10 @@ impl Payload {
             ..self
         }
     }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
 }
 
 impl From<JsonValue> for Payload {

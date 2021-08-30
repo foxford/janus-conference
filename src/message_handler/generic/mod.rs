@@ -72,6 +72,7 @@ pub async fn handle_request<O: Operation>(request: PreparedRequest<O>) -> Respon
             .call(&request.request)
             .await
             .map_err(|err| {
+                err!("Operation {:?} errored: {:?}", request.method_kind(), err);
                 notify_error(&err);
                 err
             })
