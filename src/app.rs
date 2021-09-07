@@ -42,6 +42,7 @@ impl App {
             metrics_registry,
             config.metrics.bind_addr,
         ));
+        async_std::task::spawn(start_health_check(config.general.health_check_addr));
 
         let app = App::new(config, handles_creator, metrics)?;
         APP.set(app).expect("Already initialized");
@@ -85,6 +86,13 @@ impl App {
             metrics,
         })
     }
+}
+
+async fn start_health_check(bind_addr: SocketAddr) -> async_std::io::Result<()> {
+    let mut app = tide::new();
+    app.at("/")
+        .get(|_req: tide::Request<()>| async move { Ok(tide::Response::new(200)) });
+    app.listen(bind_addr).await
 }
 
 async fn start_metrics_collector(

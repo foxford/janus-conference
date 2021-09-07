@@ -46,6 +46,7 @@ pub struct General {
     pub fir_interval: Duration,
     #[serde(with = "humantime_serde")]
     pub sessions_ttl: Duration,
+    pub health_check_addr: SocketAddr,
 }
 
 #[derive(Clone, Deserialize, Debug)]
