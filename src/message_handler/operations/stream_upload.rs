@@ -33,7 +33,7 @@ impl super::Operation for Request {
 
             if !app.config.upload.backends.contains(&self.backend) {
                 let err = anyhow!("Unknown backend '{}'", self.backend);
-                err!("{}", err; {"rtc_id": self.id});
+                err!("Unknown backend: {:?}", err; {"rtc_id": self.id});
                 return Err(error(StatusCode::BAD_REQUEST, err));
             }
         }

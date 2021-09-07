@@ -217,10 +217,9 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
-        // Check whether publisher media is muted and drop the packet if it is.
         let stream_id = switchboard
             .published_by(session_id)
-            .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))?;
+            .ok_or_else(|| anyhow!("Failed to identify the stream id {} of the packet", session_id))?;
 
         let writer_config = switchboard.writer_config(stream_id);
 
@@ -479,7 +478,7 @@ fn report_error(res: Result<()>) {
     match res {
         Ok(_) => {}
         Err(err) => {
-            err!("{}", err);
+            err!("Error reported: {:?}", err);
         }
     }
 }
