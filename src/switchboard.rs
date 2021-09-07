@@ -518,7 +518,6 @@ impl Switchboard {
             }
             self.disconnect(old_publisher)?;
         }
-        self.publishers.insert(id, publisher);
 
         self.agents.associate(agent_id, publisher);
         Ok(())
