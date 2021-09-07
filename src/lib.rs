@@ -219,8 +219,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
         let stream_id = switchboard
             .published_by(session_id)
-            .ok_or_else(|| anyhow!("Failed to identify the stream id of the packet"))
-            .with_context(|| session_id.to_string())?;
+            .ok_or_else(|| anyhow!("Failed to identify the stream id {} of the packet", session_id))?;
 
         let writer_config = switchboard.writer_config(stream_id);
 
