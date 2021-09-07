@@ -72,6 +72,7 @@ pub async fn handle_request<O: Operation>(request: PreparedRequest<O>) -> Respon
             .call(&request.request)
             .await
             .map_err(|err| {
+                err!("Operation {:?} errored: {:?}", request.method_kind(), err);
                 notify_error(&err);
                 err
             })
@@ -142,8 +143,8 @@ pub fn send_speaking_notification(
         &Payload::new(StatusCode::OK).set_response(notification),
     )?);
 
-    //this strange string is "AgentSpeaking" in base64
-    sender.send(session_id, "IkFnZW50U3BlYWtpbmci", response, None)?;
+    let agent_speaking_b64enc = "{\"kind\":\"IkFnZW50U3BlYWtpbmci\"}";
+    sender.send(session_id, agent_speaking_b64enc, response, None)?;
     Ok(())
 }
 

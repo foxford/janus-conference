@@ -530,30 +530,29 @@ impl Switchboard {
         subscriber: SessionId,
         agent_id: AgentId,
     ) -> Result<()> {
+        let publisher = self
+            .publishers
+            .get(&id)
+            .map(|p| p.to_owned())
+            .ok_or_else(|| anyhow!("Stream {} does not exist", id))?;
         let session = self.unused_sessions.remove(&subscriber).ok_or_else(|| {
             anyhow!(
                 "Subscriber's session id: {} not present in the new_sessions set",
                 subscriber
             )
         })?;
+
         self.sessions.insert(subscriber, session.session);
         self.states.insert(subscriber, SessionState::new());
 
-        let maybe_publisher = self.publishers.get(&id).map(|p| p.to_owned());
+        verb!(
+            "Joining to stream";
+            {"rtc_id": id, "handle_id": subscriber, "agent_id": agent_id}
+        );
 
-        match maybe_publisher {
-            None => bail!("Stream {} does not exist", id),
-            Some(publisher) => {
-                verb!(
-                    "Joining to stream";
-                    {"rtc_id": id, "handle_id": subscriber, "agent_id": agent_id}
-                );
-
-                self.publishers_subscribers.associate(publisher, subscriber);
-                self.agents.associate(agent_id, subscriber);
-                Ok(())
-            }
-        }
+        self.publishers_subscribers.associate(publisher, subscriber);
+        self.agents.associate(agent_id, subscriber);
+        Ok(())
     }
 
     pub fn remove_stream(
