@@ -1203,7 +1203,7 @@ checksum = "8c71b62bcd47246aeb80d8559cfda53c85b494f5c31eb814113fef51afe67e2a"
 
 [[package]]
 name = "janus-conference"
-version = "0.8.15"
+version = "0.8.16"
 dependencies = [
  "anyhow",
  "async-oneshot",
