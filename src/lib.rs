@@ -325,13 +325,7 @@ extern "C" fn data_ready(_handle: *mut PluginSession) {
     // Skip data channels.
 }
 
-extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int) {
-    report_error(slow_link_impl(handle, uplink, video));
-}
-
-fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
-    Ok(())
-}
+extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int) {}
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
     report_error(hangup_media_impl(handle));
