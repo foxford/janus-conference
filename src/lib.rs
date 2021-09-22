@@ -325,24 +325,7 @@ extern "C" fn data_ready(_handle: *mut PluginSession) {
     // Skip data channels.
 }
 
-extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int) {
-    report_error(slow_link_impl(handle, uplink, video));
-}
-
-fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
-    let session_id = session_id(handle)?;
-
-    let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
-
-    info!(
-        "Slow link: uplink = {}; is_video = {}", uplink, video;
-        {"handle_id": session_id, "rtc_id": rtc_id}
-    );
-
-    Ok(())
-}
+extern "C" fn slow_link(_handle: *mut PluginSession, _uplink: c_int, _video: c_int) {}
 
 extern "C" fn hangup_media(handle: *mut PluginSession) {
     report_error(hangup_media_impl(handle));
