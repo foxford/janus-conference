@@ -330,17 +330,6 @@ extern "C" fn slow_link(handle: *mut PluginSession, uplink: c_int, video: c_int)
 }
 
 fn slow_link_impl(handle: *mut PluginSession, uplink: c_int, video: c_int) -> Result<()> {
-    let session_id = session_id(handle)?;
-
-    let rtc_id = app!()?
-        .switchboard
-        .with_read_lock(|switchboard| Ok(switchboard.stream_id_to(session_id)))?;
-
-    info!(
-        "Slow link: uplink = {}; is_video = {}", uplink, video;
-        {"handle_id": session_id, "rtc_id": rtc_id}
-    );
-
     Ok(())
 }
 
