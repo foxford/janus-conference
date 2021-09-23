@@ -1,4 +1,5 @@
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
 use std::thread;
 use std::{fmt, usize};
 use std::{
@@ -6,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{bail, format_err, Result};
+use anyhow::{format_err, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use fnv::FnvHashMap;
 use janus::session::SessionWrapper;
@@ -645,20 +646,14 @@ impl LockedSwitchboard {
     where
         F: FnOnce(RwLockReadGuard<Switchboard>) -> Result<R>,
     {
-        match self.0.read() {
-            Ok(switchboard) => callback(switchboard),
-            Err(_) => bail!("Failed to acquire switchboard read lock"),
-        }
+        callback(self.0.read())
     }
 
     pub fn with_write_lock<F, R>(&self, callback: F) -> Result<R>
     where
         F: FnOnce(RwLockWriteGuard<Switchboard>) -> Result<R>,
     {
-        match self.0.write() {
-            Ok(switchboard) => callback(switchboard),
-            Err(_) => bail!("Failed to acquire switchboard write lock"),
-        }
+        callback(self.0.write())
     }
 
     pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
