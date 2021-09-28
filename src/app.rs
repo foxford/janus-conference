@@ -4,7 +4,7 @@ use anyhow::Result;
 use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
 
-use crate::{conf::Config, recorder::recorder};
+use crate::{conf::Config, recorder::recorder, register};
 use crate::{message_handler::JanusSender, recorder::RecorderHandlesCreator};
 use crate::{metrics::Metrics, switchboard::LockedSwitchboard as Switchboard};
 
@@ -33,6 +33,9 @@ impl App {
         if let Some(sentry_config) = config.sentry.as_ref() {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
+        }
+        if let Some(registry) = config.registry.as_ref() {
+            register::register(&registry.description, &registry.conference_url)
         }
         let (recorder, handles_creator) =
             recorder(config.recordings.clone(), config.metrics.clone());
