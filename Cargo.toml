@@ -31,7 +31,6 @@ prometheus-static-metric = "0.5"
 humantime-serde = "1"
 tide = "0.16"
 async-oneshot = "0.5"
-parking_lot = "0.11"
 ureq = "2"
 
 [dependencies.sentry]
