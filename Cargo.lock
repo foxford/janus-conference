@@ -1220,7 +1220,6 @@ dependencies = [
  "libc",
  "multimap",
  "once_cell",
- "parking_lot",
  "prometheus",
  "prometheus-static-metric",
  "sentry",
