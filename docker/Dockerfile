@@ -64,18 +64,6 @@ RUN wget https://github.com/cisco/libsrtp/archive/v${LIBSRTP_VERSION}.tar.gz \
     && make install
 
 ## -----------------------------------------------------------------------------
-## Install Paho MQTT client
-## -----------------------------------------------------------------------------
-ARG PAHO_MQTT_VERSION=1.3.5
-
-RUN PAHO_MQTT_BUILD_DIR=$(mktemp -d) \
-    && cd "${PAHO_MQTT_BUILD_DIR}" \
-    && git clone "https://github.com/eclipse/paho.mqtt.c.git" . \
-    && git checkout "v${PAHO_MQTT_VERSION}" \
-    && make \
-    && make install
-
-## -----------------------------------------------------------------------------
 ## Build Janus Gateway
 ## -----------------------------------------------------------------------------
 ARG JANUS_GATEWAY_COMMIT='v0.10.10'
