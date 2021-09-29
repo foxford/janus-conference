@@ -8,10 +8,10 @@ pub fn register(description: &Description, conference_url: &str, token: &str) {
         let response = ureq::post(conference_url)
             .set("Authorization", token)
             .send_bytes(&desc)?;
-        if response.status() == 200 {
-            Ok(())
-        } else {
-            Err(anyhow!("Not registered"))
+        match response.status() {
+            200 => Ok(()),
+            401 => Err(anyhow!("Bad token")),
+            _ => Err(anyhow!("Not registered")),
         }
     };
     while let Err(err) = register() {
