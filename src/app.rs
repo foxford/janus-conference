@@ -35,7 +35,11 @@ impl App {
             info!("Sentry initialized");
         }
         if let Some(registry) = config.registry.as_ref() {
-            register::register(&registry.description, &registry.conference_url)
+            register::register(
+                &registry.description,
+                &registry.conference_url,
+                &registry.token,
+            )
         }
         let (recorder, handles_creator) =
             recorder(config.recordings.clone(), config.metrics.clone());

@@ -43,6 +43,7 @@ impl Config {
 pub struct RegistryConfig {
     pub conference_url: String,
     pub description: Description,
+    pub token: String,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
