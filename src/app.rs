@@ -34,12 +34,16 @@ impl App {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
         }
-        if let Some(registry) = config.registry.as_ref() {
-            register::register(
-                &registry.description,
-                &registry.conference_url,
-                &registry.token,
-            )
+        let healh_check = start_health_check(config.general.health_check_addr);
+        if let Some(registry) = config.registry.clone() {
+            thread::spawn(move || {
+                register::register(
+                    &registry.description,
+                    &registry.conference_url,
+                    &registry.token,
+                );
+                async_std::task::spawn(healh_check);
+            });
         }
         let (recorder, handles_creator) =
             recorder(config.recordings.clone(), config.metrics.clone());
@@ -49,7 +53,6 @@ impl App {
             metrics_registry,
             config.metrics.bind_addr,
         ));
-        async_std::task::spawn(start_health_check(config.general.health_check_addr));
 
         let app = App::new(config, handles_creator, metrics)?;
         APP.set(app).expect("Already initialized");
