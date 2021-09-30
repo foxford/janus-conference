@@ -98,11 +98,13 @@ impl App {
     }
 }
 
-async fn start_health_check(bind_addr: SocketAddr) -> async_std::io::Result<()> {
+async fn start_health_check(bind_addr: SocketAddr) {
     let mut app = tide::new();
     app.at("/")
         .get(|_req: tide::Request<()>| async move { Ok(tide::Response::new(200)) });
-    app.listen(bind_addr).await
+    if let Err(err) = app.listen(bind_addr).await {
+        err!("Healthcheck errored: {:?}", err)
+    }
 }
 
 async fn start_metrics_collector(
