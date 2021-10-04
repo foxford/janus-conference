@@ -2,13 +2,16 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use anyhow::{format_err, Context, Error, Result};
-use async_std::process::Command;
+use async_std::{process::Command, sync::Mutex};
 use async_trait::async_trait;
 use http::StatusCode;
+use once_cell::sync::Lazy;
 use svc_error::Error as SvcError;
 
 use crate::switchboard::StreamId;
 use crate::{message_handler::generic::MethodKind, recorder::RecorderHandle};
+
+static MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -79,6 +82,8 @@ impl super::Operation for Request {
         recorder
             .check_existence()
             .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+
+        let _guard = MUTEX.lock().await;
 
         match upload_record(self).await.map_err(internal_error)? {
             UploadStatus::AlreadyRunning => {
