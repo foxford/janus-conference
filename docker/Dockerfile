@@ -39,7 +39,7 @@ RUN apt-get -y --no-install-recommends install \
     python3-setuptools \
     python3-wheel
 
-RUN aws configure set default.s3.max_bandwidth 50MB/s
+RUN aws configure set default.s3.max_bandwidth 10MB/s
 
 ## -----------------------------------------------------------------------------
 ## Install latest libnice (recommended by Janus devs)
