@@ -34,6 +34,7 @@ mod jsep;
 mod message_handler;
 mod metrics;
 mod recorder;
+mod register;
 mod serde;
 mod switchboard;
 #[cfg(test)]

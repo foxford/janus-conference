@@ -15,6 +15,7 @@ pub struct Config {
     pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,
     pub metrics: Metrics,
+    pub registry: Option<RegistryConfig>,
 }
 
 impl Config {
@@ -36,6 +37,22 @@ impl Config {
 
         Ok(config)
     }
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct RegistryConfig {
+    pub conference_url: String,
+    pub description: Description,
+    pub token: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
+pub struct Description {
+    capacity: Option<i32>,
+    balancer_capacity: Option<i32>,
+    group: Option<String>,
+    janus_url: String,
+    agent_id: String,
 }
 
 #[derive(Clone, Deserialize, Debug)]

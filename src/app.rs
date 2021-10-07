@@ -4,7 +4,7 @@ use anyhow::Result;
 use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
 
-use crate::{conf::Config, recorder::recorder};
+use crate::{conf::Config, recorder::recorder, register};
 use crate::{message_handler::JanusSender, recorder::RecorderHandlesCreator};
 use crate::{metrics::Metrics, switchboard::LockedSwitchboard as Switchboard};
 
@@ -34,6 +34,17 @@ impl App {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
         }
+        let healh_check = start_health_check(config.general.health_check_addr);
+        if let Some(registry) = config.registry.clone() {
+            thread::spawn(move || {
+                register::register(
+                    &registry.description,
+                    &registry.conference_url,
+                    &registry.token,
+                );
+                async_std::task::spawn(healh_check);
+            });
+        }
         let (recorder, handles_creator) =
             recorder(config.recordings.clone(), config.metrics.clone());
         let metrics_registry = Registry::new();
@@ -42,7 +53,6 @@ impl App {
             metrics_registry,
             config.metrics.bind_addr,
         ));
-        async_std::task::spawn(start_health_check(config.general.health_check_addr));
 
         let app = App::new(config, handles_creator, metrics)?;
         APP.set(app).expect("Already initialized");
@@ -88,11 +98,13 @@ impl App {
     }
 }
 
-async fn start_health_check(bind_addr: SocketAddr) -> async_std::io::Result<()> {
+async fn start_health_check(bind_addr: SocketAddr) {
     let mut app = tide::new();
     app.at("/")
         .get(|_req: tide::Request<()>| async move { Ok(tide::Response::new(200)) });
-    app.listen(bind_addr).await
+    if let Err(err) = app.listen(bind_addr).await {
+        err!("Healthcheck errored: {:?}", err)
+    }
 }
 
 async fn start_metrics_collector(
