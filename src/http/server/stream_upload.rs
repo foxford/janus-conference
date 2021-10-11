@@ -1,22 +1,12 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-
-use anyhow::{format_err, Context, Error, Result};
-use async_std::{process::Command, sync::Mutex};
-use async_trait::async_trait;
+use anyhow::{anyhow, format_err, Context, Error, Result};
+use axum::Json;
+use crossbeam_channel::Receiver;
 use http::StatusCode;
-use once_cell::sync::Lazy;
 use svc_error::Error as SvcError;
+use tokio::sync::{mpsc::UnboundedReceiver, oneshot::Sender};
 
 use crate::switchboard::StreamId;
 use crate::{message_handler::generic::MethodKind, recorder::RecorderHandle};
-
-
-fn stream_upload() {
-
-}
-
-static MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -31,27 +21,18 @@ struct Response {
     mjr_dumps_uris: Vec<String>,
 }
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, _request: &super::Request) -> super::OperationResult {
-        verb!("Calling stream.upload operation"; {"rtc_id": self.id});
+pub async fn stream_upload(Json(request): Json<Request>) -> Result<Response> {
+    let app = app!()?;
+    if !app.config.upload.backends.contains(&request.backend) {
+        let err = anyhow!("Unknown backend '{}'", request.backend);
+        err!("Unknown backend: {:?}", err; {"rtc_id": request.id});
+        return Err(error(StatusCode::BAD_REQUEST, err));
+    }
 
-        {
-            let app = app!().map_err(internal_error)?;
-
-            if !app.config.upload.backends.contains(&self.backend) {
-                let err = anyhow!("Unknown backend '{}'", self.backend);
-                err!("Unknown backend: {:?}", err; {"rtc_id": self.id});
-                return Err(error(StatusCode::BAD_REQUEST, err));
-            }
-        }
-
-        app!()
-            .map_err(internal_error)?
-            .switchboard
+    app.switchboard
             .with_write_lock(|mut switchboard| {
                 // The stream still may be ongoing and we must stop it gracefully.
-                if let Some(publisher) = switchboard.publisher_of(self.id) {
+                if let Some(publisher) = switchboard.publisher_of(request.id) {
                     warn!(
                         "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
                         {"rtc_id": self.id}
@@ -61,7 +42,7 @@ impl super::Operation for Request {
 
                     // At first we synchronously stop the stream and hence the recording
                     // ensuring that it finishes correctly.
-                    switchboard.remove_stream(self.id)?;
+                    switchboard.remove_stream(request.id)?;
 
                     // Then we disconnect the publisher to close its PeerConnection and notify
                     // the frontend. Disconnection also implies stream removal but it's being
@@ -78,57 +59,31 @@ impl super::Operation for Request {
                 Ok(())
             })
             .map_err(internal_error)?;
-        let recorder = app!()
-            .map_err(internal_error)?
-            .recorders_creator
-            .new_handle(self.id);
-        recorder.wait_stop().await.map_err(internal_error)?;
+    let recorder = app!()
+        .map_err(internal_error)?
+        .recorders_creator
+        .new_handle(request.id);
+    recorder.wait_stop().await.map_err(internal_error)?;
 
-        recorder
-            .check_existence()
-            .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+    recorder
+        .check_existence()
+        .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
-        let _guard = MUTEX.lock().await;
+    match upload_record(self).await.map_err(internal_error)? {
+        UploadStatus::AlreadyRunning => {
+            Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
+        }
+        UploadStatus::Done => {
+            let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
+            recorder.delete_record().map_err(internal_error)?;
 
-        match upload_record(self).await.map_err(internal_error)? {
-            UploadStatus::AlreadyRunning => {
-                Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
+            Ok(Response {
+                id: self.id,
+                mjr_dumps_uris: dumps,
             }
-            UploadStatus::Done => {
-                let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
-                recorder.delete_record().map_err(internal_error)?;
-
-                Ok(Response {
-                    id: self.id,
-                    mjr_dumps_uris: dumps,
-                }
-                .into())
-            }
+            .into())
         }
     }
-
-    fn stream_id(&self) -> Option<StreamId> {
-        None
-    }
-
-    fn method_kind(&self) -> Option<MethodKind> {
-        Some(MethodKind::StreamUpload)
-    }
-}
-
-fn error(status: StatusCode, err: Error) -> SvcError {
-    SvcError::builder()
-        .kind(
-            "stream_upload_error",
-            "Error uploading a recording of stream",
-        )
-        .status(status)
-        .detail(&err.to_string())
-        .build()
-}
-
-fn internal_error(err: Error) -> SvcError {
-    error(StatusCode::INTERNAL_SERVER_ERROR, err)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -140,7 +95,15 @@ pub enum UploadStatus {
 
 const LOCKFILE_EARLY_EXIT_STATUS: i32 = 251;
 
-async fn upload_record(request: &Request) -> Result<UploadStatus> {
+fn uploader(requests: Receiver<(Request, Sender<Result<Response>>)>) {
+    loop {
+        let (request, waiter) = requests.recv().expect("Sender must be alive");
+        let result = upload_record(&request);
+        let _ = waiter.send(result);
+    }
+}
+
+fn upload_record(request: &Request) -> Result<UploadStatus> {
     info!("Preparing & uploading record"; {"rtc_id": request.id});
 
     let mut script_path = std::env::current_exe()

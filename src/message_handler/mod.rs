@@ -5,7 +5,7 @@ use std::ffi::CString;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use janus::JanssonValue;
+use janus_plugin::JanssonValue;
 
 use self::generic::Sender;
 use crate::janus_callbacks;

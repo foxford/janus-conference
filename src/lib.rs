@@ -1,10 +1,3 @@
-#[macro_use]
-extern crate anyhow;
-#[macro_use]
-extern crate janus_plugin as janus;
-#[macro_use]
-extern crate serde_derive;
-
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
@@ -15,7 +8,7 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use janus::{
+use janus_plugin::{
     session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
     PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
     PluginSession, RawJanssonValue, RawPluginResult,
@@ -27,6 +20,7 @@ mod utils;
 mod app;
 mod bidirectional_multimap;
 mod conf;
+mod http;
 mod janus_callbacks;
 mod janus_recorder;
 pub mod janus_rtp;

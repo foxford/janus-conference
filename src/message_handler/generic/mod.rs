@@ -6,7 +6,7 @@ use std::convert::TryFrom;
 
 use anyhow::{format_err, Error};
 use http::StatusCode;
-use janus::JanssonValue;
+use janus_plugin::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 

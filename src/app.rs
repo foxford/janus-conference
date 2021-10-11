@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use prometheus::{Encoder, Registry, TextEncoder};
 
 use crate::{conf::Config, recorder::recorder, register};

@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use anyhow::{Context, Error, Result};
 use http::StatusCode;
-use janus::JanssonValue;
+use janus_plugin::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 

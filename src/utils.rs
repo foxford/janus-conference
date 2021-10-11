@@ -3,7 +3,7 @@
 use std::os::raw::{c_ulong, c_void};
 
 use anyhow::{format_err, Context, Result};
-use janus::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
+use janus_plugin::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -12,10 +12,10 @@ macro_rules! log(
     // `2` means that `;` was already found
     // -- print out the entry finally
     (2 @ { $($fmt:tt)* }, { }, $lvl:expr, $msg_fmt:expr) => {
-        janus_log!($lvl, "[CONFERENCE {{}}] {}", format_args!($msg_fmt, $($fmt)*))
+        janus_plugin::janus_log!($lvl, "[CONFERENCE {{}}] {}", format_args!($msg_fmt, $($fmt)*))
     };
     (2 @ { $($fmt:tt)* }, { $($tags:tt)+ }, $lvl:expr, $msg_fmt:expr) => {
-        janus_log!(
+        janus_plugin::janus_log!(
             $lvl,
             "[CONFERENCE {}] {}",
             serde_json::json!($($tags)+),
