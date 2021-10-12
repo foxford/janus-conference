@@ -75,9 +75,9 @@ impl Request {
                 send_audio: config.send_audio,
                 video_remb: config.video_remb,
             };
-            writer_config_update::writer_config_update(Json(writer_config_update::Request {
+            writer_config_update::writer_config_update(writer_config_update::Request {
                 configs: vec![config_item],
-            }))?;
+            })?;
         }
 
         if let Some(configs) = &self.reader_configs {
@@ -90,9 +90,7 @@ impl Request {
                     reader_id: c.reader_id.clone(),
                 })
                 .collect();
-            reader_config_update::reader_config_update(Json(reader_config_update::Request {
-                configs,
-            }))?;
+            reader_config_update::reader_config_update(reader_config_update::Request { configs })?;
         }
 
         Ok(())

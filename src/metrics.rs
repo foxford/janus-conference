@@ -55,7 +55,6 @@ make_static_metric! {
         "field" => {
             recorders,
             waiters,
-            queue
         },
     }
 }
@@ -174,13 +173,12 @@ impl Metrics {
         }
     }
 
-    pub fn observe_recorder(recorders_count: usize, queue_size: usize, waiters_size: usize) {
+    pub fn observe_recorder(recorders_count: usize, waiters_size: usize) {
         if let Ok(app) = app!() {
             app.metrics
                 .recorder_stats
                 .recorders
                 .set(recorders_count as i64);
-            app.metrics.recorder_stats.queue.set(queue_size as i64);
             app.metrics.recorder_stats.waiters.set(waiters_size as i64);
         }
     }

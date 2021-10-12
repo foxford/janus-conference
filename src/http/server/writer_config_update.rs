@@ -20,7 +20,7 @@ pub struct ConfigItem {
     pub video_remb: Option<u32>,
 }
 
-pub fn writer_config_update(Json(request): Json<Request>) -> Result<()> {
+pub fn writer_config_update(request: Request) -> Result<()> {
     let app = app!()?;
 
     for config_item in &request.configs {

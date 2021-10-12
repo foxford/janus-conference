@@ -9,13 +9,15 @@ use crate::recorder::RecorderHandle;
 use crate::switchboard::StreamId;
 use anyhow::{anyhow, format_err, Context, Error, Result};
 use axum::{extract::Extension, Json};
-use crossbeam_channel::{Receiver, Sender};
 use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use svc_error::Error as SvcError;
-use tokio::sync::oneshot;
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -30,7 +32,7 @@ struct Response {
     mjr_dumps_uris: Vec<String>,
 }
 
-pub async fn stream_upload(Json(request): Json<Request>) -> Result<Json<Value>> {
+pub async fn stream_upload(request: Request) -> Result<Value> {
     let app = app!()?;
     if !app.config.upload.backends.contains(&request.backend) {
         let err = anyhow!("Unknown backend '{}'", request.backend);
@@ -73,22 +75,21 @@ pub async fn stream_upload(Json(request): Json<Request>) -> Result<Json<Value>> 
     recorder.check_existence()?;
 
     match app.uploader.upload_record(request.clone()).await? {
-        UploadStatus::AlreadyRunning => Ok(Json(
-            serde_json::json!({"id": request.id, "state": "already_running"}),
-        )),
+        UploadStatus::AlreadyRunning => {
+            Ok(serde_json::json!({"id": request.id, "state": "already_running"}))
+        }
         UploadStatus::Done => {
             let dumps = get_dump_uris(&recorder)?;
             recorder.delete_record()?;
 
-            Ok(Json(
-                serde_json::json!({"id": request.id, "mjr_dumps_uris": dumps}),
-            ))
+            Ok(serde_json::json!({"id": request.id, "mjr_dumps_uris": dumps}))
         }
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#[derive(Debug)]
 pub enum UploadStatus {
     AlreadyRunning,
     Done,
@@ -97,12 +98,12 @@ pub enum UploadStatus {
 const LOCKFILE_EARLY_EXIT_STATUS: i32 = 251;
 
 pub struct Uploader {
-    requests: Sender<(Request, oneshot::Sender<Result<UploadStatus>>)>,
+    requests: UnboundedSender<(Request, oneshot::Sender<Result<UploadStatus>>)>,
 }
 
 impl Uploader {
     pub fn new() -> Self {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = mpsc::unbounded_channel();
         thread::spawn(|| uploader(rx));
         Self { requests: tx }
     }
@@ -114,9 +115,9 @@ impl Uploader {
     }
 }
 
-fn uploader(requests: Receiver<(Request, oneshot::Sender<Result<UploadStatus>>)>) {
+fn uploader(requests: UnboundedReceiver<(Request, oneshot::Sender<Result<UploadStatus>>)>) {
     loop {
-        let (request, waiter) = requests.recv().expect("Sender must be alive");
+        let (request, waiter) = requests.blocking_recv().expect("Sender must be alive");
         let result = upload_record(&request);
         let _ = waiter.send(result);
     }

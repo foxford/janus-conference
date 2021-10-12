@@ -8,9 +8,11 @@ use std::{fs, io};
 
 use anyhow::{anyhow, bail, Context, Error, Result};
 use chrono::{DateTime, Utc};
-use crossbeam_channel::{Receiver, Sender};
 use fnv::FnvHashMap;
-use tokio::sync::oneshot;
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 
 use crate::switchboard::StreamId;
 use crate::{
@@ -66,12 +68,12 @@ enum RecorderMsg {
 
 #[derive(Debug)]
 pub struct RecorderHandlesCreator {
-    sender: Sender<RecorderMsg>,
+    sender: UnboundedSender<RecorderMsg>,
     config: Config,
 }
 
 impl RecorderHandlesCreator {
-    fn new(sender: Sender<RecorderMsg>, config: Config) -> Self {
+    fn new(sender: UnboundedSender<RecorderMsg>, config: Config) -> Self {
         Self { sender, config }
     }
 
@@ -81,12 +83,12 @@ impl RecorderHandlesCreator {
 }
 
 pub struct Recorder {
-    messages: Receiver<RecorderMsg>,
+    messages: UnboundedReceiver<RecorderMsg>,
     metrics_update_interval: Duration,
 }
 
 impl Recorder {
-    fn new(messages: Receiver<RecorderMsg>, metrics_update_interval: Duration) -> Self {
+    fn new(messages: UnboundedReceiver<RecorderMsg>, metrics_update_interval: Duration) -> Self {
         Self {
             messages,
             metrics_update_interval,
@@ -98,9 +100,9 @@ impl Recorder {
         let mut now = Instant::now();
         let mut waiters: FnvHashMap<_, Vec<oneshot::Sender<()>>> = FnvHashMap::default();
         loop {
-            let msg = self.messages.recv().expect("All senders dropped");
+            let msg = self.messages.blocking_recv().expect("All senders dropped");
             if now.elapsed() > self.metrics_update_interval {
-                Metrics::observe_recorder(recorders.len(), self.messages.len(), waiters.len());
+                Metrics::observe_recorder(recorders.len(), waiters.len());
                 now = Instant::now();
             }
 
@@ -235,7 +237,7 @@ pub fn recorder(
     config: Config,
     metrics: crate::conf::Metrics,
 ) -> (Recorder, RecorderHandlesCreator) {
-    let (tx, rx) = crossbeam_channel::unbounded();
+    let (tx, rx) = mpsc::unbounded_channel();
     (
         Recorder::new(rx, metrics.recorders_metrics_load_interval),
         RecorderHandlesCreator::new(tx, config),
@@ -244,7 +246,7 @@ pub fn recorder(
 
 #[derive(Debug)]
 pub struct RecorderHandle {
-    sender: Sender<RecorderMsg>,
+    sender: UnboundedSender<RecorderMsg>,
     stream_id: StreamId,
     save_root_dir: String,
 
@@ -262,7 +264,7 @@ pub struct RecorderHandle {
 /// Recorder runs in separate thread.
 /// You're able to write buffers using `record_packet` method.
 impl RecorderHandle {
-    fn new(config: &Config, stream_id: StreamId, messages: Sender<RecorderMsg>) -> Self {
+    fn new(config: &Config, stream_id: StreamId, messages: UnboundedSender<RecorderMsg>) -> Self {
         Self {
             stream_id,
             save_root_dir: config.directory.clone(),

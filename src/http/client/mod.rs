@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
+    str::FromStr,
     sync::Mutex,
 };
 
@@ -9,7 +10,7 @@ use self::{
     create_handle::{CreateHandleRequest, CreateHandleResponse},
     create_session::CreateSessionResponse,
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 
 use reqwest::{Client, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -25,7 +26,7 @@ use uuid::Uuid;
 pub mod create_handle;
 pub mod create_session;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct JanusClient {
     http: Client,
     janus_url: Url,
@@ -44,15 +45,15 @@ impl JanusClient {
             let session_id = session.session_id;
             async move { start_polling(&client, &janus_url, rx, skip_events, session_id).await }
         });
-        Ok(Self {
+        Self {
             http: Client::new(),
             janus_url,
             requests: tx,
             session,
-        })
+        }
     }
 
-    pub async fn get_events(&self, max_events: usize) -> Vec<Value> {
+    pub async fn get_events(&self, max_events: usize) -> Result<Vec<Value>> {
         let (tx, mut rx) = oneshot::channel();
         self.requests.send(Message::GetEvents {
             max_events,
@@ -61,7 +62,7 @@ impl JanusClient {
         Ok(rx.await?)
     }
 
-    pub async fn proxy_request<T: Serialize>(&self, request: T) -> anyhow::Result<()> {
+    pub async fn proxy_request(&self, request: Value) -> Result<Value> {
         let transaction = Uuid::new_v4();
         let (tx, mut rx) = oneshot::channel();
         self.requests.send(Message::GetResponse {
@@ -70,8 +71,8 @@ impl JanusClient {
         });
         let _ack: AckResponse = send_post(
             &self.http,
-            &self.janus_url,
-            JanusRequest {
+            self.janus_url.clone(),
+            &JanusRequest {
                 transaction,
                 janus: "message",
                 plugin: None,
@@ -82,8 +83,8 @@ impl JanusClient {
         Ok(rx.await?)
     }
 
-    pub fn session(&self) -> &Session {
-        &self.session
+    pub fn session(&self) -> Session {
+        self.session
     }
 }
 
@@ -120,9 +121,10 @@ struct JanusRequest<T> {
     data: T,
 }
 
-struct Session {
-    session_id: u64,
-    handle_id: u64,
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Session {
+    pub session_id: u64,
+    pub handle_id: u64,
 }
 
 async fn create_session(client: &Client, url: &Url) -> Session {
@@ -130,7 +132,7 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         let app = app!()?;
         let session: JanusResponse<CreateSessionResponse> = send_post(
             client,
-            url,
+            url.clone(),
             &JanusRequest {
                 transaction: Uuid::new_v4(),
                 plugin: None,
@@ -141,7 +143,7 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         .await?;
         let handle: JanusResponse<CreateHandleResponse> = send_post(
             client,
-            url,
+            url.clone(),
             &JanusRequest {
                 transaction: Uuid::new_v4(),
                 janus: "attach",
@@ -153,7 +155,7 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         )
         .await?;
         app.switchboard.with_write_lock(|mut switchboard| {
-            switchboard.touch_session(SessionId::new(handle.id));
+            switchboard.touch_session(SessionId::new(handle.data.id));
             Ok(Session {
                 session_id: session.data.id,
                 handle_id: handle.data.id,
@@ -165,12 +167,12 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         .expect("Must be success")
 }
 
-async fn send_post(
+async fn send_post<R: DeserializeOwned>(
     client: &Client,
-    url: &Url,
+    url: Url,
     body: &impl Serialize,
-) -> reqwest::Result<impl DeserializeOwned> {
-    client.post(url).json(body).send().await?.json().await?
+) -> reqwest::Result<R> {
+    Ok(client.post(url).json(body).send().await?.json().await?)
 }
 
 #[derive(Debug)]
@@ -181,7 +183,7 @@ enum Message {
     },
     GetEvents {
         max_events: usize,
-        waiter: Sender<Value>,
+        waiter: Sender<Vec<Value>>,
     },
 }
 
@@ -196,20 +198,28 @@ async fn start_polling(
     let (responses_tx, mut responses_rx) = unbounded_channel();
     let mut waiting_requests = HashMap::new();
     let mut events_requests = VecDeque::new();
-    tokio::task::spawn(polling(
-        &client,
-        responses_tx,
-        events_tx,
-        session_id,
-        skip_events,
-    ));
+    tokio::task::spawn({
+        let client = client.clone();
+        let url = janus_url.clone();
+        async move {
+            polling(
+                &client,
+                &url,
+                session_id,
+                events_tx,
+                responses_tx,
+                skip_events,
+            )
+            .await
+        }
+    });
     loop {
         tokio::select! {
             Some(message) = requests.recv() => {
                 match message {
-                    Message::GetResponse { transaction, waiter} => waiting_requests.insert(transaction, waiter),
-                    Message::GetEvents { max_events, waiter } => events_requests.push((max_events, waiter)),
-                };
+                    Message::GetResponse { transaction, waiter } => { waiting_requests.insert(transaction, waiter); },
+                    Message::GetEvents { max_events, waiter } => { events_requests.push_back((max_events, waiter)); },
+                }
             }
             Some(event) = events_rx.recv(), if !events_requests.is_empty() => {
                 let (max_capacity, waiter) = events_requests.pop_front().expect("Must have elements");
@@ -227,9 +237,9 @@ async fn start_polling(
                 //todo maybe it is better to return events back in queue in case of receiver part of this waiter had been  dropped?
                 let _ = waiter.send(response);
             }
-            Some((id, event)) = events_rx.recv() => {
-                if let Some(req) = waiting_requests.remove(&id) {
-                    let _ = req.send(event);
+            Some((id, event)) = responses_rx.recv() => {
+                if let Some(waiter) = waiting_requests.remove(&id) {
+                    let _ = waiter.send(event);
                 }
             }
         }
@@ -239,12 +249,19 @@ async fn start_polling(
 async fn polling(
     client: &Client,
     url: &Url,
+    session_id: u64,
     events_sink: UnboundedSender<Value>,
     responses_sink: UnboundedSender<(Uuid, Value)>,
-    session_id: u64,
     skip_events: Vec<String>,
 ) {
-    let send_request = || client.get(format!("{}/{}?maxev=5", url, session_id)).send();
+    let send_request = || async {
+        client
+            .get(format!("{}/{}?maxev=5", url, session_id))
+            .send()
+            .await?
+            .json::<Vec<Value>>()
+            .await
+    };
     loop {
         match send_request().await {
             Ok(events) => {
