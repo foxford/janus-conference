@@ -1,10 +1,15 @@
 use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
 
-use crate::{conf::Config, recorder::recorder, register};
+use crate::{
+    conf::Config,
+    http::{client::JanusClient, server::stream_upload::Uploader},
+    recorder::recorder,
+    register,
+};
 use crate::{message_handler::JanusSender, recorder::RecorderHandlesCreator};
 use crate::{metrics::Metrics, switchboard::LockedSwitchboard as Switchboard};
 
@@ -26,6 +31,7 @@ pub struct App {
     pub janus_sender: JanusSender,
     pub metrics: Metrics,
     pub fir_interval: chrono::Duration,
+    pub uploader: Uploader,
 }
 
 impl App {

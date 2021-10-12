@@ -1,19 +1,22 @@
-use anyhow::{format_err, Error};
-use async_trait::async_trait;
-use http::StatusCode;
-use svc_error::Error as SvcError;
-
 use crate::{
+    http::server::{reader_config_update, writer_config_update},
     message_handler::generic::MethodKind,
     switchboard::{AgentId, StreamId},
 };
+use anyhow::Result;
+use anyhow::{format_err, Error};
+use async_trait::async_trait;
+use axum::Json;
+use http::StatusCode;
+use serde::{Deserialize, Serialize};
+use svc_error::Error as SvcError;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: StreamId,
-    agent_id: AgentId,
-    writer_config: Option<WriterConfig>,
-    reader_configs: Option<Vec<ReaderConfig>>,
+    pub id: StreamId,
+    pub agent_id: AgentId,
+    pub writer_config: Option<WriterConfig>,
+    pub reader_configs: Option<Vec<ReaderConfig>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -31,23 +34,11 @@ pub struct WriterConfig {
     video_remb: Option<u32>,
 }
 
-#[derive(Serialize)]
-struct Response {}
-
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, request: &super::Request) -> super::OperationResult {
+impl Request {
+    pub fn stream_create(&self, request: &super::Request) -> Result<()> {
         verb!("Calling stream.create operation"; {"rtc_id": self.id});
 
-        let internal_error = |err: Error| {
-            SvcError::builder()
-                .kind("stream_create_error", "Error creating a stream")
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .detail(&err.to_string())
-                .build()
-        };
-
-        let app = app!().map_err(internal_error)?;
+        let app = app!()?;
         app.switchboard.with_write_lock(|mut switchboard| {
             switchboard.create_stream(self.id, request.session_id(), self.agent_id.to_owned())?;
             let mut start_recording = || {
@@ -66,55 +57,44 @@ impl super::Operation for Request {
             start_recording().or_else(|err: Error| {
                 err!("Failed to start recording; stopping the stream"; {"rtc_id": self.id});
 
-                switchboard
-                    .remove_stream(self.id)
-                    .map_err(|remove_err| {
-                        format_err!(
-                            "Failed to remove stream {}: {} while recovering from another error: {}",
-                            self.id, remove_err, err
-                        )
-                    })?;
+                switchboard.remove_stream(self.id).map_err(|remove_err| {
+                    format_err!(
+                        "Failed to remove stream {}: {} while recovering from another error: {}",
+                        self.id,
+                        remove_err,
+                        err
+                    )
+                })?;
                 Ok(())
             })
-        })
-        .map_err(internal_error)?;
+        })?;
         if let Some(config) = &self.writer_config {
-            let config_item = super::writer_config_update::ConfigItem {
+            let config_item = writer_config_update::ConfigItem {
                 stream_id: self.id,
                 send_video: config.send_video,
                 send_audio: config.send_audio,
                 video_remb: config.video_remb,
             };
-            super::writer_config_update::Request {
+            writer_config_update::writer_config_update(Json(writer_config_update::Request {
                 configs: vec![config_item],
-            }
-            .call(request)
-            .await?;
+            }))?;
         }
 
         if let Some(configs) = &self.reader_configs {
             let configs = configs
                 .iter()
-                .map(|c| super::reader_config_update::ConfigItem {
+                .map(|c| reader_config_update::ConfigItem {
                     stream_id: self.id,
                     receive_video: c.receive_video,
                     receive_audio: c.receive_audio,
                     reader_id: c.reader_id.clone(),
                 })
                 .collect();
-            super::reader_config_update::Request { configs }
-                .call(request)
-                .await?;
+            reader_config_update::reader_config_update(Json(reader_config_update::Request {
+                configs,
+            }))?;
         }
 
-        Ok(Response {}.into())
-    }
-
-    fn stream_id(&self) -> Option<StreamId> {
-        Some(self.id)
-    }
-
-    fn method_kind(&self) -> Option<MethodKind> {
-        Some(MethodKind::StreamCreate)
+        Ok(())
     }
 }

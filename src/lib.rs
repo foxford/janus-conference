@@ -6,12 +6,12 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use janus_plugin::{
-    session::SessionWrapper, JanssonDecodingFlags, JanssonValue, LibraryMetadata, Plugin,
-    PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket, PluginRtpPacket,
-    PluginSession, RawJanssonValue, RawPluginResult,
+    build_plugin, export_plugin, session::SessionWrapper, JanssonDecodingFlags, JanssonValue,
+    LibraryMetadata, Plugin, PluginCallbacks, PluginDataPacket, PluginResult, PluginRtcpPacket,
+    PluginRtpPacket, PluginSession, RawJanssonValue, RawPluginResult,
 };
 
 #[macro_use]
@@ -20,7 +20,7 @@ mod utils;
 mod app;
 mod bidirectional_multimap;
 mod conf;
-mod http;
+pub mod http;
 mod janus_callbacks;
 mod janus_recorder;
 pub mod janus_rtp;
@@ -144,17 +144,9 @@ fn handle_message_impl(
         let janus_sender = app!()?.janus_sender.clone();
         let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
         let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
-        async_std::task::spawn(async move {
-            let method_kind = request.method_kind();
-            let response = handle_request(request).await;
-            let status = response.payload().status();
-            send_response(janus_sender, response);
-            if let Some(method) = method_kind {
-                Metrics::observe_request(now, method, status)
-            }
-        });
+        let response = handle_request(request);
+        send_response(janus_sender, response);
     }
-
     Ok(())
 }
 
@@ -289,12 +281,12 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
 
     app!()?.switchboard.with_read_lock(|switchboard| {
         match packet.video {
-            1 if janus::rtcp::has_pli(data) => {
+            1 if janus_plugin::rtcp::has_pli(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {
                     send_pli(publisher, &switchboard);
                 }
             }
-            1 if janus::rtcp::has_fir(data) => {
+            1 if janus_plugin::rtcp::has_fir(data) => {
                 if let Some(publisher) = switchboard.publisher_to(session_id) {
                     send_fir(publisher, &switchboard);
                 }
@@ -396,7 +388,7 @@ fn send_pli(publisher: SessionId, switchboard: &Switchboard) {
 fn send_pli_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> {
     let session = switchboard.session(publisher)?;
 
-    let mut pli = janus::rtcp::gen_pli();
+    let mut pli = janus_plugin::rtcp::gen_pli();
 
     let mut packet = PluginRtcpPacket {
         video: 1,
@@ -418,7 +410,7 @@ fn send_fir_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
     let state = switchboard.state(publisher)?;
     state.touch_last_fir_timestamp();
     let mut seq = state.increment_fir_seq();
-    let mut fir = janus::rtcp::gen_fir(&mut seq);
+    let mut fir = janus_plugin::rtcp::gen_fir(&mut seq);
 
     let mut packet = PluginRtcpPacket {
         video: 1,
@@ -439,7 +431,7 @@ fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
     app!()?.switchboard.with_read_lock(move |switchboard| {
         let session = switchboard.session(publisher)?;
 
-        let mut remb = janus::rtcp::gen_remb(bitrate);
+        let mut remb = janus_plugin::rtcp::gen_remb(bitrate);
 
         let mut packet = PluginRtcpPacket {
             video: 1,

@@ -1,26 +1,19 @@
 use anyhow::anyhow;
-use axum::{extract::Extension, Json};
+use axum::{extract::Extension, handler::post, routing::BoxRoute, Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::switchboard::{AgentId, StreamId};
 
+use self::proxy::proxy;
+
 use super::client::{create_handle::CreateHandleRequest, JanusClient};
 
-pub mod agent_leave;
+pub mod proxy;
 pub mod reader_config_update;
 pub mod stream_upload;
 pub mod writer_config_update;
-pub mod init;
 
-async fn poll();
-async fn proxy_request(
-    client: Extension<JanusClient>,
-    request: Json<Value>,
-) -> anyhow::Result<Json<Value>> {
-    // client.proxy_request(request, )
+pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
+    Router::new().route("/proxy", post(proxy)).boxed()
 }
-
-async fn stream_upload();
-
-async fn agent_leave();

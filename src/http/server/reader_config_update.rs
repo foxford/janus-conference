@@ -1,5 +1,5 @@
 use crate::switchboard::{AgentId, ReaderConfig, StreamId};
-use anyhow::anyhow;
+use anyhow::Result;
 use axum::Json;
 use serde::Deserialize;
 
@@ -16,7 +16,7 @@ pub struct ConfigItem {
     pub receive_audio: bool,
 }
 
-async fn reader_config_update(Json(request): Json<Request>) -> Result<()> {
+pub fn reader_config_update(Json(request): Json<Request>) -> Result<()> {
     let app = app!()?;
 
     app.switchboard.with_write_lock(|mut switchboard| {

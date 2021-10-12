@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "http::StatusCode")]
 pub(crate) struct HttpStatusCodeRef(#[serde(getter = "http_status_code_to_string")] String);

@@ -2,13 +2,17 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 
 use anyhow::{bail, Context, Result};
-use janus::sdp::{AudioCodec, MediaDirection, MediaType, OfferAnswerParameters, Sdp, VideoCodec};
+use janus_plugin::{
+    answer_sdp,
+    sdp::{AudioCodec, MediaDirection, MediaType, OfferAnswerParameters, Sdp, VideoCodec},
+};
 use serde_json::Value as JsonValue;
 
 use crate::{
     janus_rtp::{janus_rtp_extmap_audio_level, JANUS_RTP_EXTMAP_AUDIO_LEVEL},
     switchboard::StreamId,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "type")]
@@ -29,7 +33,7 @@ impl Jsep {
     }
 
     /// Parses JSEP SDP offer and returns the answer.
-    pub fn negotiate(jsep_offer: &JsonValue, stream_id: StreamId) -> Result<Option<Self>> {
+    pub fn negotiate(jsep_offer: &JsonValue, stream_id: StreamId) -> Result<Self> {
         let offer = serde_json::from_value::<Jsep>(jsep_offer.clone())
             .context("Failed to deserialize JSEP")?;
 
@@ -67,7 +71,7 @@ impl Jsep {
 
         verb!("SDP answer: {:?}", answer_sdp);
         let answer = Jsep::Answer { sdp: answer_sdp };
-        Ok(Some(answer))
+        Ok(answer)
     }
 
     fn set_publisher_bitrate_constraints(

@@ -7,6 +7,19 @@ use janus_plugin::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+pub fn infinite_retry<T, E: std::fmt::Debug>() -> impl Policy<T, E> {
+    let retry_failed = |r: Option<Result<&T, &E>>| {
+        if let Some(Err(e)) = r {
+            err!("Request failed: {:?}", e);
+            true
+        } else {
+            false
+        }
+    };
+    let fixed_backoff = fixed(Duration::from_secs(1));
+    cond(backoff(fixed_backoff), retry_failed)
+}
+
 // Based on https://github.com/slog-rs/slog/blob/master/src/lib.rs#L750.
 macro_rules! log(
     // `2` means that `;` was already found

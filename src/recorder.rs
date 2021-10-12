@@ -6,16 +6,18 @@ use std::{error::Error as StdError, time::Duration};
 use std::{fmt, time::Instant};
 use std::{fs, io};
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use chrono::{DateTime, Utc};
 use crossbeam_channel::{Receiver, Sender};
 use fnv::FnvHashMap;
+use tokio::sync::oneshot;
 
 use crate::switchboard::StreamId;
 use crate::{
     janus_recorder::{Codec, JanusRecorder},
     metrics::Metrics,
 };
+use serde::Deserialize;
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct Config {
@@ -57,7 +59,7 @@ enum RecorderMsg {
         start_time: DateTime<Utc>,
     },
     WaitStop {
-        waiter: async_oneshot::Sender<()>,
+        waiter: oneshot::Sender<()>,
         stream_id: StreamId,
     },
 }
@@ -94,7 +96,7 @@ impl Recorder {
     pub fn start(self) {
         let mut recorders = FnvHashMap::default();
         let mut now = Instant::now();
-        let mut waiters: FnvHashMap<_, Vec<async_oneshot::Sender<()>>> = FnvHashMap::default();
+        let mut waiters: FnvHashMap<_, Vec<oneshot::Sender<()>>> = FnvHashMap::default();
         loop {
             let msg = self.messages.recv().expect("All senders dropped");
             if now.elapsed() > self.metrics_update_interval {
@@ -302,7 +304,7 @@ impl RecorderHandle {
     }
 
     pub async fn wait_stop(&self) -> Result<()> {
-        let (tx, rx) = async_oneshot::oneshot();
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(RecorderMsg::WaitStop {
                 waiter: tx,

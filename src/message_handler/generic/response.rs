@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use anyhow::{Context, Error, Result};
 use http::StatusCode;
 use janus_plugin::JanssonValue;
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
 
@@ -114,7 +115,7 @@ impl TryFrom<&Payload> for JanssonValue {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use janus::JanssonEncodingFlags;
+    use janus_plugin::JanssonEncodingFlags;
     use serde_json::{json, Value as JsonValue};
     use svc_error::Error as SvcError;
 

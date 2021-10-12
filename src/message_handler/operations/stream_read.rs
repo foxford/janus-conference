@@ -7,45 +7,22 @@ use crate::{
     message_handler::generic::MethodKind,
     switchboard::{AgentId, StreamId},
 };
+use anyhow::Result;
+use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
-    id: StreamId,
-    agent_id: AgentId,
+    pub id: StreamId,
+    pub agent_id: AgentId,
 }
-
-#[derive(Serialize)]
-struct Response {}
-
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, request: &super::Request) -> super::OperationResult {
+impl Request {
+    pub fn stream_read(&self, request: &super::Request) -> Result<()> {
         verb!("Calling stream.read operation"; {"rtc_id": self.id});
 
-        let error = |status: StatusCode, err: Error| {
-            SvcError::builder()
-                .kind("stream_read_error", "Error reading a stream")
-                .status(status)
-                .detail(&err.to_string())
-                .build()
-        };
+        app!()?.switchboard.with_write_lock(|mut switchboard| {
+            switchboard.join_stream(self.id, request.session_id(), self.agent_id.to_owned())
+        })?;
 
-        app!()
-            .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
-            .switchboard
-            .with_write_lock(|mut switchboard| {
-                switchboard.join_stream(self.id, request.session_id(), self.agent_id.to_owned())
-            })
-            .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
-
-        Ok(Response {}.into())
-    }
-
-    fn stream_id(&self) -> Option<StreamId> {
-        Some(self.id)
-    }
-
-    fn method_kind(&self) -> Option<MethodKind> {
-        Some(MethodKind::StreamRead)
+        Ok(())
     }
 }

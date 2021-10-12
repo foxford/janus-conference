@@ -1,10 +1,10 @@
 use std::os::raw::c_char;
 
-use janus::{
+use janus_plugin::Plugin;
+use janus_plugin::{
     JanssonValue, JanusError, JanusResult, PluginCallbacks, PluginRtcpPacket, PluginRtpPacket,
     RawJanssonValue,
 };
-use janus_plugin::Plugin;
 
 use super::PLUGIN;
 use crate::switchboard::Session;

@@ -8,7 +8,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use janus::PluginRtpPacket;
+use janus_plugin::PluginRtpPacket;
+use serde::Deserialize;
 
 ////////////////////////////////////////////////////////////////////////////////
 

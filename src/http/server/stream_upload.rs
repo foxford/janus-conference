@@ -1,12 +1,21 @@
-use anyhow::{anyhow, format_err, Context, Error, Result};
-use axum::Json;
-use crossbeam_channel::Receiver;
-use http::StatusCode;
-use svc_error::Error as SvcError;
-use tokio::sync::{mpsc::UnboundedReceiver, oneshot::Sender};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    process::Command,
+    thread,
+};
 
+use crate::recorder::RecorderHandle;
 use crate::switchboard::StreamId;
-use crate::{message_handler::generic::MethodKind, recorder::RecorderHandle};
+use anyhow::{anyhow, format_err, Context, Error, Result};
+use axum::{extract::Extension, Json};
+use crossbeam_channel::{Receiver, Sender};
+use http::StatusCode;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::Value;
+use svc_error::Error as SvcError;
+use tokio::sync::oneshot;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -21,12 +30,12 @@ struct Response {
     mjr_dumps_uris: Vec<String>,
 }
 
-pub async fn stream_upload(Json(request): Json<Request>) -> Result<Response> {
+pub async fn stream_upload(Json(request): Json<Request>) -> Result<Json<Value>> {
     let app = app!()?;
     if !app.config.upload.backends.contains(&request.backend) {
         let err = anyhow!("Unknown backend '{}'", request.backend);
         err!("Unknown backend: {:?}", err; {"rtc_id": request.id});
-        return Err(error(StatusCode::BAD_REQUEST, err));
+        return Err(anyhow!("Unknown backend"));
     }
 
     app.switchboard
@@ -35,7 +44,7 @@ pub async fn stream_upload(Json(request): Json<Request>) -> Result<Response> {
                 if let Some(publisher) = switchboard.publisher_of(request.id) {
                     warn!(
                         "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
-                        {"rtc_id": self.id}
+                        {"rtc_id": request.id}
                     );
 
                     let subscribers = switchboard.subscribers_to(publisher).to_owned();
@@ -57,31 +66,23 @@ pub async fn stream_upload(Json(request): Json<Request>) -> Result<Response> {
                 }
 
                 Ok(())
-            })
-            .map_err(internal_error)?;
-    let recorder = app!()
-        .map_err(internal_error)?
-        .recorders_creator
-        .new_handle(request.id);
-    recorder.wait_stop().await.map_err(internal_error)?;
+            })?;
+    let recorder = app.recorders_creator.new_handle(request.id);
+    recorder.wait_stop().await?;
 
-    recorder
-        .check_existence()
-        .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+    recorder.check_existence()?;
 
-    match upload_record(self).await.map_err(internal_error)? {
-        UploadStatus::AlreadyRunning => {
-            Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
-        }
+    match app.uploader.upload_record(request.clone()).await? {
+        UploadStatus::AlreadyRunning => Ok(Json(
+            serde_json::json!({"id": request.id, "state": "already_running"}),
+        )),
         UploadStatus::Done => {
-            let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
-            recorder.delete_record().map_err(internal_error)?;
+            let dumps = get_dump_uris(&recorder)?;
+            recorder.delete_record()?;
 
-            Ok(Response {
-                id: self.id,
-                mjr_dumps_uris: dumps,
-            }
-            .into())
+            Ok(Json(
+                serde_json::json!({"id": request.id, "mjr_dumps_uris": dumps}),
+            ))
         }
     }
 }
@@ -95,7 +96,25 @@ pub enum UploadStatus {
 
 const LOCKFILE_EARLY_EXIT_STATUS: i32 = 251;
 
-fn uploader(requests: Receiver<(Request, Sender<Result<Response>>)>) {
+pub struct Uploader {
+    requests: Sender<(Request, oneshot::Sender<Result<UploadStatus>>)>,
+}
+
+impl Uploader {
+    pub fn new() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        thread::spawn(|| uploader(rx));
+        Self { requests: tx }
+    }
+
+    async fn upload_record(&self, request: Request) -> Result<UploadStatus> {
+        let (tx, mut rx) = oneshot::channel();
+        self.requests.send((request, tx)).expect("Must be alive");
+        rx.await?
+    }
+}
+
+fn uploader(requests: Receiver<(Request, oneshot::Sender<Result<UploadStatus>>)>) {
     loop {
         let (request, waiter) = requests.recv().expect("Sender must be alive");
         let result = upload_record(&request);
@@ -122,7 +141,6 @@ fn upload_record(request: &Request) -> Result<UploadStatus> {
 
     command
         .status()
-        .await
         .map_err(|err| format_err!("Failed to run upload_record.sh, return code = '{}'", err))
         .and_then(|status| {
             if status.success() {

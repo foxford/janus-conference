@@ -7,16 +7,6 @@ use svc_error::Error as SvcError;
 
 use crate::switchboard::StreamId;
 
-#[async_trait]
-pub trait Operation: fmt::Debug + Send + Sync {
-    /// Operation implementation
-    async fn call(&self, request: &super::Request) -> self::Result;
-    fn method_kind(&self) -> Option<MethodKind>;
-    /// If it returns `Some(stream_id)` then `MessageHandler` would process SDP offer/answer
-    /// using writer config for the stream.
-    fn stream_id(&self) -> Option<StreamId>;
-}
-
 #[derive(Debug)]
 pub enum MethodKind {
     AgentLeave,

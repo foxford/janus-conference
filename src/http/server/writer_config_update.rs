@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::{send_fir, switchboard::WriterConfig};
+use crate::{
+    send_fir,
+    switchboard::{StreamId, WriterConfig},
+};
 
 #[derive(Debug, Deserialize)]
 pub struct Request {
@@ -17,17 +20,17 @@ pub struct ConfigItem {
     pub video_remb: Option<u32>,
 }
 
-async fn writer_config_update(Json(request): Json<Request>) -> Result<()> {
+pub fn writer_config_update(Json(request): Json<Request>) -> Result<()> {
     let app = app!()?;
 
     for config_item in &request.configs {
         if let Some(video_remb) = config_item.video_remb {
             if video_remb > app.config.constraint.writer.max_video_remb {
-                return Err(bad_request_error(anyhow!(
+                return Err(anyhow!(
                     "Invalid video_remb: {} > {}",
                     video_remb,
                     app.config.constraint.writer.max_video_remb,
-                )));
+                ));
             }
         }
     }
@@ -45,7 +48,7 @@ async fn writer_config_update(Json(request): Json<Request>) -> Result<()> {
             if let (Some(prev_config), Some(session_id)) =
                 (prev_config, switchboard.publisher_of(config_item.stream_id))
             {
-                if (config_item.send_video && !prev_config.send_video()) {
+                if config_item.send_video && !prev_config.send_video() {
                     send_fir(session_id, &switchboard);
                 }
             }
