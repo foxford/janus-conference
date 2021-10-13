@@ -33,24 +33,24 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
         .route(
             "/proxy",
             post(
-                |janus_client: Extension<Arc<JanusClient>>, Json(request)| async {
+                |janus_client: Extension<Arc<JanusClient>>, Json(request)| async move {
                     map_result(janus_client.proxy_request(request).await)
                 },
             ),
         )
         .route(
             "/stream-upload",
-            post(|Json(r)| async { map_result(stream_upload(r).await) }),
+            post(|Json(r)| async move { map_result(stream_upload(r).await) }),
         )
         .route(
             "/writer-config-update",
-            post(|Json(request)| async {
+            post(|Json(request)| async move {
                 map_result(writer_config_update::writer_config_update(request))
             }),
         )
         .route(
             "/reader-config-update",
-            post(|Json(request)| async {
+            post(|Json(request)| async move {
                 map_result(reader_config_update::reader_config_update(request))
             }),
         )

@@ -563,6 +563,7 @@ dependencies = [
  "serde 1.0.130",
  "serde_json",
  "svc-error",
+ "svc-utils",
  "tokio",
  "uuid",
 ]
@@ -1370,6 +1371,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "svc-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1487589ee915576f8ee8bceefabcb295d5b3fa00770ae1bfc2c343fddf41f6e0"
+dependencies = [
+ "axum",
+ "hyper",
+ "prometheus",
+ "tokio",
+ "tower-http",
+ "tracing",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1554,6 +1569,7 @@ dependencies = [
  "pin-project",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

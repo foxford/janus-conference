@@ -1,12 +1,20 @@
 use std::{net::SocketAddr, thread};
 
 use anyhow::Result;
+use axum::{handler::get, Router};
+use http::StatusCode;
 use once_cell::sync::OnceCell;
 use prometheus::{Encoder, Registry, TextEncoder};
+use reqwest::Client;
+use svc_utils::metrics::MetricsServer;
+use tokio::runtime::{self, Runtime};
 
 use crate::{
     conf::Config,
-    http::{client::JanusClient, server::stream_upload::Uploader},
+    http::{
+        client::JanusClient,
+        server::{router, stream_upload::Uploader},
+    },
     recorder::recorder,
     register,
 };
@@ -40,49 +48,87 @@ impl App {
             svc_error::extension::sentry::init(sentry_config);
             info!("Sentry initialized");
         }
-        let healh_check = start_health_check(config.general.health_check_addr);
-        if let Some(registry) = config.registry.clone() {
-            thread::spawn(move || {
-                register::register(
-                    &registry.description,
-                    &registry.conference_url,
-                    &registry.token,
-                );
-                async_std::task::spawn(healh_check);
-            });
-        }
-        let (recorder, handles_creator) =
-            recorder(config.recordings.clone(), config.metrics.clone());
         let metrics_registry = Registry::new();
         let metrics = Metrics::new(&metrics_registry)?;
-        async_std::task::spawn(start_metrics_collector(
-            metrics_registry,
-            config.metrics.bind_addr,
-        ));
-
-        let app = App::new(config, handles_creator, metrics)?;
-        APP.set(app).expect("Already initialized");
+        let (recorder, handles_creator) =
+            recorder(config.recordings.clone(), config.metrics.clone());
         thread::spawn(|| recorder.start());
 
-        thread::spawn(|| loop {
-            if let Ok(app) = app!() {
-                let _ = app.switchboard.with_read_lock(|switchboard| {
-                    Metrics::observe_switchboard(&switchboard);
-                    Ok(())
-                });
-                thread::sleep(app.config.metrics.switchboard_metrics_load_interval)
-            }
-        });
+        let uploader = Uploader::new();
 
-        thread::spawn(|| {
-            if let Ok(app) = app!() {
-                if let Err(err) = app.switchboard.vacuum_publishers_loop(
-                    app.config.general.vacuum_interval,
-                    app.config.general.sessions_ttl,
-                ) {
-                    err!("Vacuum publishers loop failed: {}", err);
-                }
-            }
+        let app = App::new(config.clone(), handles_creator, metrics, uploader)?;
+        APP.set(app).expect("Already initialized");
+
+        thread::spawn(move || {
+            runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("Runtime built error")
+                .block_on(async {
+                    let janus_client = JanusClient::new(
+                        config.general.janus_url.parse()?,
+                        config.general.skip_events,
+                    )
+                    .await;
+                    let session = janus_client.session();
+                    let server_router = router(janus_client);
+                    let server_task = tokio::spawn(
+                        axum::Server::bind(&config.general.bind_addr)
+                            .serve(server_router.into_make_service()),
+                    );
+                    register::register(
+                        &Client::new(),
+                        session,
+                        &config.registry.description,
+                        &config.registry.conference_url,
+                        &config.registry.token,
+                    )
+                    .await;
+
+                    let healthcheck_task =
+                        tokio::spawn(start_health_check(config.general.health_check_addr));
+                    let switchboard_observe_task = tokio::spawn(async {
+                        loop {
+                            if let Ok(app) = app!() {
+                                let _ = app.switchboard.with_read_lock(|switchboard| {
+                                    Metrics::observe_switchboard(&switchboard);
+                                    Ok(())
+                                });
+                                tokio::time::sleep(
+                                    app.config.metrics.switchboard_metrics_load_interval,
+                                )
+                                .await
+                            }
+                        }
+                    });
+                    let vacuum_task = tokio::spawn(async {
+                        if let Ok(app) = app!() {
+                            if let Err(err) = app
+                                .switchboard
+                                .vacuum_publishers_loop(
+                                    app.config.general.vacuum_interval,
+                                    app.config.general.sessions_ttl,
+                                )
+                                .await
+                            {
+                                err!("Vacuum publishers loop failed: {}", err);
+                            }
+                        }
+                    });
+                    let _metrics_server = MetricsServer::new_with_registry(
+                        metrics_registry,
+                        config.metrics.bind_addr,
+                    );
+                    if let Err(err) = tokio::try_join!(
+                        server_task,
+                        healthcheck_task,
+                        switchboard_observe_task,
+                        vacuum_task,
+                    ) {
+                        fatal!("Tokio thread exited: {:?}", err);
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })
         });
 
         Ok(())
@@ -92,6 +138,7 @@ impl App {
         config: Config,
         recorders_creator: RecorderHandlesCreator,
         metrics: Metrics,
+        uploader: Uploader,
     ) -> Result<Self> {
         Ok(Self {
             fir_interval: chrono::Duration::from_std(config.general.fir_interval)?,
@@ -100,41 +147,15 @@ impl App {
             recorders_creator,
             janus_sender: JanusSender::new(),
             metrics,
+            uploader,
         })
     }
 }
 
 async fn start_health_check(bind_addr: SocketAddr) {
-    let mut app = tide::new();
-    app.at("/")
-        .get(|_req: tide::Request<()>| async move { Ok(tide::Response::new(200)) });
-    if let Err(err) = app.listen(bind_addr).await {
-        err!("Healthcheck errored: {:?}", err)
-    }
-}
-
-async fn start_metrics_collector(
-    registry: Registry,
-    bind_addr: SocketAddr,
-) -> async_std::io::Result<()> {
-    let mut app = tide::with_state(registry);
-    app.at("/metrics")
-        .get(|req: tide::Request<Registry>| async move {
-            let registry = req.state();
-            let mut buffer = vec![];
-            let encoder = TextEncoder::new();
-            let metric_families = registry.gather();
-            match encoder.encode(&metric_families, &mut buffer) {
-                Ok(_) => {
-                    let mut response = tide::Response::new(200);
-                    response.set_body(buffer);
-                    Ok(response)
-                }
-                Err(err) => {
-                    warn!("Metrics not gathered: {:#}", err);
-                    Ok(tide::Response::new(500))
-                }
-            }
-        });
-    app.listen(bind_addr).await
+    let app = Router::new().route("/", get(|| async { StatusCode::OK }));
+    axum::Server::bind(&bind_addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }

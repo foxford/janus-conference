@@ -30,6 +30,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = [ "json" ] }
 axum = "0.2"
 fure = "0.4"
+svc-utils = "0.1"
 
 [dependencies.sentry]
 version = "0.23"

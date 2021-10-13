@@ -95,7 +95,7 @@ impl Recorder {
         }
     }
 
-    pub fn start(self) {
+    pub fn start(mut self) {
         let mut recorders = FnvHashMap::default();
         let mut now = Instant::now();
         let mut waiters: FnvHashMap<_, Vec<oneshot::Sender<()>>> = FnvHashMap::default();

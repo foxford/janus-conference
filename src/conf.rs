@@ -15,7 +15,7 @@ pub struct Config {
     pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,
     pub metrics: Metrics,
-    pub registry: Option<RegistryConfig>,
+    pub registry: RegistryConfig,
 }
 
 impl Config {
@@ -64,6 +64,9 @@ pub struct General {
     #[serde(with = "humantime_serde")]
     pub sessions_ttl: Duration,
     pub health_check_addr: SocketAddr,
+    pub bind_addr: SocketAddr,
+    pub janus_url: String,
+    pub skip_events: Vec<String>,
 }
 
 #[derive(Clone, Deserialize, Debug)]

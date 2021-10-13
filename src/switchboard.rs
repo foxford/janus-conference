@@ -662,7 +662,11 @@ impl LockedSwitchboard {
         }
     }
 
-    pub fn vacuum_publishers_loop(&self, interval: Duration, sessions_ttl: Duration) -> Result<()> {
+    pub async fn vacuum_publishers_loop(
+        &self,
+        interval: Duration,
+        sessions_ttl: Duration,
+    ) -> Result<()> {
         info!("Vacuum thread spawned");
         loop {
             self.with_read_lock(|switchboard| {
@@ -672,7 +676,7 @@ impl LockedSwitchboard {
             })
             .unwrap_or_else(|err| err!("Vacuum errored: {:?}", err));
 
-            thread::sleep(interval);
+            tokio::time::sleep(interval).await;
         }
     }
 }

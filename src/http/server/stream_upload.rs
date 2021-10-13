@@ -97,6 +97,7 @@ pub enum UploadStatus {
 
 const LOCKFILE_EARLY_EXIT_STATUS: i32 = 251;
 
+#[derive(Debug, Clone)]
 pub struct Uploader {
     requests: UnboundedSender<(Request, oneshot::Sender<Result<UploadStatus>>)>,
 }
@@ -115,7 +116,7 @@ impl Uploader {
     }
 }
 
-fn uploader(requests: UnboundedReceiver<(Request, oneshot::Sender<Result<UploadStatus>>)>) {
+fn uploader(mut requests: UnboundedReceiver<(Request, oneshot::Sender<Result<UploadStatus>>)>) {
     loop {
         let (request, waiter) = requests.blocking_recv().expect("Sender must be alive");
         let result = upload_record(&request);
