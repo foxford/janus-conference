@@ -1,8 +1,15 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use svc_error::extension::sentry;
 
-use axum::{extract::Extension, handler::post, routing::BoxRoute, AddExtensionLayer, Json, Router};
+use axum::{
+    extract::{Extension, Query},
+    handler::{get, post},
+    routing::BoxRoute,
+    AddExtensionLayer, Json, Router,
+};
 use http::StatusCode;
+use serde::Deserialize;
+use tokio::time::timeout;
 
 use crate::metrics::Metrics;
 
@@ -35,6 +42,11 @@ fn map_result<T>(
         })
 }
 
+#[derive(Deserialize)]
+struct MaxEvents {
+    max_events: usize,
+}
+
 pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
     Router::new()
         .route(
@@ -44,6 +56,20 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
                     let _timer = Metrics::start_proxy();
                     map_result(janus_client.proxy_request(request).await)
                 },
+            ),
+        )
+        .route(
+            "/poll",
+            get(
+                |janus_client: Extension<Arc<JanusClient>>,
+                Query(max_events): Query<MaxEvents>,| async move {
+                    map_result(timeout(
+                        Duration::from_secs(30),
+                        janus_client.get_events(max_events.max_events),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Ok(Vec::new())))
+                }
             ),
         )
         .route(
