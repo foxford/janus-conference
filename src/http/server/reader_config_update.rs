@@ -1,6 +1,6 @@
 use crate::switchboard::{AgentId, ReaderConfig, StreamId};
 use anyhow::Result;
-use axum::Json;
+
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

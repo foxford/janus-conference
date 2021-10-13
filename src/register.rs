@@ -1,18 +1,13 @@
 use anyhow::anyhow;
-use fure::{
-    backoff::fixed,
-    policies::{backoff, cond},
-    Policy,
-};
+
 use http::StatusCode;
 use reqwest::Client;
 use serde::Serialize;
-use std::time::Duration;
+
 
 use crate::{
     conf::Description,
-    http::client::{create_handle::CreateHandleRequest, JanusClient, Session},
-    switchboard::SessionId,
+    http::client::{Session},
     utils::infinite_retry,
 };
 

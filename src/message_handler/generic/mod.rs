@@ -4,7 +4,7 @@ mod response;
 
 use std::convert::TryFrom;
 
-use anyhow::{format_err, Context, Error, Result};
+use anyhow::{format_err, Context, Result};
 use http::StatusCode;
 use janus_plugin::JanssonValue;
 use serde_json::Value as JsonValue;

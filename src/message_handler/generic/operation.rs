@@ -1,11 +1,6 @@
-use std::fmt;
-
-use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use svc_error::Error as SvcError;
-
-use crate::switchboard::StreamId;
 
 #[derive(Debug)]
 pub enum MethodKind {
@@ -17,8 +12,6 @@ pub enum MethodKind {
     WriterConfigUpdate,
     ServicePing,
 }
-
-pub type Result = std::result::Result<Success, SvcError>;
 
 pub struct Success {
     payload: JsonValue,

@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
     str::FromStr,
-    sync::Mutex,
 };
 
 use crate::{switchboard::SessionId, utils::infinite_retry};
@@ -10,14 +9,13 @@ use self::{
     create_handle::{CreateHandleRequest, CreateHandleResponse},
     create_session::CreateSessionResponse,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{Client, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
 use tokio::sync::{
-    self,
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot::{self, Sender},
 };
@@ -38,7 +36,7 @@ impl JanusClient {
     pub async fn new(janus_url: Url, skip_events: Vec<String>) -> Self {
         let client = Client::new();
         let session = create_session(&client, &janus_url).await;
-        let (tx, mut rx) = unbounded_channel();
+        let (tx, rx) = unbounded_channel();
         tokio::spawn({
             let client = client.clone();
             let janus_url = janus_url.clone();
@@ -54,21 +52,25 @@ impl JanusClient {
     }
 
     pub async fn get_events(&self, max_events: usize) -> Result<Vec<Value>> {
-        let (tx, mut rx) = oneshot::channel();
-        self.requests.send(Message::GetEvents {
-            max_events,
-            waiter: tx,
-        });
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .send(Message::GetEvents {
+                max_events,
+                waiter: tx,
+            })
+            .expect("Events receiver part must be alive");
         Ok(rx.await?)
     }
 
     pub async fn proxy_request(&self, request: Value) -> Result<Value> {
         let transaction = Uuid::new_v4();
-        let (tx, mut rx) = oneshot::channel();
-        self.requests.send(Message::GetResponse {
-            transaction,
-            waiter: tx,
-        });
+        let (tx, rx) = oneshot::channel();
+        self.requests
+            .send(Message::GetResponse {
+                transaction,
+                waiter: tx,
+            })
+            .expect("Proxy requests receiver part must be alive");
         let _ack: AckResponse = send_post(
             &self.http,
             self.janus_url.clone(),

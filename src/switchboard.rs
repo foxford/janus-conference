@@ -1,5 +1,5 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::thread;
+
 use std::{fmt, usize};
 use std::{
     sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU64, AtomicUsize, Ordering},
@@ -235,10 +235,6 @@ impl WriterConfig {
         self
     }
 
-    pub fn send_audio(&self) -> bool {
-        self.send_audio
-    }
-
     pub fn set_send_audio(&mut self, send_audio: bool) -> &mut Self {
         self.send_audio = send_audio;
         self
@@ -414,11 +410,6 @@ impl Switchboard {
         self.states
             .get_mut(&id)
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
-    }
-
-    #[allow(clippy::ptr_arg)]
-    pub fn agent_sessions(&self, id: &AgentId) -> &[SessionId] {
-        self.agents.get_values(id)
     }
 
     pub fn subscribers_to(&self, publisher: SessionId) -> &[SessionId] {

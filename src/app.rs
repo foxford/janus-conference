@@ -4,10 +4,10 @@ use anyhow::Result;
 use axum::{handler::get, Router};
 use http::StatusCode;
 use once_cell::sync::OnceCell;
-use prometheus::{Encoder, Registry, TextEncoder};
+use prometheus::{Registry};
 use reqwest::Client;
 use svc_utils::metrics::MetricsServer;
-use tokio::runtime::{self, Runtime};
+use tokio::runtime::{self};
 
 use crate::{
     conf::Config,
@@ -54,7 +54,7 @@ impl App {
             recorder(config.recordings.clone(), config.metrics.clone());
         thread::spawn(|| recorder.start());
 
-        let uploader = Uploader::new();
+        let uploader = Uploader::start();
 
         let app = App::new(config.clone(), handles_creator, metrics, uploader)?;
         APP.set(app).expect("Already initialized");

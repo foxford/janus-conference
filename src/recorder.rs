@@ -114,7 +114,7 @@ impl Recorder {
                         info!("Recording stopped"; {"rtc_id": stream_id});
                     }
                     if let Some(waiters) = waiters.remove(&stream_id) {
-                        for mut waiter in waiters {
+                        for waiter in waiters {
                             let _ = waiter.send(());
                         }
                     }
@@ -146,7 +146,7 @@ impl Recorder {
                     }
                 }
                 RecorderMsg::WaitStop {
-                    mut waiter,
+                    waiter,
                     stream_id,
                 } => {
                     if recorders.contains_key(&stream_id) {

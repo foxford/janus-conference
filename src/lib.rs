@@ -131,7 +131,7 @@ fn handle_message_impl(
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
 ) -> Result<()> {
-    let now = Instant::now();
+    let _now = Instant::now();
     let session_id = session_id(handle)?;
     verb!("Incoming message"; {"handle_id": session_id});
 

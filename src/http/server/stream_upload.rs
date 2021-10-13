@@ -7,13 +7,12 @@ use std::{
 
 use crate::recorder::RecorderHandle;
 use crate::switchboard::StreamId;
-use anyhow::{anyhow, format_err, Context, Error, Result};
-use axum::{extract::Extension, Json};
-use http::StatusCode;
+use anyhow::{anyhow, format_err, Context, Result};
+
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use svc_error::Error as SvcError;
+
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -103,14 +102,14 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn new() -> Self {
+    pub fn start() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         thread::spawn(|| uploader(rx));
         Self { requests: tx }
     }
 
     async fn upload_record(&self, request: Request) -> Result<UploadStatus> {
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         self.requests.send((request, tx)).expect("Must be alive");
         rx.await?
     }
