@@ -283,10 +283,10 @@ async fn polling(
                                 .map(Uuid::from_str)
                             {
                                 let _ = responses_sink.send((tran, event));
+                                continue;
                             }
-                        } else {
-                            let _ = events_sink.send(event);
                         }
+                        let _ = events_sink.send(event);
                     }
                 }
             }

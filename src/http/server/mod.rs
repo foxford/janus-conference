@@ -58,21 +58,29 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
                 },
             ),
         )
-        .route("/create-handle", post(|janus_client: Extension<Arc<JanusClient>>, Json(body)| async move {
-            map_result(janus_client.create_handle(body).await)
-        }))
+        .route(
+            "/create-handle",
+            post(
+                |janus_client: Extension<Arc<JanusClient>>, Json(body)| async move {
+                    map_result(janus_client.create_handle(body).await)
+                },
+            ),
+        )
         .route(
             "/poll",
             get(
                 |janus_client: Extension<Arc<JanusClient>>,
-                Query(max_events): Query<MaxEvents>,| async move {
-                    map_result(timeout(
-                        Duration::from_secs(30),
-                        janus_client.get_events(max_events.max_events),
+                 max_events: Query<Option<MaxEvents>>| async move {
+                    map_result(
+                        timeout(
+                            Duration::from_secs(30),
+                            janus_client
+                                .get_events(max_events.0.map(|x| x.max_events).unwrap_or(5)),
+                        )
+                        .await
+                        .unwrap_or_else(|_| Ok(Vec::new())),
                     )
-                    .await
-                    .unwrap_or_else(|_| Ok(Vec::new())))
-                }
+                },
             ),
         )
         .route(
