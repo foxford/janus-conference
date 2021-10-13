@@ -12,7 +12,6 @@ pub struct Config {
     pub recordings: recorder::Config,
     pub speaking_notifications: Option<SpeakingNotifications>,
     pub constraint: Constraint,
-    pub sentry: Option<svc_error::extension::sentry::Config>,
     pub upload: UploadConfig,
     pub metrics: Metrics,
     pub registry: RegistryConfig,

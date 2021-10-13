@@ -5,10 +5,6 @@ use std::{
 
 use crate::{switchboard::SessionId, utils::infinite_retry};
 
-use self::{
-    create_handle::{CreateHandleRequest, CreateHandleResponse},
-    create_session::CreateSessionResponse,
-};
 use anyhow::Result;
 
 use reqwest::{Client, Url};
@@ -20,9 +16,6 @@ use tokio::sync::{
     oneshot::{self, Sender},
 };
 use uuid::Uuid;
-
-pub mod create_handle;
-pub mod create_session;
 
 #[derive(Debug)]
 pub struct JanusClient {
@@ -63,7 +56,12 @@ impl JanusClient {
     }
 
     pub async fn create_handle(&self, request: Value) -> Result<Value> {
-        Ok(send_post(&self.http, self.janus_url.clone(), &request).await?)
+        Ok(send_post(
+            &self.http,
+            format!("{}/{}", self.janus_url, self.session.session_id),
+            &request,
+        )
+        .await?)
     }
 
     pub async fn proxy_request(&self, request: Value) -> Result<Value> {
@@ -77,7 +75,7 @@ impl JanusClient {
             .expect("Proxy requests receiver part must be alive");
         let _ack: AckResponse = send_post(
             &self.http,
-            self.janus_url.clone(),
+            format!("{}/{}", self.janus_url, self.session.session_id).clone(),
             &JanusRequest {
                 transaction,
                 janus: "message",
@@ -88,10 +86,16 @@ impl JanusClient {
         .await?;
         Ok(rx.await?)
     }
+}
 
-    pub fn session(&self) -> Session {
-        self.session
-    }
+#[derive(Deserialize, Debug)]
+pub struct CreateSessionResponse {
+    pub id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateHandleResponse {
+    pub id: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -138,7 +142,7 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         let app = app!()?;
         let session: JanusResponse<CreateSessionResponse> = send_post(
             client,
-            url.clone(),
+            url.to_string(),
             &JanusRequest {
                 transaction: Uuid::new_v4(),
                 plugin: None,
@@ -149,14 +153,12 @@ async fn create_session(client: &Client, url: &Url) -> Session {
         .await?;
         let handle: JanusResponse<CreateHandleResponse> = send_post(
             client,
-            url.clone(),
+            format!("{}/{}", url.to_string(), session.data.id),
             &JanusRequest {
                 transaction: Uuid::new_v4(),
                 janus: "attach",
                 plugin: Some("janus.plugin.conference"),
-                data: CreateHandleRequest {
-                    session_id: session.data.id,
-                },
+                data: (),
             },
         )
         .await?;
@@ -175,7 +177,7 @@ async fn create_session(client: &Client, url: &Url) -> Session {
 
 async fn send_post<R: DeserializeOwned>(
     client: &Client,
-    url: Url,
+    url: String,
     body: &impl Serialize,
 ) -> reqwest::Result<R> {
     Ok(client.post(url).json(body).send().await?.json().await?)
@@ -277,13 +279,15 @@ async fn polling(
                             continue;
                         }
                         if event_kind == "event" {
-                            if let Some(Ok(tran)) = event
-                                .get("transaction")
-                                .and_then(|x| x.as_str())
-                                .map(Uuid::from_str)
-                            {
-                                let _ = responses_sink.send((tran, event));
-                                continue;
+                            match event.get("transaction").and_then(|x| x.as_str()) {
+                                Some("speaking") => {}
+                                Some(x) => {
+                                    if let Ok(t) = Uuid::from_str(x) {
+                                        let _ = responses_sink.send((t, event));
+                                    }
+                                    continue;
+                                }
+                                _ => continue,
                             }
                         }
                         let _ = events_sink.send(event);

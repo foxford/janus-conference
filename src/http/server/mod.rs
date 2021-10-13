@@ -1,5 +1,4 @@
 use std::{sync::Arc, time::Duration};
-use svc_error::extension::sentry;
 
 use axum::{
     extract::{Extension, Query},
@@ -35,9 +34,6 @@ fn map_result<T>(
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .detail(&format!("Error occured: {:?}", err))
                 .build();
-            sentry::send(error.clone()).unwrap_or_else(|err| {
-                warn!("Failed to send error to Sentry: {}", err);
-            });
             (error.status_code(), Json(error))
         })
 }

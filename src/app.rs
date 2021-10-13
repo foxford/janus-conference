@@ -44,10 +44,6 @@ pub struct App {
 
 impl App {
     pub fn init(config: Config) -> Result<()> {
-        if let Some(sentry_config) = config.sentry.as_ref() {
-            svc_error::extension::sentry::init(sentry_config);
-            info!("Sentry initialized");
-        }
         let metrics_registry = Registry::new();
         let metrics = Metrics::new(&metrics_registry)?;
         let (recorder, handles_creator) =
@@ -70,7 +66,6 @@ impl App {
                         config.general.skip_events,
                     )
                     .await;
-                    let session = janus_client.session();
                     let server_router = router(janus_client);
                     let server_task = tokio::spawn(
                         axum::Server::bind(&config.general.bind_addr)
@@ -78,7 +73,6 @@ impl App {
                     );
                     register::register(
                         &Client::new(),
-                        session,
                         &config.registry.description,
                         &config.registry.conference_url,
                         &config.registry.token,

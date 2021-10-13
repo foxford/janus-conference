@@ -2,24 +2,11 @@ use anyhow::anyhow;
 
 use http::StatusCode;
 use reqwest::Client;
-use serde::Serialize;
 
-
-use crate::{
-    conf::Description,
-    http::client::{Session},
-    utils::infinite_retry,
-};
-
-#[derive(Serialize)]
-struct InitRequest {
-    session: Session,
-    description: Description,
-}
+use crate::{conf::Description, utils::infinite_retry};
 
 pub async fn register(
     http_client: &Client,
-    session: Session,
     description: &Description,
     conference_url: &str,
     token: &str,
@@ -28,10 +15,7 @@ pub async fn register(
         let response = http_client
             .post(conference_url)
             .header("Authorization", token)
-            .json(&InitRequest {
-                session,
-                description: description.clone(),
-            })
+            .json(description)
             .send()
             .await?;
         match response.status() {

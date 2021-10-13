@@ -19,7 +19,7 @@ config = "0.11"
 libc = "0.2"
 multimap = "0.8"
 http = "0.2"
-svc-error = { version="0.2", features=["sentry-extension"] }
+svc-error = { version="0.2" }
 uuid = { version="0.8", features=["serde", "v4"] }
 fnv = "1"
 once_cell = "1"
@@ -31,8 +31,3 @@ reqwest = { version = "0.11", features = [ "json" ] }
 axum = "0.2"
 fure = "0.4"
 svc-utils = "0.1"
-
-[dependencies.sentry]
-version = "0.23"
-default-features = false
-features = ["anyhow", "backtrace", "contexts", "panic"]

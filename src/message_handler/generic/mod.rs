@@ -128,9 +128,7 @@ pub fn send_speaking_notification(
     let response = Some(JanssonValue::try_from(
         &Payload::new(StatusCode::OK).set_response(notification),
     )?);
-
-    let agent_speaking_b64enc = "{\"kind\":\"IkFnZW50U3BlYWtpbmci\"}";
-    sender.send(session_id, agent_speaking_b64enc, response, None)?;
+    sender.send(session_id, "speaking", response, None)?;
     Ok(())
 }
 
