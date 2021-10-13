@@ -4,7 +4,7 @@ use anyhow::Result;
 use axum::{handler::get, Router};
 use http::StatusCode;
 use once_cell::sync::OnceCell;
-use prometheus::{Registry};
+use prometheus::Registry;
 use reqwest::Client;
 use svc_utils::metrics::MetricsServer;
 use tokio::runtime::{self};
@@ -63,7 +63,7 @@ impl App {
             runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
-                .expect("Runtime built error")
+                .expect("Runtime building error")
                 .block_on(async {
                     let janus_client = JanusClient::new(
                         config.general.janus_url.parse()?,
