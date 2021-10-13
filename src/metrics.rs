@@ -1,22 +1,13 @@
-use std::time::{Duration, Instant};
-
-use crate::{message_handler::MethodKind, switchboard::Switchboard};
-use http::StatusCode;
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry};
+use crate::switchboard::Switchboard;
+use prometheus::{
+    HistogramOpts, HistogramTimer, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry,
+};
 use prometheus_static_metric::make_static_metric;
 
 make_static_metric! {
-    pub struct RequestStats: IntCounter {
-        "status" => {
-            success,
-            failure,
-        },
-    }
-
     pub struct ResponseStats: IntCounter {
         "status" => {
             success,
-            client_error,
             server_error,
         },
     }
@@ -25,13 +16,10 @@ make_static_metric! {
 make_static_metric! {
     pub struct RequestDuration: Histogram {
         "method" => {
-            agent_leave,
             reader_config_update,
-            stream_create,
-            stream_read,
+            proxy,
             stream_upload,
             writer_config_update,
-            service_ping,
         },
     }
 }
@@ -61,7 +49,6 @@ make_static_metric! {
 
 pub struct Metrics {
     request_duration: RequestDuration,
-    request_stats: RequestStats,
     response_stats: ResponseStats,
     switchboard_stats: SwitchboardStats,
     recorder_stats: RecorderStats,
@@ -79,9 +66,6 @@ impl Metrics {
             HistogramOpts::new("request_duration", "Request duration"),
             &["method"],
         )?;
-        let request_stats =
-            IntCounterVec::new(Opts::new("request_stats", "Request stats"), &["status"])?;
-
         let response_stats =
             IntCounterVec::new(Opts::new("response_stats", "Response stats"), &["status"])?;
 
@@ -93,28 +77,26 @@ impl Metrics {
             IntGaugeVec::new(Opts::new("recorder_stats", "Recorder stats"), &["field"])?;
 
         registry.register(Box::new(request_duration.clone()))?;
-        registry.register(Box::new(request_stats.clone()))?;
         registry.register(Box::new(switchboard_stats.clone()))?;
         registry.register(Box::new(recorder_stats.clone()))?;
         registry.register(Box::new(response_stats.clone()))?;
         Ok(Self {
             request_duration: RequestDuration::from(&request_duration),
-            request_stats: RequestStats::from(&request_stats),
             switchboard_stats: SwitchboardStats::from(&switchboard_stats),
             recorder_stats: RecorderStats::from(&recorder_stats),
             response_stats: ResponseStats::from(&response_stats),
         })
     }
 
-    pub fn observe_success_request() {
+    pub fn observe_success_response() {
         if let Ok(app) = app!() {
-            app.metrics.request_stats.success.inc()
+            app.metrics.response_stats.success.inc()
         }
     }
 
-    pub fn observe_failed_request() {
+    pub fn observe_failed_response() {
         if let Ok(app) = app!() {
-            app.metrics.request_stats.failure.inc()
+            app.metrics.response_stats.server_error.inc()
         }
     }
 
@@ -145,34 +127,6 @@ impl Metrics {
         }
     }
 
-    pub fn observe_request(start_time: Instant, method: MethodKind, status: StatusCode) {
-        let elapsed = Self::duration_to_seconds(start_time.elapsed());
-        if let Ok(app) = app!() {
-            if status.is_client_error() {
-                app.metrics.response_stats.client_error.inc()
-            } else if status.is_server_error() {
-                app.metrics.response_stats.server_error.inc()
-            } else {
-                app.metrics.response_stats.success.inc()
-            }
-            let request_duration = &app.metrics.request_duration;
-            match method {
-                MethodKind::AgentLeave => request_duration.agent_leave.observe(elapsed),
-                MethodKind::ReaderConfigUpdate => {
-                    request_duration.reader_config_update.observe(elapsed)
-                }
-
-                MethodKind::StreamCreate => request_duration.stream_create.observe(elapsed),
-                MethodKind::StreamRead => request_duration.stream_read.observe(elapsed),
-                MethodKind::StreamUpload => request_duration.stream_upload.observe(elapsed),
-                MethodKind::WriterConfigUpdate => {
-                    request_duration.writer_config_update.observe(elapsed)
-                }
-                MethodKind::ServicePing => request_duration.service_ping.observe(elapsed),
-            }
-        }
-    }
-
     pub fn observe_recorder(recorders_count: usize, waiters_size: usize) {
         if let Ok(app) = app!() {
             app.metrics
@@ -183,9 +137,40 @@ impl Metrics {
         }
     }
 
-    #[inline]
-    pub fn duration_to_seconds(d: Duration) -> f64 {
-        let nanos = f64::from(d.subsec_nanos()) / 1e9;
-        d.as_secs() as f64 + nanos
+    pub fn start_proxy() -> Option<HistogramTimer> {
+        Some(app!().ok()?.metrics.request_duration.proxy.start_timer())
+    }
+
+    pub fn start_reader_config() -> Option<HistogramTimer> {
+        Some(
+            app!()
+                .ok()?
+                .metrics
+                .request_duration
+                .reader_config_update
+                .start_timer(),
+        )
+    }
+
+    pub fn start_writer_config() -> Option<HistogramTimer> {
+        Some(
+            app!()
+                .ok()?
+                .metrics
+                .request_duration
+                .writer_config_update
+                .start_timer(),
+        )
+    }
+
+    pub fn start_upload() -> Option<HistogramTimer> {
+        Some(
+            app!()
+                .ok()?
+                .metrics
+                .request_duration
+                .stream_upload
+                .start_timer(),
+        )
     }
 }

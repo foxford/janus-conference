@@ -1,17 +1,5 @@
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use svc_error::Error as SvcError;
-
-#[derive(Debug)]
-pub enum MethodKind {
-    AgentLeave,
-    ReaderConfigUpdate,
-    StreamCreate,
-    StreamRead,
-    StreamUpload,
-    WriterConfigUpdate,
-    ServicePing,
-}
 
 pub struct Success {
     payload: JsonValue,

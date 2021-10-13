@@ -11,8 +11,8 @@ use janus_plugin::JanssonValue;
 use serde::Deserialize;
 
 pub use self::generic::{
-    handle_request, prepare_request, send_response, send_speaking_notification, MethodKind,
-    OperationResult, PreparedRequest, Request,
+    handle_request, prepare_request, send_response, send_speaking_notification, PreparedRequest,
+    Request,
 };
 
 #[derive(Debug, Clone, Deserialize)]

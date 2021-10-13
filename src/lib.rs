@@ -114,11 +114,11 @@ extern "C" fn handle_message(
 ) -> *mut RawPluginResult {
     match handle_message_impl(handle, transaction, message, jsep) {
         Ok(()) => {
-            Metrics::observe_success_request();
+            Metrics::observe_success_response();
             PluginResult::ok_wait(None).into_raw()
         }
         Err(err) => {
-            Metrics::observe_failed_request();
+            Metrics::observe_failed_response();
             err!("Message handling error: {}", err);
             PluginResult::error(c_str!("Failed to handle message")).into_raw()
         }

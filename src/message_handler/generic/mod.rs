@@ -8,7 +8,6 @@ use anyhow::{format_err, Context, Result};
 use http::StatusCode;
 use janus_plugin::JanssonValue;
 use serde_json::Value as JsonValue;
-use svc_error::{extension::sentry, Error as SvcError};
 
 use self::response::Response;
 use crate::utils;
@@ -18,7 +17,6 @@ use crate::{
     switchboard::{AgentId, SessionId, StreamId},
 };
 
-pub use self::operation::{MethodKind, Result as OperationResult};
 pub use self::request::Request;
 
 use super::JanusSender;
@@ -65,7 +63,7 @@ pub fn handle_request(PreparedRequest { request, operation }: PreparedRequest) -
     match handle_request() {
         Ok(jsep) => Response::new(request, Payload::new(StatusCode::OK)).set_jsep_answer(jsep),
         Err(err) => {
-            let error = SvcError::builder()
+            let error = svc_error::Error::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .detail(&format!("Error occured: {:?}", err))
                 .build();
@@ -134,16 +132,6 @@ pub fn send_speaking_notification(
     let agent_speaking_b64enc = "{\"kind\":\"IkFnZW50U3BlYWtpbmci\"}";
     sender.send(session_id, agent_speaking_b64enc, response, None)?;
     Ok(())
-}
-
-fn notify_error(err: &SvcError) {
-    if err.status_code() == StatusCode::INTERNAL_SERVER_ERROR {
-        huge!("Sending error to Sentry");
-
-        sentry::send(err.to_owned()).unwrap_or_else(|err| {
-            warn!("Failed to send error to Sentry: {}", err);
-        });
-    }
 }
 
 fn handle_jsep(request: &Request, stream_id: StreamId) -> Result<JsonValue> {

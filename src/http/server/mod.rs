@@ -1,16 +1,14 @@
 use std::sync::Arc;
-
+use svc_error::extension::sentry;
 
 use axum::{extract::Extension, handler::post, routing::BoxRoute, AddExtensionLayer, Json, Router};
 use http::StatusCode;
 
-
-
-
+use crate::metrics::Metrics;
 
 use self::stream_upload::stream_upload;
 
-use super::client::{JanusClient};
+use super::client::JanusClient;
 
 pub mod reader_config_update;
 pub mod stream_upload;
@@ -19,13 +17,22 @@ pub mod writer_config_update;
 fn map_result<T>(
     result: anyhow::Result<T>,
 ) -> Result<Json<T>, (StatusCode, Json<svc_error::Error>)> {
-    result.map(Json).map_err(|err| {
-        let error = svc_error::Error::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .detail(&format!("Error occured: {:?}", err))
-            .build();
-        (error.status_code(), Json(error))
-    })
+    result
+        .map(|x| {
+            Metrics::observe_success_response();
+            Json(x)
+        })
+        .map_err(|err| {
+            Metrics::observe_failed_response();
+            let error = svc_error::Error::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .detail(&format!("Error occured: {:?}", err))
+                .build();
+            sentry::send(error.clone()).unwrap_or_else(|err| {
+                warn!("Failed to send error to Sentry: {}", err);
+            });
+            (error.status_code(), Json(error))
+        })
 }
 
 pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
@@ -34,23 +41,29 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
             "/proxy",
             post(
                 |janus_client: Extension<Arc<JanusClient>>, Json(request)| async move {
+                    let _timer = Metrics::start_proxy();
                     map_result(janus_client.proxy_request(request).await)
                 },
             ),
         )
         .route(
             "/stream-upload",
-            post(|Json(r)| async move { map_result(stream_upload(r).await) }),
+            post(|Json(r)| async move {
+                let _timer = Metrics::start_upload();
+                map_result(stream_upload(r).await)
+            }),
         )
         .route(
             "/writer-config-update",
             post(|Json(request)| async move {
+                let _timer = Metrics::start_writer_config();
                 map_result(writer_config_update::writer_config_update(request))
             }),
         )
         .route(
             "/reader-config-update",
             post(|Json(request)| async move {
+                let _timer = Metrics::start_reader_config();
                 map_result(reader_config_update::reader_config_update(request))
             }),
         )
