@@ -70,12 +70,11 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
             "/poll",
             get(
                 |janus_client: Extension<Arc<JanusClient>>,
-                 max_events: Query<Option<MaxEvents>>| async move {
+                 max_events: Option<Query<MaxEvents>>| async move {
                     map_result(
                         timeout(
                             Duration::from_secs(30),
-                            janus_client
-                                .get_events(max_events.0.map(|x| x.max_events).unwrap_or(5)),
+                            janus_client.get_events(max_events.map(|x| x.max_events).unwrap_or(5)),
                         )
                         .await
                         .unwrap_or_else(|_| Ok(Vec::new())),
