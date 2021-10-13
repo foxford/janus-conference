@@ -62,20 +62,8 @@ impl JanusClient {
         Ok(rx.await?)
     }
 
-    pub async fn create_handle(&self) -> Result<Value> {
-        Ok(send_post(
-            &self.http,
-            self.janus_url.clone(),
-            &JanusRequest {
-                transaction: Uuid::new_v4(),
-                janus: "attach",
-                plugin: Some("janus.plugin.conference"),
-                data: CreateHandleRequest {
-                    session_id: self.session.session_id,
-                },
-            },
-        )
-        .await?)
+    pub async fn create_handle(&self, request: Value) -> Result<Value> {
+        Ok(send_post(&self.http, self.janus_url.clone(), request).await?)
     }
 
     pub async fn proxy_request(&self, request: Value) -> Result<Value> {

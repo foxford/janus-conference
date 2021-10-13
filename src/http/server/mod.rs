@@ -58,8 +58,8 @@ pub fn router(janus_client: JanusClient) -> Router<BoxRoute> {
                 },
             ),
         )
-        .route("/create-handle", post(|janus_client: Extension<Arc<JanusClient>>| async move {
-            map_result(janus_client.create_handle().await)
+        .route("/create-handle", post(|janus_client: Extension<Arc<JanusClient>>, Json(body)| async move {
+            map_result(janus_client.create_handle(body).await)
         }))
         .route(
             "/poll",
