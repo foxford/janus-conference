@@ -5,7 +5,7 @@ use std::{
 
 use crate::{switchboard::SessionId, utils::infinite_retry};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use reqwest::{Client, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -178,8 +178,9 @@ async fn send_post<R: DeserializeOwned>(
     client: &Client,
     url: String,
     body: &impl Serialize,
-) -> reqwest::Result<R> {
-    Ok(client.post(url).json(body).send().await?.json().await?)
+) -> Result<R> {
+    let response = client.post(url).json(body).send().await?.text().await?;
+    serde_json::from_str(&response).context(response)
 }
 
 #[derive(Debug)]
