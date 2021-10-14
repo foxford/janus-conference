@@ -205,7 +205,7 @@ async fn start_polling(
     let (events_tx, mut events_rx) = unbounded_channel();
     let (responses_tx, mut responses_rx) = unbounded_channel();
     let mut waiting_requests = HashMap::new();
-    let mut events_requests = VecDeque::new();
+    let mut events_requests: VecDeque<(usize, Sender<Vec<Value>>)> = VecDeque::new();
     tokio::task::spawn({
         let client = client.clone();
         let url = janus_url.clone();
@@ -225,8 +225,21 @@ async fn start_polling(
         tokio::select! {
             Some(message) = requests.recv() => {
                 match message {
-                    Message::GetResponse { transaction, waiter } => { waiting_requests.insert(transaction, waiter); },
-                    Message::GetEvents { max_events, waiter } => { events_requests.push_back((max_events, waiter)); },
+                    Message::GetResponse { transaction, waiter } => {
+                        waiting_requests.insert(transaction, waiter);
+                    },
+                    Message::GetEvents { max_events, waiter } => {
+                        loop {
+                            if let Some((_, waiter)) = events_requests.front() {
+                                if waiter.is_closed() {
+                                    events_requests.pop_front();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        events_requests.push_back((max_events, waiter));
+                    },
                 }
             }
             Some(event) = events_rx.recv(), if !events_requests.is_empty() => {
