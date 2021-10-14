@@ -56,12 +56,7 @@ impl JanusClient {
     }
 
     pub async fn create_handle(&self, request: Value) -> Result<Value> {
-        Ok(send_post(
-            &self.http,
-            format!("{}/{}", self.janus_url, self.session.session_id),
-            &request,
-        )
-        .await?)
+        Ok(send_post(&self.http, self.get_url(), &request).await?)
     }
 
     pub async fn proxy_request(&self, request: Value) -> Result<Value> {
@@ -75,7 +70,7 @@ impl JanusClient {
             .expect("Proxy requests receiver part must be alive");
         let _ack: AckResponse = send_post(
             &self.http,
-            format!("{}/{}", self.janus_url, self.session.session_id),
+            self.get_url(),
             &JanusRequest {
                 transaction,
                 janus: "message",
@@ -85,6 +80,10 @@ impl JanusClient {
         )
         .await?;
         Ok(rx.await?)
+    }
+
+    fn get_url(&self) -> String {
+        format!("{}/{}", self.janus_url, self.session.session_id)
     }
 }
 

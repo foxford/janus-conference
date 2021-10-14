@@ -145,10 +145,7 @@ impl Recorder {
                         info!("Recording to {}", dir; {"rtc_id": stream_id});
                     }
                 }
-                RecorderMsg::WaitStop {
-                    waiter,
-                    stream_id,
-                } => {
+                RecorderMsg::WaitStop { waiter, stream_id } => {
                     if recorders.contains_key(&stream_id) {
                         waiters
                             .entry(stream_id)
