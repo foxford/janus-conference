@@ -30,6 +30,7 @@ fn map_result<T>(
         })
         .map_err(|err| {
             Metrics::observe_failed_response();
+            err!("Http handler error occured: {:?}", err);
             let error = svc_error::Error::builder()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .detail(&format!("Error occured: {:?}", err))

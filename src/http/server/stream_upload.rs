@@ -11,7 +11,6 @@ use anyhow::{anyhow, format_err, Context, Result};
 
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -31,7 +30,7 @@ struct Response {
     mjr_dumps_uris: Vec<String>,
 }
 
-pub async fn stream_upload(request: Request) -> Result<Value> {
+pub async fn stream_upload(request: Request) -> Result<UploadResult> {
     let app = app!()?;
     if !app.config.upload.backends.contains(&request.backend) {
         let err = anyhow!("Unknown backend '{}'", request.backend);
@@ -71,19 +70,35 @@ pub async fn stream_upload(request: Request) -> Result<Value> {
     let recorder = app.recorders_creator.new_handle(request.id);
     recorder.wait_stop().await?;
 
-    recorder.check_existence()?;
+    if recorder.check_existence().is_err() {
+        return Ok(UploadResult::Missing { id: request.id });
+    }
 
     match app.uploader.upload_record(request.clone()).await? {
-        UploadStatus::AlreadyRunning => {
-            Ok(serde_json::json!({"id": request.id, "state": "already_running"}))
-        }
+        UploadStatus::AlreadyRunning => Ok(UploadResult::AlreadyRunning { id: request.id }),
         UploadStatus::Done => {
             let dumps = get_dump_uris(&recorder)?;
             recorder.delete_record()?;
-
-            Ok(serde_json::json!({"id": request.id, "mjr_dumps_uris": dumps}))
+            Ok(UploadResult::Done {
+                id: request.id,
+                mjr_dumps_uris: dumps,
+            })
         }
     }
+}
+
+#[derive(Serialize)]
+pub enum UploadResult {
+    AlreadyRunning {
+        id: StreamId,
+    },
+    Missing {
+        id: StreamId,
+    },
+    Done {
+        id: StreamId,
+        mjr_dumps_uris: Vec<String>,
+    },
 }
 
 ///////////////////////////////////////////////////////////////////////////////
