@@ -180,7 +180,7 @@ async fn send_post<R: DeserializeOwned>(
     body: &impl Serialize,
 ) -> Result<R> {
     let response = client.post(url).json(body).send().await?.text().await?;
-    serde_json::from_str(&response).context(response)
+    Ok(serde_json::from_str(&response).context(response)?)
 }
 
 #[derive(Debug)]
@@ -236,6 +236,8 @@ async fn start_polling(
                                 } else {
                                     break;
                                 }
+                            } else {
+                                break;
                             }
                         }
                         events_requests.push_back((max_events, waiter));
