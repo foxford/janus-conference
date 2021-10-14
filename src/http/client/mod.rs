@@ -275,7 +275,7 @@ async fn polling(
             Ok(events) => {
                 for event in events {
                     if let Some(event_kind) = event.get("janus").and_then(|x| x.as_str()) {
-                        info!("Got event: {}", event_kind)?;
+                        info!("Got event: {}", event_kind);
                         if skip_events.iter().any(|e| e.as_str() == event_kind) {
                             continue;
                         }
