@@ -75,7 +75,7 @@ impl JanusClient {
             .expect("Proxy requests receiver part must be alive");
         let _ack: AckResponse = send_post(
             &self.http,
-            format!("{}/{}", self.janus_url, self.session.session_id).clone(),
+            format!("{}/{}", self.janus_url, self.session.session_id),
             &JanusRequest {
                 transaction,
                 janus: "message",
