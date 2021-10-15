@@ -229,13 +229,9 @@ async fn start_polling(
                         waiting_requests.insert(transaction, waiter);
                     },
                     Message::GetEvents { max_events, waiter } => {
-                        loop {
-                            if let Some((_, waiter)) = events_requests.front() {
-                                if waiter.is_closed() {
-                                    events_requests.pop_front();
-                                } else {
-                                    break;
-                                }
+                        while let Some((_, waiter)) = events_requests.front() {
+                            if waiter.is_closed() {
+                                events_requests.pop_front();
                             } else {
                                 break;
                             }
