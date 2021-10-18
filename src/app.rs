@@ -71,16 +71,19 @@ impl App {
                         axum::Server::bind(&config.general.bind_addr)
                             .serve(server_router.into_make_service()),
                     );
-                    register::register(
-                        &Client::new(),
-                        &config.registry.description,
-                        &config.registry.conference_url,
-                        &config.registry.token,
-                    )
-                    .await;
+                    let registry = config.registry;
+                    let health_check_addr = config.general.health_check_addr;
+                    let healthcheck_task = tokio::spawn(async move {
+                        register::register(
+                            &Client::new(),
+                            &registry.description,
+                            &registry.conference_url,
+                            &registry.token,
+                        )
+                        .await;
+                        start_health_check(health_check_addr).await;
+                    });
 
-                    let healthcheck_task =
-                        tokio::spawn(start_health_check(config.general.health_check_addr));
                     let switchboard_observe_task = tokio::spawn(async {
                         loop {
                             if let Ok(app) = app!() {

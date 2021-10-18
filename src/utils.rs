@@ -1,16 +1,8 @@
 #![allow(unused_macros)]
 
-use std::{
-    os::raw::{c_ulong, c_void},
-    time::Duration,
-};
+use std::os::raw::{c_ulong, c_void};
 
 use anyhow::{format_err, Context, Result};
-use fure::{
-    backoff::fixed,
-    policies::{backoff, cond},
-    Policy,
-};
 use janus_plugin::{JanssonDecodingFlags, JanssonEncodingFlags, JanssonValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -92,16 +84,13 @@ pub fn jansson_to_serde<T: DeserializeOwned>(json: &JanssonValue) -> Result<T> {
     serde_json::from_str(&json).context("Failed to parse JSON")
 }
 
-pub fn infinite_retry<T, E: std::fmt::Debug>() -> impl Policy<T, E> {
-    let retry_failed = |r: Option<Result<&T, &E>>| {
-        if let Some(Err(e)) = r {
-            err!("Request failed: {:?}", e);
-            true
-        } else {
-            false
-        }
-    };
-    cond(backoff(fixed(Duration::from_secs(1))), retry_failed)
+pub fn retry_failed<T, E: std::fmt::Debug>(r: Option<Result<&T, &E>>) -> bool {
+    if let Some(Err(e)) = r {
+        err!("Request failed: {:?}", e);
+        true
+    } else {
+        false
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -1,12 +1,17 @@
 use std::{
     collections::{HashMap, VecDeque},
     str::FromStr,
+    time::Duration,
 };
 
-use crate::{switchboard::SessionId, utils::infinite_retry};
+use crate::{switchboard::SessionId, utils::retry_failed};
 
 use anyhow::{Context, Result};
 
+use fure::{
+    backoff::fixed,
+    policies::{backoff, cond},
+};
 use reqwest::{Client, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -169,9 +174,12 @@ async fn create_session(client: &Client, url: &Url) -> Session {
             })
         })
     };
-    fure::retry(create_session, infinite_retry())
-        .await
-        .expect("Must be success")
+    fure::retry(
+        create_session,
+        cond(backoff(fixed(Duration::from_secs(1))), retry_failed),
+    )
+    .await
+    .expect("Must be success")
 }
 
 async fn send_post<R: DeserializeOwned>(
