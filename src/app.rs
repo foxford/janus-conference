@@ -116,6 +116,7 @@ impl App {
                         metrics_registry,
                         config.metrics.bind_addr,
                     );
+                    info!("Plugin runtime started");
                     if let Err(err) = tokio::try_join!(
                         server_task,
                         healthcheck_task,
