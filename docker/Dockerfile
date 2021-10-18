@@ -137,4 +137,4 @@ COPY --from=netologygroup/janus-conference-logger:v0.1.1 \
     /build/target/release/libjanus_conference_logger.so \
     /opt/janus/lib/janus/loggers/libjanus_conference_logger.so
 
-EXPOSE 8088
+EXPOSE 8083
