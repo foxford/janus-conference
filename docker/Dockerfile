@@ -133,7 +133,7 @@ WORKDIR /opt/janus
 COPY --from=build-plugin-deploy /build/target/release/${PLUGIN} ./lib/janus/plugins/${PLUGIN}
 COPY ./scripts/upload_record.sh /opt/janus/bin/upload_record.sh
 
-COPY --from=netologygroup/janus-conference-logger:v0.1.1 \
+COPY --from=foxford/janus-conference-logger:v0.1.1 \
     /build/target/release/libjanus_conference_logger.so \
     /opt/janus/lib/janus/loggers/libjanus_conference_logger.so
 

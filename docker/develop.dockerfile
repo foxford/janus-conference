@@ -115,6 +115,6 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Install janus-conference-logger
 ## -----------------------------------------------------------------------------
-COPY --from=netologygroup/janus-conference-logger:v0.1.1 \
+COPY --from=foxford/janus-conference-logger:v0.1.1 \
     /build/target/release/libjanus_conference_logger.so \
     /opt/janus/lib/janus/loggers/libjanus_conference_logger.so
