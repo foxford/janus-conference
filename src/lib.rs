@@ -193,7 +193,7 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     let app = app!()?;
-    let mut packet = unsafe { &mut *packet };
+    let packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
     let session_id = session_id(handle)?;
@@ -261,7 +261,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                 .unwrap_or(true);
 
             if is_relay_packet {
-                match relay_rtp_packet(&switchboard, *subscriber_id, &mut packet, &header) {
+                match relay_rtp_packet(&switchboard, *subscriber_id, packet, &header) {
                     Ok(()) => (),
                     Err(err) => huge!(
                         "Failed to relay an RTP packet: {}", err;
@@ -290,7 +290,7 @@ extern "C" fn incoming_rtcp(handle: *mut PluginSession, packet: *mut PluginRtcpP
 
 fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket) -> Result<()> {
     let session_id = session_id(handle)?;
-    let mut packet = unsafe { &mut *packet };
+    let packet = unsafe { &mut *packet };
     let data = unsafe { slice::from_raw_parts_mut(packet.buffer, packet.length as usize) };
 
     app!()?.switchboard.with_read_lock(|switchboard| {
@@ -309,7 +309,7 @@ fn incoming_rtcp_impl(handle: *mut PluginSession, packet: *mut PluginRtcpPacket)
                 for subscriber in switchboard.subscribers_to(session_id) {
                     let subscriber_session = switchboard.session(*subscriber)?;
 
-                    janus_callbacks::relay_rtcp(subscriber_session, &mut packet);
+                    janus_callbacks::relay_rtcp(subscriber_session, packet);
                 }
             }
         }

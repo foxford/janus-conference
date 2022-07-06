@@ -372,7 +372,7 @@ impl Switchboard {
             {"handle_id": id}
         );
 
-        for subscriber in self.subscribers_to(id).to_owned() {
+        for subscriber in self.subscribers_to(id).iter().copied() {
             self.disconnect(subscriber)?;
         }
 
