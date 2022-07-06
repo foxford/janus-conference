@@ -87,7 +87,8 @@ pub struct WriterConstraint {
     pub audio_bitrate: u32,
 }
 
-#[derive(Clone, Deserialize, Debug)]
+#[derive(Deserialize)]
+#[allow(dead_code)]
 struct UploadBackendConfig {
     access_key_id: String,
     secret_access_key: String,
