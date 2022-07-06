@@ -1,0 +1,13 @@
+apiVersion: skaffold/v2beta11
+kind: Config
+build:
+  artifacts:
+  - image: foxford/janus-gateway
+    docker:
+      dockerfile: docker/Dockerfile
+  tagPolicy:
+    gitCommit: {}
+  local:
+    push: true
+    useDockerCLI: true
+    tryImportMissing: true
