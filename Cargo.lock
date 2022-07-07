@@ -85,6 +85,9 @@ name = "anyhow"
 version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "595d3cfa7a60d4555cb5067b99f07142a08ea778de5cf993f7b75c7d8fabc486"
+dependencies = [
+ "backtrace",
+]
 
 [[package]]
 name = "arrayref"
@@ -2216,14 +2219,16 @@ checksum = "45f6ee7c7b87caf59549e9fe45d6a69c75c8019e79e212a835c5da0e92f0ba08"
 
 [[package]]
 name = "svc-error"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45ba124380cab5b1acf1bb40fdb6159ee5be24f6c45b9f6f7b939c90a3f63bca"
+checksum = "746114b66fe115121d146776dd3808f4c60c762d72921fa5a0f0817798e26538"
 dependencies = [
+ "anyhow",
  "crossbeam-channel",
  "http",
  "once_cell",
  "sentry",
+ "sentry-anyhow",
  "serde 1.0.127",
  "serde_derive",
 ]
