@@ -17,6 +17,32 @@ pub trait Operation: fmt::Debug + Send + Sync {
     fn stream_id(&self) -> Option<StreamId>;
 }
 
+pub trait SyncOperation {
+    fn sync_call(&self, request: &super::Request) -> self::Result;
+    fn method_kind(&self) -> Option<MethodKind>;
+    /// If it returns `Some(stream_id)` then `MessageHandler` would process SDP offer/answer
+    /// using writer config for the stream.
+    fn stream_id(&self) -> Option<StreamId>;
+}
+
+#[async_trait]
+impl<O> Operation for O
+where
+    O: SyncOperation + std::marker::Sync + std::marker::Send + std::fmt::Debug,
+{
+    async fn call(&self, request: &super::Request) -> super::OperationResult {
+        <Self as SyncOperation>::sync_call(self, request)
+    }
+
+    fn stream_id(&self) -> Option<StreamId> {
+        <Self as SyncOperation>::stream_id(self)
+    }
+
+    fn method_kind(&self) -> Option<MethodKind> {
+        <Self as SyncOperation>::method_kind(self)
+    }
+}
+
 #[derive(Debug)]
 pub enum MethodKind {
     AgentLeave,

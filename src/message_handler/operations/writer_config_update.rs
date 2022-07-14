@@ -1,5 +1,4 @@
 use anyhow::Error;
-use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
@@ -8,6 +7,8 @@ use crate::{
     send_fir,
     switchboard::{StreamId, WriterConfig},
 };
+
+use super::SyncOperation;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -25,9 +26,24 @@ pub struct ConfigItem {
 #[derive(Serialize)]
 struct Response {}
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, _request: &super::Request) -> super::OperationResult {
+fn error(status: StatusCode, err: Error) -> SvcError {
+    SvcError::builder()
+        .kind("writer_config_update_error", "Error updating writer config")
+        .status(status)
+        .detail(&err.to_string())
+        .build()
+}
+
+fn bad_request_error(err: Error) -> SvcError {
+    error(StatusCode::BAD_REQUEST, err)
+}
+
+fn internal_error(err: Error) -> SvcError {
+    error(StatusCode::INTERNAL_SERVER_ERROR, err)
+}
+
+impl SyncOperation for Request {
+    fn sync_call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling writer_config.update operation");
         let app = app!().map_err(internal_error)?;
 
@@ -75,27 +91,11 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn stream_id(&self) -> Option<StreamId> {
-        None
-    }
-
     fn method_kind(&self) -> Option<MethodKind> {
         Some(MethodKind::WriterConfigUpdate)
     }
-}
 
-fn error(status: StatusCode, err: Error) -> SvcError {
-    SvcError::builder()
-        .kind("writer_config_update_error", "Error updating writer config")
-        .status(status)
-        .detail(&err.to_string())
-        .build()
-}
-
-fn bad_request_error(err: Error) -> SvcError {
-    error(StatusCode::BAD_REQUEST, err)
-}
-
-fn internal_error(err: Error) -> SvcError {
-    error(StatusCode::INTERNAL_SERVER_ERROR, err)
+    fn stream_id(&self) -> Option<StreamId> {
+        None
+    }
 }

@@ -1,5 +1,4 @@
 use anyhow::Error;
-use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
@@ -7,6 +6,8 @@ use crate::{
     message_handler::generic::MethodKind,
     switchboard::{AgentId, ReaderConfig, StreamId},
 };
+
+use super::SyncOperation;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -24,9 +25,16 @@ pub struct ConfigItem {
 #[derive(Serialize)]
 struct Response {}
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, _request: &super::Request) -> super::OperationResult {
+fn internal_error(err: Error) -> SvcError {
+    SvcError::builder()
+        .kind("reader_config_update_error", "Error updating reader config")
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .detail(&err.to_string())
+        .build()
+}
+
+impl SyncOperation for Request {
+    fn sync_call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling reader_config.update operation");
 
         let app = app!().map_err(internal_error)?;
@@ -48,19 +56,11 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn stream_id(&self) -> Option<StreamId> {
-        None
-    }
-
     fn method_kind(&self) -> Option<MethodKind> {
         Some(MethodKind::ReaderConfigUpdate)
     }
-}
 
-fn internal_error(err: Error) -> SvcError {
-    SvcError::builder()
-        .kind("reader_config_update_error", "Error updating reader config")
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .detail(&err.to_string())
-        .build()
+    fn stream_id(&self) -> Option<StreamId> {
+        None
+    }
 }

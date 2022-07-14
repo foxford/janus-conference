@@ -5,6 +5,7 @@ extern crate janus_plugin as janus;
 #[macro_use]
 extern crate serde_derive;
 
+use std::convert::TryInto;
 use std::os::raw::{c_char, c_int};
 use std::path::Path;
 use std::slice;
@@ -47,7 +48,10 @@ use switchboard::{SessionId, Switchboard};
 
 use crate::{
     janus_rtp::AudioLevel,
-    message_handler::{handle_request, prepare_request, send_response, send_speaking_notification},
+    message_handler::{
+        handle_request, handle_request_sync, prepare_request, send_response,
+        send_speaking_notification,
+    },
     metrics::Metrics,
 };
 
@@ -112,6 +116,11 @@ extern "C" fn query_session(_handle: *mut PluginSession) -> *mut RawJanssonValue
     std::ptr::null_mut()
 }
 
+enum HandleMessageResponse {
+    Ack,
+    Success(JanssonValue),
+}
+
 extern "C" fn handle_message(
     handle: *mut PluginSession,
     transaction: *mut c_char,
@@ -119,9 +128,13 @@ extern "C" fn handle_message(
     jsep: *mut RawJanssonValue,
 ) -> *mut RawPluginResult {
     match handle_message_impl(handle, transaction, message, jsep) {
-        Ok(()) => {
+        Ok(HandleMessageResponse::Ack) => {
             Metrics::observe_success_request();
             PluginResult::ok_wait(None).into_raw()
+        }
+        Ok(HandleMessageResponse::Success(payload)) => {
+            Metrics::observe_success_request();
+            PluginResult::ok(payload).into_raw()
         }
         Err(err) => {
             Metrics::observe_failed_request();
@@ -136,32 +149,52 @@ fn handle_message_impl(
     transaction: *mut c_char,
     message: *mut RawJanssonValue,
     jsep: *mut RawJanssonValue,
-) -> Result<()> {
+) -> Result<HandleMessageResponse> {
     let now = Instant::now();
     let session_id = session_id(handle)?;
     verb!("Incoming message"; {"handle_id": session_id});
 
     let transaction = match unsafe { CString::from_raw(transaction) }.to_str() {
         Ok(transaction) => String::from(transaction),
-        Err(err) => bail!("Failed to serialize transaction: {}", err),
+        Err(err) => bail!("Transaction is not valid UTF-8: {}", err),
     };
 
-    if let Some(json) = unsafe { JanssonValue::from_raw(message) } {
-        let janus_sender = app!()?.janus_sender.clone();
-        let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
-        let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
-        async_std::task::spawn(async move {
-            let method_kind = request.method_kind();
-            let response = handle_request(request).await;
-            let status = response.payload().status();
-            send_response(janus_sender, response);
-            if let Some(method) = method_kind {
-                Metrics::observe_request(now, method, status)
-            }
-        });
-    }
+    let value = unsafe { JanssonValue::from_raw(message) };
 
-    Ok(())
+    match value {
+        Some(json) => {
+            let jsep_offer = unsafe { JanssonValue::from_raw(jsep) };
+            let request = prepare_request(session_id, &transaction, &json, jsep_offer)?;
+            let method_kind = request.method_kind();
+
+            match request.try_as_sync() {
+                Ok(sync_req) => {
+                    let response = handle_request_sync(sync_req);
+                    let status = response.payload().status();
+                    if let Some(method) = method_kind {
+                        Metrics::observe_request(now, method, status)
+                    }
+
+                    Ok(HandleMessageResponse::Success(response.try_into()?))
+                }
+                Err(async_req) => {
+                    let janus_sender = app!()?.janus_sender.clone();
+
+                    async_std::task::spawn(async move {
+                        let response = handle_request(async_req).await;
+                        let status = response.payload().status();
+                        send_response(janus_sender, response);
+                        if let Some(method) = method_kind {
+                            Metrics::observe_request(now, method, status)
+                        }
+                    });
+
+                    Ok(HandleMessageResponse::Ack)
+                }
+            }
+        }
+        None => Ok(HandleMessageResponse::Ack),
+    }
 }
 
 extern "C" fn handle_admin_message(_message: *mut RawJanssonValue) -> *mut RawJanssonValue {

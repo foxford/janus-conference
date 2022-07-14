@@ -1,4 +1,4 @@
-pub use super::{Operation, OperationResult, Request};
+pub use super::{Operation, OperationResult, Request, SyncOperation};
 
 pub mod agent_leave;
 pub mod reader_config_update;

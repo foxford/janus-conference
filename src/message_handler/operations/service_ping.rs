@@ -1,9 +1,10 @@
 use anyhow::Error;
-use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::{message_handler::generic::MethodKind, switchboard::StreamId};
+
+use super::SyncOperation;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {}
@@ -11,9 +12,16 @@ pub struct Request {}
 #[derive(Serialize)]
 struct Response {}
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, request: &super::Request) -> super::OperationResult {
+fn internal_error(err: Error) -> SvcError {
+    SvcError::builder()
+        .kind("touch_session_error", "Error touching session")
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .detail(&err.to_string())
+        .build()
+}
+
+impl SyncOperation for Request {
+    fn sync_call(&self, request: &super::Request) -> super::OperationResult {
         let app = app!().map_err(internal_error)?;
 
         app.switchboard
@@ -26,19 +34,11 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn stream_id(&self) -> Option<StreamId> {
-        None
-    }
-
     fn method_kind(&self) -> Option<MethodKind> {
         Some(MethodKind::ServicePing)
     }
-}
 
-fn internal_error(err: Error) -> SvcError {
-    SvcError::builder()
-        .kind("touch_session_error", "Error touching session")
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .detail(&err.to_string())
-        .build()
+    fn stream_id(&self) -> Option<StreamId> {
+        None
+    }
 }

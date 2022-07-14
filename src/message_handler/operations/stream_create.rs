@@ -1,5 +1,4 @@
 use anyhow::{format_err, Error};
-use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
@@ -7,6 +6,8 @@ use crate::{
     message_handler::generic::MethodKind,
     switchboard::{AgentId, StreamId},
 };
+
+use super::SyncOperation;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -34,9 +35,8 @@ pub struct WriterConfig {
 #[derive(Serialize)]
 struct Response {}
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, request: &super::Request) -> super::OperationResult {
+impl SyncOperation for Request {
+    fn sync_call(&self, request: &super::Request) -> super::OperationResult {
         verb!("Calling stream.create operation"; {"rtc_id": self.id});
 
         let internal_error = |err: Error| {
@@ -88,8 +88,7 @@ impl super::Operation for Request {
             super::writer_config_update::Request {
                 configs: vec![config_item],
             }
-            .call(request)
-            .await?;
+            .sync_call(request)?;
         }
 
         if let Some(configs) = &self.reader_configs {
@@ -102,19 +101,17 @@ impl super::Operation for Request {
                     reader_id: c.reader_id.clone(),
                 })
                 .collect();
-            super::reader_config_update::Request { configs }
-                .call(request)
-                .await?;
+            super::reader_config_update::Request { configs }.sync_call(request)?;
         }
 
         Ok(Response {}.into())
     }
 
-    fn stream_id(&self) -> Option<StreamId> {
-        Some(self.id)
-    }
-
     fn method_kind(&self) -> Option<MethodKind> {
         Some(MethodKind::StreamCreate)
+    }
+
+    fn stream_id(&self) -> Option<StreamId> {
+        Some(self.id)
     }
 }

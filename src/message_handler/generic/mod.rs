@@ -10,7 +10,6 @@ use janus::JanssonValue;
 use serde_json::Value as JsonValue;
 use svc_error::{extension::sentry, Error as SvcError};
 
-use self::response::Response;
 use crate::utils;
 use crate::{jsep::Jsep, message_handler::Method};
 use crate::{
@@ -18,10 +17,11 @@ use crate::{
     switchboard::{AgentId, SessionId, StreamId},
 };
 
-pub use self::operation::{MethodKind, Operation, Result as OperationResult};
+pub use self::operation::{MethodKind, Operation, Result as OperationResult, SyncOperation};
 pub use self::request::Request;
+use self::response::{Response, SyncResponse};
 
-use super::JanusSender;
+use super::{JanusSender, SyncMethod};
 
 pub struct PreparedRequest<O> {
     request: Request,
@@ -30,6 +30,21 @@ pub struct PreparedRequest<O> {
 impl<O: Operation> PreparedRequest<O> {
     pub fn method_kind(&self) -> Option<MethodKind> {
         self.operation.method_kind()
+    }
+}
+
+impl PreparedRequest<Method> {
+    pub fn try_as_sync(self) -> Result<PreparedRequest<SyncMethod>, PreparedRequest<Method>> {
+        match self.operation.try_as_sync() {
+            Ok(operation) => Ok(PreparedRequest {
+                operation,
+                request: self.request,
+            }),
+            Err(operation) => Err(PreparedRequest {
+                operation,
+                request: self.request,
+            }),
+        }
     }
 }
 
@@ -57,6 +72,35 @@ pub fn prepare_request(
         request,
         operation: method,
     })
+}
+
+pub fn handle_request_sync<O: SyncOperation>(request: PreparedRequest<O>) -> SyncResponse {
+    let handle = || {
+        let jsep_answer = request
+            .operation
+            .stream_id()
+            .and_then(|stream_id| handle_jsep(&request.request, stream_id).transpose())
+            .transpose()?;
+
+        let payload = request
+            .operation
+            .sync_call(&request.request)
+            .map_err(|err| {
+                err!(
+                    "Operation {:?} errored: {:?}",
+                    request.operation.method_kind(),
+                    err
+                );
+                notify_error(&err);
+                err
+            })
+            .map(JsonValue::from)?;
+        Ok::<_, SvcError>((jsep_answer, payload.into()))
+    };
+    match handle() {
+        Ok((jsep_answer, payload)) => SyncResponse::new(payload, jsep_answer),
+        Err(err) => SyncResponse::new(err.into(), None),
+    }
 }
 
 pub async fn handle_request<O: Operation>(request: PreparedRequest<O>) -> Response {

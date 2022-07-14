@@ -50,6 +50,36 @@ impl Response {
     }
 }
 
+#[derive(Serialize)]
+pub struct SyncResponse {
+    payload: Payload,
+    jsep_answer: Option<JsonValue>,
+}
+
+impl SyncResponse {
+    pub fn new(payload: Payload, jsep_answer: Option<JsonValue>) -> Self {
+        Self {
+            payload,
+            jsep_answer,
+        }
+    }
+
+    pub fn payload(&self) -> &Payload {
+        &self.payload
+    }
+}
+
+impl TryFrom<SyncResponse> for JanssonValue {
+    type Error = Error;
+
+    fn try_from(response: SyncResponse) -> Result<Self, Self::Error> {
+        serde_json::to_value(response)
+            .map_err(Error::from)
+            .and_then(|ref json_value| utils::serde_to_jansson(json_value))
+            .context("Failed to serialize response")
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Payload {
     #[serde(with = "crate::serde::HttpStatusCodeRef")]

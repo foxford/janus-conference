@@ -1,10 +1,11 @@
 use anyhow::Error;
-use async_trait::async_trait;
 use http::StatusCode;
 use svc_error::Error as SvcError;
 
 use crate::switchboard::{AgentId, StreamId};
 use crate::{janus_callbacks, message_handler::generic::MethodKind};
+
+use super::SyncOperation;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Request {
@@ -14,9 +15,8 @@ pub struct Request {
 #[derive(Serialize)]
 struct Response {}
 
-#[async_trait]
-impl super::Operation for Request {
-    async fn call(&self, _request: &super::Request) -> super::OperationResult {
+impl SyncOperation for Request {
+    fn sync_call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling agent.leave operation"; {"agent_id": self.agent_id});
 
         let error = |status: StatusCode, err: Error| {
@@ -49,11 +49,11 @@ impl super::Operation for Request {
         Ok(Response {}.into())
     }
 
-    fn stream_id(&self) -> Option<StreamId> {
-        None
-    }
-
     fn method_kind(&self) -> Option<MethodKind> {
         Some(MethodKind::AgentLeave)
+    }
+
+    fn stream_id(&self) -> Option<StreamId> {
+        None
     }
 }
