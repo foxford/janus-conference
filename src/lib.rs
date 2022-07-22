@@ -198,6 +198,22 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let header = JanusRtpHeader::extract(packet);
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
+        let stream_id = switchboard
+            .published_by(session_id)
+            .ok_or_else(|| anyhow!("Failed to identify the stream id {} of the packet", session_id))?;
+
+        let writer_config = switchboard.writer_config(stream_id);
+
+        let should_relay = if is_video {
+            writer_config.send_video()
+        } else {
+            writer_config.send_audio()
+        };
+
+        if !should_relay {
+            return Ok(());
+        }
+
         let state = switchboard.state(session_id)?;
         let is_speaking =
         app.config.speaking_notifications
@@ -217,12 +233,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         }
         // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
-
-        let stream_id = switchboard
-            .published_by(session_id)
-            .ok_or_else(|| anyhow!("Failed to identify the stream id {} of the packet", session_id))?;
-
-        let writer_config = switchboard.writer_config(stream_id);
 
         // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
         // Do it only for video because Windows and Linux don't make a difference for media types
