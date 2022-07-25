@@ -199,6 +199,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
+
         // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
@@ -207,6 +208,40 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             .ok_or_else(|| anyhow!("Failed to identify the stream id {} of the packet", session_id))?;
 
         let writer_config = switchboard.writer_config(stream_id);
+
+        // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
+        // Do it only for video because Windows and Linux don't make a difference for media types
+        // and apply audio limitation to video while only MacOS does.
+        let remb_interval = chrono::Duration::seconds(5);
+        if is_video {
+            let now = Utc::now();
+            if now - state.last_fir_timestamp() >= app.fir_interval {
+                send_fir(session_id, &switchboard);
+            }
+            let target_bitrate = writer_config.video_remb();
+            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
+
+            if initial_rembs_left > 0 {
+                let bitrate = target_bitrate / initial_rembs_left as u32;
+                send_remb(session_id, bitrate);
+                state.touch_last_remb_timestamp();
+                state.increment_initial_rembs_counter();
+            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
+                if now - last_remb_timestamp >= remb_interval {
+                    send_remb(session_id, target_bitrate);
+                    state.touch_last_remb_timestamp();
+                }
+            }
+        }
+
+        // Push packet to the recorder.
+        if let Some(recorder) = state.recorder() {
+            let buf = unsafe {
+                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+            };
+
+            recorder.record_packet(buf, is_video)?;
+        }
 
         let should_relay = if is_video {
             writer_config.send_video()
@@ -235,31 +270,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
-        // Send incremental initial or regular REMB to the publisher if needed to control bitrate.
-        // Do it only for video because Windows and Linux don't make a difference for media types
-        // and apply audio limitation to video while only MacOS does.
-        let remb_interval = chrono::Duration::seconds(5);
-        if is_video {
-            let now = Utc::now();
-            if now - state.last_fir_timestamp() >= app.fir_interval {
-                send_fir(session_id, &switchboard);
-            }
-            let target_bitrate = writer_config.video_remb();
-            let initial_rembs_left = INITIAL_REMBS - state.initial_rembs_counter();
-
-            if initial_rembs_left > 0 {
-                let bitrate = target_bitrate / initial_rembs_left as u32;
-                send_remb(session_id, bitrate);
-                state.touch_last_remb_timestamp();
-                state.increment_initial_rembs_counter();
-            } else if let Some(last_remb_timestamp) = state.last_remb_timestamp() {
-                if now - last_remb_timestamp >= remb_interval {
-                    send_remb(session_id, target_bitrate);
-                    state.touch_last_remb_timestamp();
-                }
-            }
-        }
-
         // Retransmit packet to publishers as is.
         for subscriber_id in switchboard.subscribers_to(session_id) {
             // Check whether media is muted by the agent.
@@ -280,15 +290,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                     ),
                 }
             }
-        }
-
-        // Push packet to the recorder.
-        if let Some(recorder) = state.recorder() {
-            let buf = unsafe {
-                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
-            };
-
-            recorder.record_packet(buf, is_video)?;
         }
 
         Ok(())
