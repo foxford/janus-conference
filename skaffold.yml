@@ -2,7 +2,7 @@ apiVersion: skaffold/v2beta11
 kind: Config
 build:
   artifacts:
-  - image: foxford/janus-gateway
+  - image: cr.yandex/crp1of6bddata8ain3q5/janus-gateway
     docker:
       dockerfile: docker/Dockerfile
   tagPolicy:

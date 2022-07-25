@@ -23,7 +23,7 @@ services:
     stdin_open: true
     tty: true
   vernemq:
-    image: foxford/mqtt-gateway:v0.13.7
+    image: cr.yandex/crp1of6bddata8ain3q5/mqtt-gateway:v0.13.7
     ports:
       - "1883:1883"
       - "8080:8080"
