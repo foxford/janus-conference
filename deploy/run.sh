@@ -37,7 +37,7 @@ else
     curl -fsSLo skaffold "https://storage.googleapis.com/skaffold/releases/v0.18.0/skaffold-linux-amd64" \
         && chmod +x skaffold \
         && mv skaffold "${HOME}/.local/bin"
-    echo ${DOCKER_PASSWORD} \
+    printf "%s" "${DOCKER_PASSWORD}" \
         | docker login -u ${DOCKER_USERNAME} --password-stdin
 
     kubectl config set-cluster media --embed-certs --server ${KUBE_SERVER} --certificate-authority deploy/ca.crt
