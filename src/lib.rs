@@ -241,7 +241,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
         };
 
         if !should_relay {
-            replace_payload_with_zeros(&mut packet);
+            return Ok(());
         }
 
         // Push packet to the recorder.
@@ -251,10 +251,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             };
 
             recorder.record_packet(buf, is_video)?;
-        }
-
-        if !should_relay {
-            return Ok(());
         }
 
         let is_speaking =
