@@ -117,6 +117,16 @@ type uint32_t = c_uint;
 const RTP_HEADER_SIZE: usize = 12;
 type janus_rtp_header = [i8; RTP_HEADER_SIZE];
 
+pub fn replace_payload_with_zeros(packet: &mut PluginRtpPacket) {
+    unsafe {
+        std::ptr::write_bytes(
+            &mut packet.buffer.add(RTP_HEADER_SIZE),
+            0,
+            packet.length as usize - RTP_HEADER_SIZE,
+        )
+    }
+}
+
 #[derive(Debug)]
 #[repr(C)]
 struct janus_rtp_switching_context {

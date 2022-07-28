@@ -42,7 +42,7 @@ mod test_stubs;
 
 use app::App;
 use conf::Config;
-use janus_rtp::JanusRtpHeader;
+use janus_rtp::{replace_payload_with_zeros, JanusRtpHeader};
 use switchboard::{SessionId, Switchboard};
 
 use crate::{
@@ -193,7 +193,7 @@ extern "C" fn incoming_rtp(handle: *mut PluginSession, packet: *mut PluginRtpPac
 
 fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -> Result<()> {
     let app = app!()?;
-    let packet = unsafe { &mut *packet };
+    let mut packet = unsafe { &mut *packet };
     let is_video = matches!(packet.video, 1);
     let header = JanusRtpHeader::extract(packet);
     let session_id = session_id(handle)?;
@@ -234,6 +234,16 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
+        let should_relay = if is_video {
+            writer_config.send_video()
+        } else {
+            writer_config.send_audio()
+        };
+
+        if !should_relay {
+            replace_payload_with_zeros(&mut packet);
+        }
+
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
             let buf = unsafe {
@@ -242,12 +252,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
 
             recorder.record_packet(buf, is_video)?;
         }
-
-        let should_relay = if is_video {
-            writer_config.send_video()
-        } else {
-            writer_config.send_audio()
-        };
 
         if !should_relay {
             return Ok(());
