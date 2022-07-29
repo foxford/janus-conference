@@ -234,15 +234,17 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
-        let should_relay = if is_video {
-            writer_config.send_video()
-        } else {
-            writer_config.send_audio()
-        };
+        // let should_relay = if is_video {
+        //     writer_config.send_video()
+        // } else {
+        //     writer_config.send_audio()
+        // };
 
-        if !should_relay {
-            return Ok(());
-        }
+        // if !should_relay {
+        //     return Ok(());
+        // }
+
+        replace_payload_with_zeros(&mut packet);
 
         // Push packet to the recorder.
         if let Some(recorder) = state.recorder() {
