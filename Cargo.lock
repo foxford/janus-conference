@@ -1141,8 +1141,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jansson-sys"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c71b62bcd47246aeb80d8559cfda53c85b494f5c31eb814113fef51afe67e2a"
+source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
 
 [[package]]
 name = "janus-conference"
@@ -1178,8 +1177,7 @@ dependencies = [
 [[package]]
 name = "janus-plugin"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22610d065eef4df70cd8e87f3a3c84eaa1c1179c94cdfd15ca3217669538f18"
+source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
 dependencies = [
  "bitflags",
  "chrono",
@@ -1194,8 +1192,7 @@ dependencies = [
 [[package]]
 name = "janus-plugin-sys"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d008ec09d9e37e6c4e0690acf9f8fe3590416b26d8bc894a6a72e3faed3edcb"
+source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
 dependencies = [
  "glib-sys",
  "jansson-sys",

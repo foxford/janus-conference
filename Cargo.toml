@@ -37,3 +37,8 @@ ureq = "2"
 version = "0.23"
 default-features = false
 features = ["anyhow", "backtrace", "contexts", "panic", "surf"]
+
+
+[patch.crates-io]
+janus-plugin-sys = {git = "https://github.com/0nkery/janus-plugin-rs"}
+janus-plugin = {git = "https://github.com/0nkery/janus-plugin-rs"}
