@@ -1141,7 +1141,7 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 [[package]]
 name = "jansson-sys"
 version = "0.1.0"
-source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
+source = "git+https://github.com/0nkery/janus-plugin-rs#d22e3fbd5c0ff46b5942b6e50e6c5fe012917126"
 
 [[package]]
 name = "janus-conference"
@@ -1177,7 +1177,7 @@ dependencies = [
 [[package]]
 name = "janus-plugin"
 version = "0.13.0"
-source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
+source = "git+https://github.com/0nkery/janus-plugin-rs#d22e3fbd5c0ff46b5942b6e50e6c5fe012917126"
 dependencies = [
  "bitflags",
  "chrono",
@@ -1192,7 +1192,7 @@ dependencies = [
 [[package]]
 name = "janus-plugin-sys"
 version = "0.8.0"
-source = "git+https://github.com/0nkery/janus-plugin-rs#39389b7f7f90fbf8cd0623cfde294c7643581b70"
+source = "git+https://github.com/0nkery/janus-plugin-rs#d22e3fbd5c0ff46b5942b6e50e6c5fe012917126"
 dependencies = [
  "glib-sys",
  "jansson-sys",
