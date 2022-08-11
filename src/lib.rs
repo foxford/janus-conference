@@ -411,7 +411,7 @@ fn send_pli_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
     let mut pli = janus::rtcp::gen_pli();
 
     let mut packet = PluginRtcpPacket {
-        mindex: 0,
+        mindex: -1,
         video: 1,
         buffer: pli.as_mut_ptr(),
         length: pli.len() as i16,
@@ -434,7 +434,7 @@ fn send_fir_impl(publisher: SessionId, switchboard: &Switchboard) -> Result<()> 
     let mut fir = janus::rtcp::gen_fir(&mut seq);
 
     let mut packet = PluginRtcpPacket {
-        mindex: 0,
+        mindex: -1,
         video: 1,
         buffer: fir.as_mut_ptr(),
         length: fir.len() as i16,
@@ -456,7 +456,7 @@ fn send_remb_impl(publisher: SessionId, bitrate: u32) -> Result<()> {
         let mut remb = janus::rtcp::gen_remb(bitrate);
 
         let mut packet = PluginRtcpPacket {
-            mindex: 0,
+            mindex: -1,
             video: 1,
             buffer: remb.as_mut_ptr(),
             length: remb.len() as i16,
