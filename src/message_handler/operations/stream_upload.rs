@@ -31,75 +31,77 @@ impl super::Operation for Request {
     async fn call(&self, _request: &super::Request) -> super::OperationResult {
         verb!("Calling stream.upload operation"; {"rtc_id": self.id});
 
-        {
-            let app = app!().map_err(internal_error)?;
+        Err(error(StatusCode::BAD_REQUEST, anyhow!("test")))
 
-            if !app.config.upload.backends.contains(&self.backend) {
-                let err = anyhow!("Unknown backend '{}'", self.backend);
-                err!("Unknown backend: {:?}", err; {"rtc_id": self.id});
-                return Err(error(StatusCode::BAD_REQUEST, err));
-            }
-        }
+        // {
+        //     let app = app!().map_err(internal_error)?;
 
-        app!()
-            .map_err(internal_error)?
-            .switchboard
-            .with_write_lock(|mut switchboard| {
-                // The stream still may be ongoing and we must stop it gracefully.
-                if let Some(publisher) = switchboard.publisher_of(self.id) {
-                    warn!(
-                        "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
-                        {"rtc_id": self.id}
-                    );
+        //     if !app.config.upload.backends.contains(&self.backend) {
+        //         let err = anyhow!("Unknown backend '{}'", self.backend);
+        //         err!("Unknown backend: {:?}", err; {"rtc_id": self.id});
+        //         return Err(error(StatusCode::BAD_REQUEST, err));
+        //     }
+        // }
 
-                    let subscribers = switchboard.subscribers_to(publisher).to_owned();
+        // app!()
+        //     .map_err(internal_error)?
+        //     .switchboard
+        //     .with_write_lock(|mut switchboard| {
+        //         // The stream still may be ongoing and we must stop it gracefully.
+        //         if let Some(publisher) = switchboard.publisher_of(self.id) {
+        //             warn!(
+        //                 "Stream upload has been called while still ongoing; stopping it and disconnecting everyone";
+        //                 {"rtc_id": self.id}
+        //             );
 
-                    // At first we synchronously stop the stream and hence the recording
-                    // ensuring that it finishes correctly.
-                    switchboard.remove_stream(self.id)?;
+        //             let subscribers = switchboard.subscribers_to(publisher).to_owned();
 
-                    // Then we disconnect the publisher to close its PeerConnection and notify
-                    // the frontend. Disconnection also implies stream removal but it's being
-                    // performed asynchronously through a janus callback and to avoid race condition
-                    // we have preliminary removed the stream in a synchronous way.
-                    switchboard.disconnect(publisher)?;
+        //             // At first we synchronously stop the stream and hence the recording
+        //             // ensuring that it finishes correctly.
+        //             switchboard.remove_stream(self.id)?;
 
-                    // Disconnect subscribers also to avoid memory leak.
-                    for subscriber in subscribers {
-                        switchboard.disconnect(subscriber)?;
-                    }
-                }
+        //             // Then we disconnect the publisher to close its PeerConnection and notify
+        //             // the frontend. Disconnection also implies stream removal but it's being
+        //             // performed asynchronously through a janus callback and to avoid race condition
+        //             // we have preliminary removed the stream in a synchronous way.
+        //             switchboard.disconnect(publisher)?;
 
-                Ok(())
-            })
-            .map_err(internal_error)?;
-        let recorder = app!()
-            .map_err(internal_error)?
-            .recorders_creator
-            .new_handle(self.id);
-        recorder.wait_stop().await.map_err(internal_error)?;
+        //             // Disconnect subscribers also to avoid memory leak.
+        //             for subscriber in subscribers {
+        //                 switchboard.disconnect(subscriber)?;
+        //             }
+        //         }
 
-        recorder
-            .check_existence()
-            .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+        //         Ok(())
+        //     })
+        //     .map_err(internal_error)?;
+        // let recorder = app!()
+        //     .map_err(internal_error)?
+        //     .recorders_creator
+        //     .new_handle(self.id);
+        // recorder.wait_stop().await.map_err(internal_error)?;
 
-        let _guard = MUTEX.lock().await;
+        // recorder
+        //     .check_existence()
+        //     .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
 
-        match upload_record(self).await.map_err(internal_error)? {
-            UploadStatus::AlreadyRunning => {
-                Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
-            }
-            UploadStatus::Done => {
-                let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
-                recorder.delete_record().map_err(internal_error)?;
+        // let _guard = MUTEX.lock().await;
 
-                Ok(Response {
-                    id: self.id,
-                    mjr_dumps_uris: dumps,
-                }
-                .into())
-            }
-        }
+        // match upload_record(self).await.map_err(internal_error)? {
+        //     UploadStatus::AlreadyRunning => {
+        //         Ok(serde_json::json!({"id": self.id, "state": "already_running"}).into())
+        //     }
+        //     UploadStatus::Done => {
+        //         let dumps = get_dump_uris(&recorder).map_err(internal_error)?;
+        //         recorder.delete_record().map_err(internal_error)?;
+
+        //         Ok(Response {
+        //             id: self.id,
+        //             mjr_dumps_uris: dumps,
+        //         }
+        //         .into())
+        //     }
+        // }
     }
 
     fn stream_id(&self) -> Option<StreamId> {
