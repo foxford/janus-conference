@@ -468,9 +468,9 @@ impl Switchboard {
         reader_id: &AgentId,
         config: ReaderConfig,
     ) -> Result<()> {
-        if !self.agents.contains_key(reader_id) {
-            return Err(anyhow!("Agent {} not registered", reader_id));
-        }
+        // if !self.agents.contains_key(reader_id) {
+        //     return Err(anyhow!("Agent {} not registered", reader_id));
+        // }
 
         self.reader_configs
             .entry(reader_id.to_owned())
