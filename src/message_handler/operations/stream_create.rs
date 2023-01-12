@@ -18,9 +18,9 @@ pub struct Request {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReaderConfig {
-    reader_id: AgentId,
-    receive_video: bool,
-    receive_audio: bool,
+    pub reader_id: AgentId,
+    pub receive_video: bool,
+    pub receive_audio: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
