@@ -38,7 +38,7 @@ impl super::Operation for Request {
                         config_item.stream_id,
                         &config_item.reader_id,
                         ReaderConfig::new(config_item.receive_video, config_item.receive_audio),
-                    )?;
+                    );
                 }
 
                 Ok(())
