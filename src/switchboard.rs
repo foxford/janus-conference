@@ -389,10 +389,10 @@ impl Switchboard {
         self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
-        let agent = self.agents.remove_value(&id);
-        if let Some(agent) = agent {
-            self.reader_configs.remove(&agent);
-        }
+        // let agent = self.agents.remove_value(&id);
+        // if let Some(agent) = agent {
+        //     self.reader_configs.remove(&agent);
+        // }
         self.publishers_subscribers.remove_value(&id);
         Ok(())
     }
