@@ -383,17 +383,34 @@ impl Switchboard {
             .map(|(stream_id, _)| stream_id.to_owned())
             .collect();
 
+        if let Some(agent) = self.agents.remove_value(&id) {
+            if !stream_ids.is_empty() {
+                // We're publisher so remove everything.
+                self.reader_configs.remove(&agent);
+            } else {
+                // We're subscriber so need to check if we have
+                // multiple reader configs (case with subgroups in minigroup).
+                // If we do have multiple configs so we don't remove anything now,
+                // will remove later on publisher's disconnect.
+                let should_remove = match self.reader_configs.get(&agent) {
+                    Some(cfg_by_stream) => cfg_by_stream.len() <= 1,
+                    None => false,
+                };
+
+                if should_remove {
+                    self.reader_configs.remove(&agent);
+                }
+            }
+        }
+
         for stream_id in stream_ids {
             self.remove_stream(stream_id)?;
         }
         self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
-        let agent = self.agents.remove_value(&id);
-        if let Some(agent) = agent {
-            self.reader_configs.remove(&agent);
-        }
         self.publishers_subscribers.remove_value(&id);
+
         Ok(())
     }
 
