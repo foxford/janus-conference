@@ -97,7 +97,7 @@ impl Sender for JanusSender {
             let txn = CString::new(transaction.to_owned())
                 .context("Failed to cast transaction to CString")?;
 
-            janus_callbacks::push_event(session, txn.into_raw(), payload, jsep_answer)
+            janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
                 .context("Failed to push event")
         })
     }

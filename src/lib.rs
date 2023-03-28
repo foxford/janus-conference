@@ -471,7 +471,7 @@ fn report_error(res: Result<()>) {
 
 static PLUGIN: Plugin = build_plugin!(
     LibraryMetadata {
-        api_version: 17,
+        api_version: 15,
         version: 1,
         name: c_str!("Janus Conference plugin"),
         package: c_str!("janus.plugin.conference"),
