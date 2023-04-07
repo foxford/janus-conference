@@ -148,7 +148,7 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
 
-    command.args(&[&stream_id, &request.backend, &request.bucket]);
+    command.args([&stream_id, &request.backend, &request.bucket]);
 
     huge!("Running stream upload shell command: {:?}", command);
 
