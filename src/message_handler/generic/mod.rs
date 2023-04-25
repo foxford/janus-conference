@@ -200,7 +200,8 @@ pub trait Sender {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{mpsc, Arc, Mutex};
+    use parking_lot::Mutex;
+    use std::sync::{mpsc, Arc};
     use std::time::Duration;
 
     use anyhow::{bail, Result};
