@@ -292,7 +292,6 @@ mod tests {
 
             self.tx
                 .lock()
-                .map_err(|err| anyhow!("Failed to obtain test sender lock: {}", err))?
                 .send(TestResponse {
                     session_id,
                     transaction: transaction.to_owned(),
