@@ -94,26 +94,26 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
 ## -----------------------------------------------------------------------------
-FROM buildpack-deps:buster as build-plugin-deploy
+FROM cr.yandex/crp1of6bddata8ain3q5/janus-gateway:v0.8.22 as build-plugin-deploy
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
 
+RUN set -xe \
+    && apt-get update \
+    && apt-get -y --no-install-recommends install libjansson-dev wget
+
 RUN set -eux; \
     url="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init"; \
     wget "$url"; \
     chmod +x rustup-init; \
-    ./rustup-init -y --no-modify-path --default-toolchain stable; \
+    ./rustup-init -y --no-modify-path --default-toolchain 1.55.0; \
     rm rustup-init; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
     rustup --version; \
     cargo --version; \
     rustc --version;
-
-RUN set -xe \
-    && apt-get update \
-    && apt-get -y --no-install-recommends install libjansson-dev 
 
 WORKDIR /build
 
