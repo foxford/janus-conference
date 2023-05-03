@@ -148,14 +148,20 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
     let mut command = Command::new(&script_path);
     let stream_id = request.id.to_string();
 
-    command.args(&[&stream_id, &request.backend, &request.bucket]);
+    command.args([&stream_id, &request.backend, &request.bucket]);
 
     huge!("Running stream upload shell command: {:?}", command);
 
     command
         .status()
         .await
-        .map_err(|err| format_err!("Failed to run upload_record.sh, return code = '{}'", err))
+        .map_err(|err| {
+            format_err!(
+                "Failed to run upload_record.sh, return code = '{}', command = '{:?}'",
+                err,
+                command,
+            )
+        })
         .and_then(|status| {
             if status.success() {
                 info!(
@@ -167,7 +173,11 @@ async fn upload_record(request: &Request) -> Result<UploadStatus> {
             } else {
                 match status.code() {
                     Some(LOCKFILE_EARLY_EXIT_STATUS) => Ok(UploadStatus::AlreadyRunning),
-                    _ => Err(format_err!("Failed to prepare & upload record: {}", status)),
+                    _ => Err(format_err!(
+                        "Failed to prepare & upload record: {}, command = '{:?}'",
+                        status,
+                        command
+                    )),
                 }
             }
         })

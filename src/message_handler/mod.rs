@@ -92,12 +92,14 @@ impl Sender for JanusSender {
         jsep_answer: Option<JanssonValue>,
     ) -> Result<()> {
         app!()?.switchboard.with_read_lock(move |switchboard| {
-            let session = switchboard.session(session_id)?;
+            let session = switchboard
+                .session(session_id)
+                .or_else(|_| switchboard.lookup_unused_session(session_id))?;
 
             let txn = CString::new(transaction.to_owned())
                 .context("Failed to cast transaction to CString")?;
 
-            janus_callbacks::push_event(&*session, txn.into_raw(), payload, jsep_answer)
+            janus_callbacks::push_event(session, txn.into_raw(), payload, jsep_answer)
                 .context("Failed to push event")
         })
     }

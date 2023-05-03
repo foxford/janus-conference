@@ -213,7 +213,7 @@ impl Recorder {
     }
 
     fn create_records_dir(dir: &str) -> Result<(), std::io::Error> {
-        if let Err(err) = fs::create_dir(&dir) {
+        if let Err(err) = fs::create_dir(dir) {
             match err.kind() {
                 std::io::ErrorKind::AlreadyExists => Ok(()),
                 _ => Err(err),
@@ -336,7 +336,7 @@ impl RecorderHandle {
 
     pub fn delete_record(&self) -> Result<()> {
         if self.is_deletion_enabled {
-            fs::remove_dir_all(&self.get_records_dir()).context("Failed to delete record")
+            fs::remove_dir_all(self.get_records_dir()).context("Failed to delete record")
         } else {
             Ok(())
         }

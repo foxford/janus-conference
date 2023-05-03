@@ -158,6 +158,7 @@ fn notify_error(err: &SvcError) {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn handle_jsep(request: &Request, stream_id: StreamId) -> Result<Option<JsonValue>, SvcError> {
     let error = |status: StatusCode, err: Error| {
         SvcError::builder()
