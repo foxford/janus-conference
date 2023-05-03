@@ -94,7 +94,7 @@ RUN set -xe \
 ## -----------------------------------------------------------------------------
 ## Build Janus Conference plugin for deploy
 ## -----------------------------------------------------------------------------
-FROM buildpack-deps:buster as build-plugin-deploy
+FROM cr.yandex/crp1of6bddata8ain3q5/janus-gateway:v0.8.22
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
