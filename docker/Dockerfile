@@ -127,7 +127,7 @@ RUN touch src/lib.rs && cargo build --release
 ## -----------------------------------------------------------------------------
 ## Build image ready to deploy
 ## -----------------------------------------------------------------------------
-FROM build-janus
+FROM cr.yandex/crp1of6bddata8ain3q5/janus-gateway:v0.8.22
 ARG PLUGIN=libjanus_conference.so
 WORKDIR /opt/janus
 COPY --from=build-plugin-deploy /build/target/release/${PLUGIN} ./lib/janus/plugins/${PLUGIN}
