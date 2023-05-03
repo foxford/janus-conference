@@ -1,5 +1,5 @@
 # Using Debian here because official Rust image is based on Debian too.
-FROM debian:buster as build-janus
+FROM debian:buster-20211011 as build-janus
 
 ## -----------------------------------------------------------------------------
 ## Install dependencies
