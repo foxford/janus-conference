@@ -199,22 +199,7 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
     let session_id = session_id(handle)?;
     app.switchboard.with_read_lock(|switchboard| {
         let state = switchboard.state(session_id)?;
-        let is_speaking =
-        app.config.speaking_notifications
-            .as_ref()
-            .filter(|_| !is_video)
-            .and_then(|config| {
-                let agent_id = switchboard.agent_id(session_id)?;
-                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  config)?;
-                Some((agent_id, is_speaking))
-            });
 
-        if let Some((agent_id, is_speaking)) = is_speaking {
-            verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
-            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
-                err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
-            }
-        }
         // Touch last packet timestamp  to drop timeout.
         state.touch_last_rtp_packet_timestamp();
 
@@ -249,6 +234,44 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
             }
         }
 
+        let should_relay = if is_video {
+            writer_config.send_video()
+        } else {
+            writer_config.send_audio()
+        };
+
+        if !should_relay {
+            return Ok(());
+        }
+
+        // TODO: this breaks the records
+
+        // Push packet to the recorder.
+        if let Some(recorder) = state.recorder() {
+            let buf = unsafe {
+                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
+            };
+
+            recorder.record_packet(buf, is_video)?;
+        }
+
+        let is_speaking =
+        app.config.speaking_notifications
+            .as_ref()
+            .filter(|_| !is_video)
+            .and_then(|config| {
+                let agent_id = switchboard.agent_id(session_id)?;
+                let is_speaking = state.is_speaking(AudioLevel::new(packet, state.audio_level_ext_id()?)?,  config)?;
+                Some((agent_id, is_speaking))
+            });
+
+        if let Some((agent_id, is_speaking)) = is_speaking {
+            verb!("Sending speaking notification: is_speaking: {}, agent_id: {}", is_speaking, agent_id);
+            if let Err(err) = send_speaking_notification(&app.janus_sender, session_id, agent_id, is_speaking) {
+                err!("Sending speaking notification errored: {:?}", err; { "session_id": session_id, "agent_id": agent_id });
+            }
+        }
+
         // Retransmit packet to publishers as is.
         for subscriber_id in switchboard.subscribers_to(session_id) {
             // Check whether media is muted by the agent.
@@ -269,15 +292,6 @@ fn incoming_rtp_impl(handle: *mut PluginSession, packet: *mut PluginRtpPacket) -
                     ),
                 }
             }
-        }
-
-        // Push packet to the recorder.
-        if let Some(recorder) = state.recorder() {
-            let buf = unsafe {
-                std::slice::from_raw_parts(packet.buffer as *const i8, packet.length as usize)
-            };
-
-            recorder.record_packet(buf, is_video)?;
         }
 
         Ok(())
