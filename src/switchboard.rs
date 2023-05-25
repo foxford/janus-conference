@@ -384,17 +384,34 @@ impl Switchboard {
             .map(|(stream_id, _)| stream_id.to_owned())
             .collect();
 
+        if let Some(agent) = self.agents.remove_value(&id) {
+            if !stream_ids.is_empty() {
+                // We're publisher so remove everything.
+                self.reader_configs.remove(&agent);
+            } else {
+                // We're subscriber so need to check if we have
+                // multiple reader configs (case with subgroups in minigroup).
+                // If we do have multiple configs so we don't remove anything now,
+                // will remove later on publisher's disconnect.
+                let should_remove = match self.reader_configs.get(&agent) {
+                    Some(cfg_by_stream) => cfg_by_stream.len() <= 1,
+                    None => false,
+                };
+
+                if should_remove {
+                    self.reader_configs.remove(&agent);
+                }
+            }
+        }
+
         for stream_id in stream_ids {
             self.remove_stream(stream_id)?;
         }
         self.unused_sessions.remove(&id);
         self.sessions.remove(&id);
         self.states.remove(&id);
-        let agent = self.agents.remove_value(&id);
-        if let Some(agent) = agent {
-            self.reader_configs.remove(&agent);
-        }
         self.publishers_subscribers.remove_value(&id);
+
         Ok(())
     }
 
@@ -475,16 +492,11 @@ impl Switchboard {
         stream_id: StreamId,
         reader_id: &AgentId,
         config: ReaderConfig,
-    ) -> Result<()> {
-        if !self.agents.contains_key(reader_id) {
-            return Err(anyhow!("Agent {} not registered", reader_id));
-        }
-
+    ) {
         self.reader_configs
             .entry(reader_id.to_owned())
             .or_default()
             .insert(stream_id, config);
-        Ok(())
     }
 
     pub fn writer_config(&self, stream_id: StreamId) -> &WriterConfig {
