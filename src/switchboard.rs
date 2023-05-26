@@ -582,22 +582,28 @@ impl Switchboard {
         self.publishers_subscribers.associate(publisher, subscriber);
         self.agents.associate(agent_id.clone(), subscriber);
 
+        let max_sessions_per_agent = self.cfg.max_sessions_per_agent.max(1);
         let agent_sessions = self.agent_sessions(&agent_id);
-        if agent_sessions.len() > self.cfg.max_sessions_per_agent {
-            for session_id in agent_sessions {
-                if *session_id == subscriber {
-                    continue;
-                }
 
-                let session = self.session(*session_id)?;
+        let remove_sessions_count = if agent_sessions.len() > max_sessions_per_agent {
+            agent_sessions.len() - max_sessions_per_agent
+        } else {
+            0
+        };
+        let sessions_to_remove = agent_sessions
+            .iter()
+            .filter(|s| **s != subscriber)
+            .take(remove_sessions_count);
 
-                info!(
-                    "There are more sessions than allowed; finishing session";
-                    {"agent_id": agent_id, "session_id": session_id}
-                );
+        for s_id in sessions_to_remove {
+            let session = self.session(*s_id)?;
 
-                janus_callbacks::end_session(session);
-            }
+            info!(
+                "There are more sessions than allowed; finishing session";
+                {"agent_id": agent_id, "session_id": s_id}
+            );
+
+            janus_callbacks::end_session(session);
         }
 
         Ok(())
