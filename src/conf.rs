@@ -42,13 +42,13 @@ impl Config {
 
 #[derive(Clone, Deserialize, Debug)]
 pub struct SwitchboardConfig {
-    #[serde(default = "SwitchboardConfig::default_allow_multiple_sessions")]
-    pub allow_multiple_sessions: bool,
+    #[serde(default = "SwitchboardConfig::default_max_sessions_per_agent")]
+    pub max_sessions_per_agent: usize,
 }
 
 impl SwitchboardConfig {
-    fn default_allow_multiple_sessions() -> bool {
-        true
+    fn default_max_sessions_per_agent() -> usize {
+        1
     }
 }
 

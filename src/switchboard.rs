@@ -582,8 +582,9 @@ impl Switchboard {
         self.publishers_subscribers.associate(publisher, subscriber);
         self.agents.associate(agent_id.clone(), subscriber);
 
-        if !self.cfg.allow_multiple_sessions {
-            for session_id in self.agent_sessions(&agent_id) {
+        let agent_sessions = self.agent_sessions(&agent_id);
+        if agent_sessions.len() > self.cfg.max_sessions_per_agent {
+            for session_id in agent_sessions {
                 if *session_id == subscriber {
                     continue;
                 }
