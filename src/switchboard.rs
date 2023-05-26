@@ -398,7 +398,9 @@ impl Switchboard {
                 let should_remove = match self.reader_configs.get(&agent) {
                     Some(cfg_by_stream) => {
                         let is_webinar = cfg_by_stream.len() <= 1;
-                        let was_single_session = self.agent_sessions(&agent).len() == 0;
+                        // If we're subscriber and multiple sessions allowed (default)
+                        // need to check here we don't remove reader config too early.
+                        let was_single_session = self.agent_sessions(&agent).is_empty();
 
                         is_webinar && was_single_session
                     }
