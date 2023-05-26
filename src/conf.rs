@@ -16,6 +16,7 @@ pub struct Config {
     pub upload: UploadConfig,
     pub metrics: Metrics,
     pub registry: Option<RegistryConfig>,
+    pub switchboard: SwitchboardConfig,
 }
 
 impl Config {
@@ -36,6 +37,18 @@ impl Config {
         config.upload.check()?;
 
         Ok(config)
+    }
+}
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct SwitchboardConfig {
+    #[serde(default = "SwitchboardConfig::default_allow_multiple_sessions")]
+    pub allow_multiple_sessions: bool,
+}
+
+impl SwitchboardConfig {
+    fn default_allow_multiple_sessions() -> bool {
+        true
     }
 }
 
