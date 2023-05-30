@@ -87,10 +87,11 @@ impl App {
         recorders_creator: RecorderHandlesCreator,
         metrics: Metrics,
     ) -> Result<Self> {
+        let switchboard_cfg = config.switchboard.clone();
         Ok(Self {
             fir_interval: chrono::Duration::from_std(config.general.fir_interval)?,
             config,
-            switchboard: Switchboard::new(),
+            switchboard: Switchboard::new(switchboard_cfg),
             recorders_creator,
             janus_sender: JanusSender::new(),
             metrics,

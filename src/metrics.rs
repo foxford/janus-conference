@@ -41,6 +41,7 @@ make_static_metric! {
         "field" => {
             sessions,
             agents,
+            avg_sessions_per_agent,
             publishers,
             publishers_subscribers,
             reader_configs,
@@ -122,12 +123,16 @@ impl Metrics {
     pub fn observe_switchboard(switchboard: &Switchboard) {
         if let Ok(app) = app!() {
             let switchboard_stats = &app.metrics.switchboard_stats;
+
+            let sessions_count = switchboard.sessions_count() as i64;
+            let agents_count = switchboard.agents_count() as i64;
+            let avg_sessions_per_count = sessions_count.checked_div(agents_count).unwrap_or(0);
+
+            switchboard_stats.sessions.set(sessions_count);
+            switchboard_stats.agents.set(agents_count);
             switchboard_stats
-                .sessions
-                .set(switchboard.sessions_count() as i64);
-            switchboard_stats
-                .agents
-                .set(switchboard.agents_count() as i64);
+                .avg_sessions_per_agent
+                .set(avg_sessions_per_count);
             switchboard_stats
                 .publishers
                 .set(switchboard.publishers_count() as i64);

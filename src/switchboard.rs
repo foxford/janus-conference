@@ -13,6 +13,7 @@ use janus::session::SessionWrapper;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
+use crate::conf::SwitchboardConfig;
 use crate::janus_rtp::JanusRtpSwitchingContext;
 use crate::recorder::RecorderHandle;
 use crate::{bidirectional_multimap::BidirectionalMultimap, janus_rtp::AudioLevel};
@@ -291,10 +292,11 @@ pub struct Switchboard {
     publishers_subscribers: BidirectionalMultimap<SessionId, SessionId>,
     reader_configs: FnvHashMap<AgentId, FnvHashMap<StreamId, ReaderConfig>>,
     writer_configs: FnvHashMap<StreamId, WriterConfig>,
+    cfg: SwitchboardConfig,
 }
 
 impl Switchboard {
-    pub fn new() -> Self {
+    pub fn new(cfg: SwitchboardConfig) -> Self {
         Self {
             sessions: FnvHashMap::default(),
             states: FnvHashMap::default(),
@@ -304,6 +306,7 @@ impl Switchboard {
             reader_configs: FnvHashMap::default(),
             writer_configs: FnvHashMap::default(),
             unused_sessions: FnvHashMap::default(),
+            cfg,
         }
     }
 
@@ -393,7 +396,14 @@ impl Switchboard {
                 // If we do have multiple configs so we don't remove anything now,
                 // will remove later on publisher's disconnect.
                 let should_remove = match self.reader_configs.get(&agent) {
-                    Some(cfg_by_stream) => cfg_by_stream.len() <= 1,
+                    Some(cfg_by_stream) => {
+                        let is_webinar = cfg_by_stream.len() <= 1;
+                        // If we're subscriber and multiple sessions allowed (default)
+                        // need to check here we don't remove reader config too early.
+                        let was_single_session = self.agent_sessions(&agent).is_empty();
+
+                        is_webinar && was_single_session
+                    }
                     None => false,
                 };
 
@@ -570,7 +580,32 @@ impl Switchboard {
         );
 
         self.publishers_subscribers.associate(publisher, subscriber);
-        self.agents.associate(agent_id, subscriber);
+        self.agents.associate(agent_id.clone(), subscriber);
+
+        let max_sessions_per_agent = self.cfg.max_sessions_per_agent.max(1);
+        let agent_sessions = self.agent_sessions(&agent_id);
+
+        let remove_sessions_count = if agent_sessions.len() > max_sessions_per_agent {
+            agent_sessions.len() - max_sessions_per_agent
+        } else {
+            0
+        };
+        let sessions_to_remove = agent_sessions
+            .iter()
+            .filter(|s| **s != subscriber)
+            .take(remove_sessions_count);
+
+        for s_id in sessions_to_remove {
+            let session = self.session(*s_id)?;
+
+            info!(
+                "There are more sessions than allowed; finishing session";
+                {"agent_id": agent_id, "session_id": s_id}
+            );
+
+            janus_callbacks::end_session(session);
+        }
+
         Ok(())
     }
 
@@ -657,8 +692,8 @@ impl Switchboard {
 pub struct LockedSwitchboard(RwLock<Switchboard>);
 
 impl LockedSwitchboard {
-    pub fn new() -> Self {
-        Self(RwLock::new(Switchboard::new()))
+    pub fn new(cfg: SwitchboardConfig) -> Self {
+        Self(RwLock::new(Switchboard::new(cfg)))
     }
 
     pub fn with_read_lock<F, R>(&self, callback: F) -> Result<R>
