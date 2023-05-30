@@ -126,7 +126,7 @@ impl Metrics {
 
             let sessions_count = switchboard.sessions_count() as i64;
             let agents_count = switchboard.agents_count() as i64;
-            let avg_sessions_per_count = sessions_count / agents_count;
+            let avg_sessions_per_count = sessions_count.checked_div(agents_count).unwrap_or(0);
 
             switchboard_stats.sessions.set(sessions_count);
             switchboard_stats.agents.set(agents_count);
