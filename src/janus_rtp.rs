@@ -1,13 +1,11 @@
 #![allow(non_camel_case_types)]
 
+use parking_lot::Mutex;
 use std::os::raw::{c_char, c_int, c_long, c_short, c_uint, c_ushort};
 use std::{convert::TryInto, mem::MaybeUninit};
-use std::{
-    ffi::CStr,
-    sync::{Arc, Mutex},
-};
+use std::{ffi::CStr, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use janus::PluginRtpPacket;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,10 +37,7 @@ impl JanusRtpSwitchingContext {
     }
 
     pub fn update_rtp_packet_header(&self, packet: &mut PluginRtpPacket) -> Result<()> {
-        let mut context = self
-            .locked_context
-            .lock()
-            .map_err(|err| anyhow!("Failed to acquire RTP switching context mutex: {}", err))?;
+        let mut context = self.locked_context.lock();
 
         let video = matches!(packet.video, 1).into();
 
