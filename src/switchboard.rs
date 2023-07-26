@@ -567,7 +567,7 @@ impl Switchboard {
             .publishers
             .get(&id)
             .map(|p| p.to_owned())
-            .ok_or_else(|| JoinStreamError::StreamNotFound)?;
+            .ok_or(JoinStreamError::StreamNotFound)?;
 
         if let Some(max_agents) = self.cfg.max_agents {
             if self.agents_count() >= max_agents {
@@ -578,7 +578,7 @@ impl Switchboard {
         let session = self
             .unused_sessions
             .remove(&subscriber)
-            .ok_or_else(|| JoinStreamError::SessionNotFound)?;
+            .ok_or(JoinStreamError::SessionNotFound)?;
 
         self.sessions.insert(subscriber, session.session);
         self.states.insert(subscriber, SessionState::new());
