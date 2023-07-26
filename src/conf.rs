@@ -44,11 +44,20 @@ impl Config {
 pub struct SwitchboardConfig {
     #[serde(default = "SwitchboardConfig::default_max_sessions_per_agent")]
     pub max_sessions_per_agent: usize,
+    pub max_agents: Option<usize>,
 }
 
 impl SwitchboardConfig {
     fn default_max_sessions_per_agent() -> usize {
         1
+    }
+
+    pub fn set_max_agents_if_empty(mut self, max_agents: usize) -> Self {
+        if self.max_agents.is_none() {
+            self.max_agents = Some(max_agents);
+        }
+
+        self
     }
 }
 
@@ -61,11 +70,11 @@ pub struct RegistryConfig {
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct Description {
-    capacity: Option<i32>,
-    balancer_capacity: Option<i32>,
-    group: Option<String>,
-    janus_url: String,
-    agent_id: String,
+    pub capacity: Option<i32>,
+    pub balancer_capacity: Option<i32>,
+    pub group: Option<String>,
+    pub janus_url: String,
+    pub agent_id: String,
 }
 
 #[derive(Clone, Deserialize, Debug)]

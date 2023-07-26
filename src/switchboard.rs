@@ -282,6 +282,12 @@ impl UnusedSession {
     }
 }
 
+pub enum JoinStreamError {
+    StreamNotFound,
+    SessionNotFound,
+    TooManyAgents,
+}
+
 #[derive(Debug)]
 pub struct Switchboard {
     unused_sessions: FnvHashMap<SessionId, UnusedSession>,
@@ -449,7 +455,6 @@ impl Switchboard {
             .ok_or_else(|| format_err!("Session state not found for id = {}", id))
     }
 
-    #[allow(clippy::ptr_arg)]
     pub fn agent_sessions(&self, id: &AgentId) -> &[SessionId] {
         self.agents.get_values(id)
     }
@@ -557,19 +562,23 @@ impl Switchboard {
         id: StreamId,
         subscriber: SessionId,
         agent_id: AgentId,
-    ) -> Result<()> {
+    ) -> Result<(), JoinStreamError> {
         let publisher = self
             .publishers
             .get(&id)
             .map(|p| p.to_owned())
-            .ok_or_else(|| anyhow!("Stream {} does not exist", id))?;
+            .ok_or_else(|| JoinStreamError::StreamNotFound)?;
 
-        let session = self.unused_sessions.remove(&subscriber).ok_or_else(|| {
-            anyhow!(
-                "Subscriber's session id: {} not present in the new_sessions set",
-                subscriber
-            )
-        })?;
+        if let Some(max_agents) = self.cfg.max_agents {
+            if self.agents_count() >= max_agents {
+                return Err(JoinStreamError::TooManyAgents);
+            }
+        }
+
+        let session = self
+            .unused_sessions
+            .remove(&subscriber)
+            .ok_or_else(|| JoinStreamError::SessionNotFound)?;
 
         self.sessions.insert(subscriber, session.session);
         self.states.insert(subscriber, SessionState::new());
@@ -596,7 +605,9 @@ impl Switchboard {
             .take(remove_sessions_count);
 
         for s_id in sessions_to_remove {
-            let session = self.session(*s_id)?;
+            let session = self
+                .session(*s_id)
+                .map_err(|_err| JoinStreamError::SessionNotFound)?;
 
             info!(
                 "There are more sessions than allowed; finishing session";

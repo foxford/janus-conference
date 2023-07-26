@@ -88,6 +88,17 @@ impl App {
         metrics: Metrics,
     ) -> Result<Self> {
         let switchboard_cfg = config.switchboard.clone();
+
+        let capacity = config
+            .registry
+            .as_ref()
+            .and_then(|r| r.description.capacity);
+
+        let switchboard_cfg = match capacity {
+            Some(capacity) => switchboard_cfg.set_max_agents_if_empty(capacity as usize),
+            None => switchboard_cfg,
+        };
+
         Ok(Self {
             fir_interval: chrono::Duration::from_std(config.general.fir_interval)?,
             config,
