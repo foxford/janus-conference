@@ -5,7 +5,7 @@ use svc_error::Error as SvcError;
 
 use crate::{
     message_handler::generic::MethodKind,
-    switchboard::{AgentId, StreamId},
+    switchboard::{AgentId, JoinStreamError, StreamId},
 };
 
 use super::stream_create::ReaderConfig;
@@ -38,9 +38,26 @@ impl super::Operation for Request {
             .map_err(|err| error(StatusCode::INTERNAL_SERVER_ERROR, err))?
             .switchboard
             .with_write_lock(|mut switchboard| {
-                switchboard.join_stream(self.id, request.session_id(), self.agent_id.to_owned())
+                // this wrapped in `Ok` to avoid using anyhow so we can distingiush
+                // different error types
+                // TODO: refactor `with_write_lock` to allow custom error types
+                Ok(switchboard
+                    .join_stream(self.id, request.session_id(), self.agent_id.to_owned())
+                    .map_err(|e| match e {
+                        JoinStreamError::StreamNotFound => error(
+                            StatusCode::NOT_FOUND,
+                            anyhow!("Stream {} does not exist", self.id),
+                        ),
+                        JoinStreamError::SessionNotFound => {
+                            error(StatusCode::NOT_FOUND, anyhow!("Session does not exist"))
+                        }
+                        JoinStreamError::TooManyAgents => error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            anyhow!("Too many agents on server"),
+                        ),
+                    }))
             })
-            .map_err(|err| error(StatusCode::NOT_FOUND, err))?;
+            .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))??;
 
         if let Some(configs) = &self.reader_configs {
             let configs = configs
