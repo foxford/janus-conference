@@ -18,7 +18,6 @@ services:
     env_file: janus.plugin.conference.environment
     links:
       - vernemq
-    platform: linux/x86_64
     working_dir: /build
     entrypoint: /bin/bash
     stdin_open: true

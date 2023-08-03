@@ -1,6 +1,6 @@
 [package]
 name = "janus-conference"
-version = "0.8.30"
+version = "0.8.29"
 authors = ["Andrei Nesterov <ae.nesterov@gmail.com>"]
 edition = "2018"
 
@@ -32,7 +32,6 @@ humantime-serde = "1"
 tide = "0.16"
 async-oneshot = "0.5"
 ureq = "2"
-parking_lot = "0.12"
 
 [dependencies.sentry]
 version = "0.23"
