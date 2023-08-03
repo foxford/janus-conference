@@ -703,7 +703,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f91cf5a8c2f2097e2a32627123508635d47ce10563d999ec1a95addf08b502ba"
 dependencies = [
  "serde 1.0.127",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1172,7 +1172,7 @@ dependencies = [
  "svc-error",
  "tide",
  "ureq",
- "uuid",
+ "uuid 1.3.0",
 ]
 
 [[package]]
@@ -1921,7 +1921,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "url",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2526,6 +2526,16 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.3",
+ "serde 1.0.127",
+]
+
+[[package]]
+name = "uuid"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1674845326ee10d37ca60470760d4288a6f80f304007d92e5c53bab78c9cfd79"
 dependencies = [
  "getrandom 0.2.3",
  "serde 1.0.127",
